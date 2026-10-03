@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  formatDateValue,
   formatMonthValue,
   formatOrdinal,
+  formatTimestamp,
   isValidDateValue,
   isValidIsoTimestamp,
   isValidMonthValue,
@@ -93,5 +95,28 @@ describe('isValidIsoTimestamp', () => {
     'nope',
   ])('rejects %j', (value) => {
     expect(isValidIsoTimestamp(value)).toBe(false)
+  })
+})
+
+describe('formatDateValue', () => {
+  it.each([
+    ['2026-10-01', '1 Oct 2026'],
+    ['2026-02-28', '28 Feb 2026'],
+  ])('formats %s as %s', (value, expected) => {
+    expect(formatDateValue(value)).toBe(expected)
+  })
+
+  it.each(['2026-02-30', 'nope'])('returns invalid input %j unchanged', (value) => {
+    expect(formatDateValue(value)).toBe(value)
+  })
+})
+
+describe('formatTimestamp', () => {
+  it('shows the time in the viewer’s time zone', () => {
+    expect(formatTimestamp(new Date(2026, 9, 3, 11, 30).toISOString())).toBe('3 Oct 2026, 11:30 am')
+  })
+
+  it('returns invalid input unchanged', () => {
+    expect(formatTimestamp('nope')).toBe('nope')
   })
 })

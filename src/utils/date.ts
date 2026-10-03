@@ -70,3 +70,22 @@ export function isValidIsoTimestamp(value: string): boolean {
     !Number.isNaN(Date.parse(value))
   )
 }
+
+// "2026-10-01" -> "1 Oct 2026"
+export function formatDateValue(value: string): string {
+  if (!isValidDateValue(value)) return value
+
+  const [year, month, day] = value.split('-').map(Number) as [number, number, number]
+  return new Date(year, month - 1, day).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+// ISO timestamp -> "3 Oct 2026, 11:30 am" in the viewer's time zone.
+export function formatTimestamp(value: string): string {
+  if (!isValidIsoTimestamp(value)) return value
+
+  return new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+}

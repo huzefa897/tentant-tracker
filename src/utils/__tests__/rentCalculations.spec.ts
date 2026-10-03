@@ -5,7 +5,9 @@ import {
   calculateOutstanding,
   calculateTotalDue,
   formatPaymentStatus,
+  getEntryAmounts,
   getPaymentStatus,
+  sumEntryAmounts,
 } from '@/utils/rentCalculations'
 
 const charges = { rentAmount: 15000, electricityUnits: 75, electricityRate: 6, waterAmount: 300 }
@@ -77,5 +79,49 @@ describe('formatPaymentStatus', () => {
     ['paid', 'Paid'],
   ] as const)('labels %s as %s', (status, label) => {
     expect(formatPaymentStatus(status)).toBe(label)
+  })
+})
+
+describe('getEntryAmounts', () => {
+  it('derives totals and status from the entry’s own charges', () => {
+    expect(getEntryAmounts({ ...charges, totalPaid: 10000 })).toEqual({
+      totalDue: 15750,
+      totalPaid: 10000,
+      outstanding: 5750,
+      status: 'partially_paid',
+    })
+  })
+
+  it('marks a fully paid bill as paid with nothing outstanding', () => {
+    expect(getEntryAmounts({ ...charges, totalPaid: 15750 })).toMatchObject({
+      outstanding: 0,
+      status: 'paid',
+    })
+  })
+})
+
+describe('sumEntryAmounts', () => {
+  it('adds up every given bill', () => {
+    expect(
+      sumEntryAmounts([
+        { ...charges, totalPaid: 10000 },
+        { ...charges, totalPaid: 15750 },
+        { ...charges, waterAmount: 0, totalPaid: 0 },
+      ]),
+    ).toEqual({ totalBilled: 46950, totalPaid: 25750, outstanding: 21200 })
+  })
+
+  it('returns zeros for no bills', () => {
+    expect(sumEntryAmounts([])).toEqual({ totalBilled: 0, totalPaid: 0, outstanding: 0 })
+  })
+
+  it('rounds away floating-point noise', () => {
+    const cents = { rentAmount: 0.1, electricityUnits: 0, electricityRate: 0, waterAmount: 0 }
+    expect(
+      sumEntryAmounts([
+        { ...cents, totalPaid: 0 },
+        { ...cents, rentAmount: 0.2, totalPaid: 0 },
+      ]),
+    ).toEqual({ totalBilled: 0.3, totalPaid: 0, outstanding: 0.3 })
   })
 })

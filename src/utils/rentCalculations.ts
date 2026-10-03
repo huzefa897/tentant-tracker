@@ -47,3 +47,51 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
 export function formatPaymentStatus(status: PaymentStatus): string {
   return PAYMENT_STATUS_LABELS[status]
 }
+
+type Bill = Charges & Pick<RentEntryInput, 'totalPaid'>
+
+export interface EntryAmounts {
+  totalDue: number
+  totalPaid: number
+  outstanding: number
+  status: PaymentStatus
+}
+
+// Everything derived for one bill, so every screen calculates it the same way.
+export function getEntryAmounts(entry: Bill): EntryAmounts {
+  const totalDue = calculateTotalDue(entry)
+
+  return {
+    totalDue,
+    totalPaid: entry.totalPaid,
+    outstanding: calculateOutstanding(totalDue, entry.totalPaid),
+    status: getPaymentStatus(totalDue, entry.totalPaid),
+  }
+}
+
+export interface EntryTotals {
+  totalBilled: number
+  totalPaid: number
+  outstanding: number
+}
+
+// Sums the given bills only. The deposit is deliberately not applied: that needs a business rule.
+export function sumEntryAmounts(entries: Bill[]): EntryTotals {
+  const totals = entries.reduce(
+    (sum, entry) => {
+      const amounts = getEntryAmounts(entry)
+      return {
+        totalBilled: sum.totalBilled + amounts.totalDue,
+        totalPaid: sum.totalPaid + amounts.totalPaid,
+        outstanding: sum.outstanding + amounts.outstanding,
+      }
+    },
+    { totalBilled: 0, totalPaid: 0, outstanding: 0 },
+  )
+
+  return {
+    totalBilled: roundMoney(totals.totalBilled),
+    totalPaid: roundMoney(totals.totalPaid),
+    outstanding: roundMoney(totals.outstanding),
+  }
+}
