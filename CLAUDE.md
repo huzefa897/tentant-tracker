@@ -9,10 +9,10 @@ Stack: Vue Router, Pinia (setup stores), Tailwind v4, shadcn-vue (reka-ui), Axio
 - `npm run build` — type-check (`vue-tsc`) + production build. Run it: the dev server does not type-check.
 - `npm run lint` — oxlint + ESLint with auto-fix
 - `npm run lint:check` — same, no fixes (use for verification/CI)
-- `npm run format` — Prettier over `src/`
+- `npm run format` — Prettier over `src/` (`npm run format:check` to check only)
 - `npm test` — Vitest, single run (`npm run test:watch` to watch)
 
-Before calling work done: `npm run format && npm run lint:check && npm test && npm run build`.
+Before calling work done: `npm run format && npm run lint:check && npm test && npm run build`. CI (`.github/workflows/ci.yml`) runs the same checks on every PR and push to `main`.
 
 ## Architecture
 

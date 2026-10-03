@@ -37,15 +37,16 @@ by name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
 
 ## Scripts
 
-| Command              | What it does                          |
-| -------------------- | ------------------------------------- |
-| `npm run dev`        | Start the Vite dev server             |
-| `npm run build`      | Type-check and build for production   |
-| `npm run lint`       | Run oxlint and ESLint (with auto-fix) |
-| `npm run lint:check` | Run oxlint and ESLint without fixing  |
-| `npm run format`     | Format `src/` with Prettier           |
-| `npm test`           | Run the Vitest unit tests once        |
-| `npm run test:watch` | Run Vitest in watch mode              |
+| Command                | What it does                          |
+| ---------------------- | ------------------------------------- |
+| `npm run dev`          | Start the Vite dev server             |
+| `npm run build`        | Type-check and build for production   |
+| `npm run lint`         | Run oxlint and ESLint (with auto-fix) |
+| `npm run lint:check`   | Run oxlint and ESLint without fixing  |
+| `npm run format`       | Format `src/` with Prettier           |
+| `npm run format:check` | Check formatting without writing      |
+| `npm test`             | Run the Vitest unit tests once        |
+| `npm run test:watch`   | Run Vitest in watch mode              |
 
 ## Environment
 
