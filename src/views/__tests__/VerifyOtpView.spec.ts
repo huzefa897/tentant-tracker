@@ -14,8 +14,8 @@ const phoneNumber = '+918341413827'
 let view: VueWrapper | undefined
 
 // Starts mid-flow: a code was sent from the login screen.
-async function mountView() {
-  sessionStorage.setItem('rent-tracker-pending-phone', phoneNumber)
+async function mountView(pendingPhoneNumber = phoneNumber) {
+  sessionStorage.setItem('rent-tracker-pending-phone', pendingPhoneNumber)
   const pinia = createPinia()
   setActivePinia(pinia)
   await router.push('/verify')
@@ -54,6 +54,12 @@ describe('VerifyOtpView', () => {
     await mountView()
 
     expect(view!.text()).toContain('+91 83414 13827')
+  })
+
+  it('formats a number from another supported country', async () => {
+    await mountView('+61412345678')
+
+    expect(view!.text()).toContain('+61 412 345 678')
   })
 
   it('verifies the code and goes to the dashboard', async () => {

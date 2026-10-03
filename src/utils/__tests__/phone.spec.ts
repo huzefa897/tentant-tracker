@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatIndianPhoneNumber, formatIndianPhoneNumberNational } from '@/utils/phone'
+import { formatIndianPhoneNumberNational, formatPhoneNumber } from '@/utils/phone'
 
-describe('formatIndianPhoneNumber', () => {
-  it('formats an E.164 Indian number with the country code', () => {
-    expect(formatIndianPhoneNumber('+918341413827')).toBe('+91 83414 13827')
+describe('formatPhoneNumber', () => {
+  it.each([
+    ['+918341413827', '+91 83414 13827'],
+    ['+61412345678', '+61 412 345 678'],
+    ['+12015550123', '+1 201 555 0123'],
+  ])('formats %s as %s', (value, expected) => {
+    expect(formatPhoneNumber(value)).toBe(expected)
   })
 
-  it.each(['8341413827', '+9183414138', '+4407911123456', ''])(
-    'returns %j unchanged when it is not Indian E.164',
+  it.each(['8341413827', '+9183414138', '+4407911123456', '+61212345678', ''])(
+    'returns %j unchanged when it is not a supported E.164 number',
     (value) => {
-      expect(formatIndianPhoneNumber(value)).toBe(value)
+      expect(formatPhoneNumber(value)).toBe(value)
     },
   )
 })

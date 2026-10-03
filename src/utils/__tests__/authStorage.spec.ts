@@ -54,6 +54,12 @@ describe('pending phone number storage', () => {
     expect(localStorage.length).toBe(0)
   })
 
+  it('keeps a stored number from any supported country', () => {
+    savePendingPhoneNumber('+61412345678')
+
+    expect(getStoredPendingPhoneNumber()).toBe('+61412345678')
+  })
+
   it('clears a stored number', () => {
     savePendingPhoneNumber('+918341413827')
     clearStoredPendingPhoneNumber()

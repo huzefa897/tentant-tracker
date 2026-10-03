@@ -1,5 +1,5 @@
 import type { AuthUser, SendOtpRequest, VerifyOtpRequest } from '@/types/auth'
-import { isValidIndianPhoneNumber, isValidOtpCode } from '@/utils/authValidation'
+import { isValidPhoneNumber, isValidOtpCode } from '@/utils/authValidation'
 
 // Development-only mock: a hard-coded OTP is not authentication. Replaced by Firebase phone
 // auth later, which also changes session restore and the OTP flow (see CLAUDE.md).
@@ -12,7 +12,7 @@ function delay(ms: number) {
 
 // The service owns the request contract, so a backend swap keeps the same checks.
 function assertValidPhoneNumber(phoneNumber: string) {
-  if (!isValidIndianPhoneNumber(phoneNumber)) {
+  if (!isValidPhoneNumber(phoneNumber)) {
     throw new Error('Invalid phone number')
   }
 }
