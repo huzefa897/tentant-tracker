@@ -63,4 +63,23 @@ describe('TenantDetails', () => {
     expect(wrapper.emitted('addEntry')).toHaveLength(1)
     expect(wrapper.emitted('viewHistory')).toHaveLength(1)
   })
+
+  it('shows the saved entry count on Previous Entries', () => {
+    const wrapper = mount(TenantDetails, { props: { tenant, entryCount: 2 } })
+
+    expect(wrapper.text()).toContain('Previous Entries (2)')
+  })
+
+  it('shows a count of 0', () => {
+    const wrapper = mount(TenantDetails, { props: { tenant, entryCount: 0 } })
+
+    expect(wrapper.text()).toContain('Previous Entries (0)')
+  })
+
+  it('leaves out the count while it is unknown', () => {
+    const wrapper = mount(TenantDetails, { props: { tenant, entryCount: null } })
+
+    expect(wrapper.text()).toContain('Previous Entries')
+    expect(wrapper.text()).not.toContain('Previous Entries (')
+  })
 })

@@ -1,21 +1,34 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { LogOut, Users } from '@lucide/vue'
 
+import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import TenantDetails from '@/components/tenant/TenantDetails.vue'
 import TenantSelector from '@/components/tenant/TenantSelector.vue'
 import { Button } from '@/components/ui/button'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 
 const authStore = useAuthStore()
 const tenantStore = useTenantStore()
+const rentEntryStore = useRentEntryStore()
 const router = useRouter()
 
 onMounted(() => {
   tenantStore.loadTenants()
+  rentEntryStore.initialize()
+})
+
+// null hides the count rather than showing a wrong 0 when entries didn't load.
+const selectedTenantEntryCount = computed(() => {
+  const tenantId = tenantStore.selectedTenantId
+
+  if (!tenantId || !rentEntryStore.initialized) return null
+
+  return rentEntryStore.getEntriesForTenant(tenantId).length
 })
 
 async function handleLogout() {
@@ -68,9 +81,17 @@ function openNewEntry() {
       {{ tenantStore.error }}
     </p>
 
+    <RentEntriesLoadError
+      v-if="rentEntryStore.loadError"
+      class="mb-6"
+      :message="rentEntryStore.loadError"
+      @retry="rentEntryStore.initialize"
+    />
+
     <TenantDetails
       v-if="tenantStore.selectedTenant"
       :tenant="tenantStore.selectedTenant"
+      :entry-count="selectedTenantEntryCount"
       @add-entry="openNewEntry"
     />
 
