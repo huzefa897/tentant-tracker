@@ -5,6 +5,7 @@ import { ArrowRight } from '@lucide/vue'
 import IndiaFlag from '@/components/brand/IndiaFlag.vue'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { isValidIndianMobileDigits } from '@/utils/authValidation'
 
 const COUNTRY_CODE = '+91'
 
@@ -28,8 +29,7 @@ const displayValue = computed({
   },
 })
 
-// Indian mobile numbers: 10 digits starting 6-9.
-const isPhoneValid = computed(() => /^[6-9]\d{9}$/.test(digits.value))
+const isPhoneValid = computed(() => isValidIndianMobileDigits(digits.value))
 
 function handleSubmit() {
   if (!isPhoneValid.value || props.loading) return

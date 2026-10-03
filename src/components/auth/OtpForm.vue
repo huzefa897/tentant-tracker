@@ -4,8 +4,7 @@ import { ArrowRight } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import { PinInput, PinInputGroup, PinInputSlot } from '@/components/ui/pin-input'
-
-const CODE_LENGTH = 6
+import { isValidOtpCode, OTP_LENGTH } from '@/utils/authValidation'
 
 const props = defineProps<{
   loading: boolean
@@ -19,7 +18,7 @@ const emit = defineEmits<{
 const digits = ref<(number | undefined)[]>([])
 
 const code = computed(() => digits.value.join(''))
-const isCodeComplete = computed(() => new RegExp(`^\\d{${CODE_LENGTH}}$`).test(code.value))
+const isCodeComplete = computed(() => isValidOtpCode(code.value))
 
 function handleSubmit() {
   if (!isCodeComplete.value || props.loading) return
@@ -42,7 +41,7 @@ function handleSubmit() {
       >
         <PinInputGroup class="w-full justify-between gap-2">
           <PinInputSlot
-            v-for="(_, index) in CODE_LENGTH"
+            v-for="(_, index) in OTP_LENGTH"
             :key="index"
             :index="index"
             class="h-14 w-full max-w-14 rounded-lg border bg-background text-xl font-medium first:rounded-lg last:rounded-lg focus:bg-muted"
