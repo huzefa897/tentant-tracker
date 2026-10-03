@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
 import { LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
+import { useTenantStore } from '@/stores/tenant'
 import { makeEntry, openPage, storeEntries } from '@/test/rentEntries'
 import { RENT_ENTRIES_STORAGE_KEY } from '@/utils/rentEntryStorage'
 
@@ -221,5 +222,31 @@ describe('RentEntryHistoryView when the URL changes in place', () => {
     expect(view!.get('[data-testid="tenant-chip"]').text()).toBe('Mohammed Yusuf · Flat 301')
     expect((view!.get('#filter-year').element as HTMLSelectElement).value).toBe('all')
     expect(rows().map((row) => row[0])).toEqual(['July 2026'])
+  })
+})
+
+describe('RentEntryHistoryView when tenants fail to load', () => {
+  it('shows the error with Retry instead of Tenant not found, then recovers', async () => {
+    storeEntries(september)
+    view = await openPage('/tenants/tenant-001/entries', () => {
+      const tenantStore = useTenantStore()
+      const realLoad = tenantStore.loadTenants
+      vi.spyOn(tenantStore, 'loadTenants')
+        .mockImplementationOnce(async () => {
+          tenantStore.error = 'Unable to load tenants. Please try again.'
+        })
+        .mockImplementation(realLoad)
+    })
+
+    expect(view.get('[role="alert"]').text()).toContain('Unable to load tenants. Please try again.')
+    expect(view.text()).not.toContain('Tenant not found')
+
+    await view
+      .findAll('button')
+      .find((b) => b.text() === 'Retry')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(view.get('[data-testid="tenant-chip"]').text()).toBe('Shaik Zahid Ali · Flat 202')
   })
 })

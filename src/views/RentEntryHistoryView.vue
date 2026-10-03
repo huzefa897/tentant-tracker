@@ -8,9 +8,9 @@ import RentEntryFilters from '@/components/rent/RentEntryFilters.vue'
 import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
 import RentEntryTotals from '@/components/rent/RentEntryTotals.vue'
 import { Button } from '@/components/ui/button'
+import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
-import { useTenantStore } from '@/stores/tenant'
 import type { PaymentStatus } from '@/types/rentEntry'
 import { getEntryAmounts, sumEntryAmounts } from '@/utils/rentCalculations'
 
@@ -20,21 +20,17 @@ const props = defineProps<{
   tenantId: string
 }>()
 
-const tenantStore = useTenantStore()
 const rentEntryStore = useRentEntryStore()
 const router = useRouter()
 
-const tenantsReady = ref(tenantStore.tenants.length > 0)
-const tenant = computed(() => tenantStore.tenants.find((t) => t.id === props.tenantId) ?? null)
+const {
+  tenant,
+  status: tenantStatus,
+  error: tenantError,
+  retry: retryTenants,
+} = useRouteTenant(() => props.tenantId)
 
-onMounted(async () => {
-  rentEntryStore.initialize()
-
-  if (tenantsReady.value) return
-
-  await tenantStore.loadTenants()
-  tenantsReady.value = true
-})
+onMounted(() => rentEntryStore.initialize())
 
 const tenantEntries = computed(() => rentEntryStore.getEntriesForTenant(props.tenantId))
 
@@ -94,7 +90,13 @@ function viewEntry(entryId: string) {
       </Button>
     </template>
 
-    <p v-if="!tenantsReady" class="text-muted-foreground" role="status">Loading…</p>
+    <p v-if="tenantStatus === 'loading'" class="text-muted-foreground" role="status">Loading…</p>
+
+    <RentEntriesLoadError
+      v-else-if="tenantStatus === 'error'"
+      :message="tenantError ?? ''"
+      @retry="retryTenants"
+    />
 
     <div
       v-else-if="!tenant"
@@ -179,9 +181,5 @@ function viewEntry(entryId: string) {
         </div>
       </div>
     </template>
-
-    <p v-if="tenantStore.error" class="mt-6 text-sm text-destructive" role="alert">
-      {{ tenantStore.error }}
-    </p>
   </AppLayout>
 </template>

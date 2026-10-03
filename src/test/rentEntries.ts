@@ -31,13 +31,15 @@ export function storeEntries(...entries: RentEntry[]) {
 
 // Signs in and opens the URL directly, as after a refresh: fresh Pinia, nothing selected.
 // Rendered through RouterView, as in the app.
-export async function openPage(path: string): Promise<VueWrapper> {
+// `beforeMount` runs with the fresh Pinia active, e.g. to stub a store action.
+export async function openPage(path: string, beforeMount?: () => void): Promise<VueWrapper> {
   localStorage.setItem(
     'rent-tracker-auth-user',
     JSON.stringify({ id: 'mock-user-1', phoneNumber: '+918341413827' }),
   )
   const pinia = createPinia()
   setActivePinia(pinia)
+  beforeMount?.()
   await router.push(path)
   const wrapper = mount(() => h(RouterView), {
     global: { plugins: [pinia, router] },

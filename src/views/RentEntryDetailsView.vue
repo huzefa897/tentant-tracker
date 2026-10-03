@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, User } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import { Button } from '@/components/ui/button'
+import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
-import { useTenantStore } from '@/stores/tenant'
 import { formatINR } from '@/utils/currency'
 import { formatDateValue, formatMonthValue, formatTimestamp } from '@/utils/date'
 import { calculateElectricity, getEntryAmounts } from '@/utils/rentCalculations'
@@ -18,21 +18,17 @@ const props = defineProps<{
   entryId: string
 }>()
 
-const tenantStore = useTenantStore()
 const rentEntryStore = useRentEntryStore()
 const router = useRouter()
 
-const tenantsReady = ref(tenantStore.tenants.length > 0)
-const tenant = computed(() => tenantStore.tenants.find((t) => t.id === props.tenantId) ?? null)
+const {
+  tenant,
+  status: tenantStatus,
+  error: tenantError,
+  retry: retryTenants,
+} = useRouteTenant(() => props.tenantId)
 
-onMounted(async () => {
-  rentEntryStore.initialize()
-
-  if (tenantsReady.value) return
-
-  await tenantStore.loadTenants()
-  tenantsReady.value = true
-})
+onMounted(() => rentEntryStore.initialize())
 
 // Match both ids, so an entry never shows under another tenant's URL.
 const entry = computed(
@@ -84,7 +80,13 @@ function goToHistory() {
       </Button>
     </template>
 
-    <p v-if="!tenantsReady" class="text-muted-foreground" role="status">Loading…</p>
+    <p v-if="tenantStatus === 'loading'" class="text-muted-foreground" role="status">Loading…</p>
+
+    <RentEntriesLoadError
+      v-else-if="tenantStatus === 'error'"
+      :message="tenantError ?? ''"
+      @retry="retryTenants"
+    />
 
     <div
       v-else-if="!tenant"
@@ -188,9 +190,5 @@ function goToHistory() {
         </section>
       </div>
     </template>
-
-    <p v-if="tenantStore.error" class="mt-6 text-sm text-destructive" role="alert">
-      {{ tenantStore.error }}
-    </p>
   </AppLayout>
 </template>

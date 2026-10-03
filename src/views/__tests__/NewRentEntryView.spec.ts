@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
 import { LOAD_ERROR_MESSAGE, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
+import { useTenantStore } from '@/stores/tenant'
+import { openPage } from '@/test/rentEntries'
 import { RENT_ENTRIES_STORAGE_KEY } from '@/utils/rentEntryStorage'
 
 vi.mock('@/services/auth.service', () => ({
@@ -304,5 +306,28 @@ describe('NewRentEntryView', () => {
       expect(router.currentRoute.value.name).toBe('rent-entry-new')
       expect(body.find('[role="alertdialog"]').exists()).toBe(true)
     })
+  })
+})
+
+describe('NewRentEntryView when tenants fail to load', () => {
+  it('shows the error with Retry instead of Tenant not found, then shows the form', async () => {
+    app = await openPage('/tenants/tenant-001/entries/new', () => {
+      const tenantStore = useTenantStore()
+      const realLoad = tenantStore.loadTenants
+      vi.spyOn(tenantStore, 'loadTenants')
+        .mockImplementationOnce(async () => {
+          tenantStore.error = 'Unable to load tenants. Please try again.'
+        })
+        .mockImplementation(realLoad)
+    })
+
+    expect(app.get('[role="alert"]').text()).toContain('Unable to load tenants. Please try again.')
+    expect(app.text()).not.toContain('Tenant not found')
+    expect(app.find('form').exists()).toBe(false)
+
+    await button('Retry').trigger('click')
+    await flushPromises()
+
+    expect(app.find('form').exists()).toBe(true)
   })
 })
