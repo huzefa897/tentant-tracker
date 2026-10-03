@@ -1,5 +1,5 @@
 import type { AuthUser } from '@/types/auth'
-import { isValidIndianPhoneNumber } from '@/utils/authValidation'
+import { isValidPhoneNumber } from '@/utils/authValidation'
 
 // Temporary mock-session persistence. Firebase manages its own session later.
 const AUTH_USER_KEY = 'rent-tracker-auth-user'
@@ -34,7 +34,7 @@ export function savePendingPhoneNumber(phoneNumber: string) {
 export function getStoredPendingPhoneNumber(): string | null {
   const stored = sessionStorage.getItem(PENDING_PHONE_KEY)
 
-  if (stored && isValidIndianPhoneNumber(stored)) return stored
+  if (stored && isValidPhoneNumber(stored)) return stored
 
   clearStoredPendingPhoneNumber()
   return null

@@ -50,6 +50,54 @@ describe('PhoneNumberForm', () => {
     expect(wrapper.emitted('submit')).toEqual([['+918341413827']])
   })
 
+  it('defaults to India', () => {
+    const wrapper = mountForm()
+
+    expect((wrapper.get('#phone-country').element as HTMLSelectElement).value).toBe('IN')
+    expect(wrapper.text()).toContain('+91')
+    expect(wrapper.find('[data-flag="IN"]').exists()).toBe(true)
+  })
+
+  it('offers India, Australia and the United States', () => {
+    const wrapper = mountForm()
+
+    expect(wrapper.findAll('#phone-country option').map((option) => option.text())).toEqual([
+      'India (+91)',
+      'Australia (+61)',
+      'United States (+1)',
+    ])
+  })
+
+  it.each([
+    ['AU', '0412 345 678', '412 345 678', '+61412345678'],
+    ['US', '(201) 555-0123', '201 555 0123', '+12015550123'],
+  ])('formats and emits a %s number after switching country', async (code, typed, shown, e164) => {
+    const wrapper = mountForm()
+
+    await wrapper.get('#phone-country').setValue(code)
+    expect(wrapper.find(`[data-flag="${code}"]`).exists()).toBe(true)
+
+    const input = wrapper.get('#phone')
+    await input.setValue(typed)
+    expect((input.element as HTMLInputElement).value).toBe(shown)
+
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toEqual([[e164]])
+  })
+
+  it('validates against the selected country', async () => {
+    const wrapper = mountForm()
+    const button = wrapper.get('button[type="submit"]')
+
+    // Valid Indian number, but not an Australian mobile (no leading 4) once switched.
+    await wrapper.get('#phone').setValue('8341413827')
+    expect(button.attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('#phone-country').setValue('AU')
+    expect((wrapper.get('#phone').element as HTMLInputElement).value).toBe('834 141 382')
+    expect(button.attributes('disabled')).toBeDefined()
+  })
+
   it('does not emit for an invalid number', async () => {
     const wrapper = mountForm()
 

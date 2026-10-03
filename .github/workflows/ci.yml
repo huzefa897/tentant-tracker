@@ -26,3 +26,24 @@ jobs:
       - run: npm run lint:check
       - run: npm test
       - run: npm run build
+
+  # Dry-run merges against the base and other open PRs' branches. Only a conflict with the
+  # base fails; others are warnings on the PR. See scripts/check-merge-conflicts.sh.
+  merge-conflicts:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The PR's own commits (not GitHub's merge commit) and every branch to compare with.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - run: >-
+          scripts/check-merge-conflicts.sh --no-fetch
+          --base "origin/${{ github.base_ref }}" --self "${{ github.head_ref }}"
+        env:
+          GH_TOKEN: ${{ github.token }}

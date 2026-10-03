@@ -16,7 +16,8 @@
     "lint:eslint": "eslint . --fix --cache",
     "format": "prettier --write --experimental-cli src/",
     "format:check": "prettier --check --experimental-cli src/",
-    "lint:check": "oxlint . && eslint . --cache"
+    "lint:check": "oxlint . && eslint . --cache",
+    "check:conflicts": "scripts/check-merge-conflicts.sh"
   },
   "dependencies": {
     "@lucide/vue": "^1.50.0",

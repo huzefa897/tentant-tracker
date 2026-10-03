@@ -11,8 +11,9 @@ Stack: Vue Router, Pinia (setup stores), Tailwind v4, shadcn-vue (reka-ui), Axio
 - `npm run lint:check` — same, no fixes (use for verification/CI)
 - `npm run format` — Prettier over `src/` (`npm run format:check` to check only)
 - `npm test` — Vitest, single run (`npm run test:watch` to watch)
+- `npm run check:conflicts` — dry-run merges of the current branch into `main` and every other open PR's branch (`scripts/check-merge-conflicts.sh`, `--strict` to fail on PR-vs-PR conflicts). Textual conflicts only: a clean merge can still break the build.
 
-Before calling work done: `npm run format && npm run lint:check && npm test && npm run build`. CI (`.github/workflows/ci.yml`) runs the same checks on every PR and push to `main`.
+Before calling work done: `npm run format && npm run lint:check && npm test && npm run build`. CI (`.github/workflows/ci.yml`) runs the same checks on every PR and push to `main`, plus the conflict check on PRs (fails only on conflicts with `main`; conflicts with other PRs are warnings).
 
 ## Architecture
 
@@ -41,6 +42,7 @@ Layering, top to bottom — each layer only calls the one below it:
 - Import via `@/` alias, not relative `../../`.
 - Use theme tokens (`bg-background`, `text-muted-foreground`, `text-destructive`) rather than raw colours.
 - Phone numbers are stored as E.164 (`+918341413827`); format for display only (`utils/phone.ts`).
+- Login accepts India, Australia and US mobiles. Countries live in one table (`utils/phoneCountries.ts`) that drives validation, input grouping, display and the login country picker; add a country there (and its flag in `components/brand/CountryFlag.vue`).
 - Errors are shown inline (`role="alert"`), never `alert()`.
 - `VITE_*` env vars are public — never put secrets in them.
 

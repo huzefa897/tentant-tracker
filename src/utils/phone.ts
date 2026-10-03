@@ -1,12 +1,15 @@
+import { groupNationalDigits, parsePhoneNumber } from '@/utils/phoneCountries'
+
 const INDIAN_E164 = /^\+91(\d{5})(\d{5})$/
 
-// "+918341413827" -> "+91 83414 13827". Display only; store the E.164 value.
-export function formatIndianPhoneNumber(phoneNumber: string): string {
-  const match = INDIAN_E164.exec(phoneNumber)
+// "+61412345678" -> "+61 412 345 678". Display only; store the E.164 value.
+// Numbers outside the supported countries are returned unchanged.
+export function formatPhoneNumber(phoneNumber: string): string {
+  const parsed = parsePhoneNumber(phoneNumber)
 
-  if (!match) return phoneNumber
+  if (!parsed) return phoneNumber
 
-  return `+91 ${match[1]} ${match[2]}`
+  return `${parsed.country.dialCode} ${groupNationalDigits(parsed.country, parsed.nationalNumber)}`
 }
 
 // "+918341413827" -> "83414 13827", for compact layouts where +91 is implied.
