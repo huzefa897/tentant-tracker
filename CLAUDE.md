@@ -46,7 +46,13 @@ Layering, top to bottom — each layer only calls the one below it:
 
 ## Current state
 
-Auth is **mocked** (`services/auth.service.ts`, OTP `924636`) with the session in localStorage and the pending OTP phone number in sessionStorage, so refreshing `/verify` keeps the flow (`utils/authStorage.ts`). Both get replaced by Firebase phone auth later; the store, views and guards should not need to change.
+Auth is a **development-only mock** (`services/auth.service.ts`): the OTP is hard-coded (`924636`) and the "session" is a user object in localStorage, with the pending OTP phone number in sessionStorage so refreshing `/verify` keeps the flow (`utils/authStorage.ts`). It is not authentication. Anyone can sign in or forge the stored user, and route guards are UX only, never a security boundary. Don't put real tenant data behind it; real protection must come from the backend.
+
+Replacing it with Firebase phone auth is **not** a drop-in swap. The service boundary (`authService`, `AuthUser`) keeps vendor types out of the app, but expect these changes:
+- **Session restore:** the store reads the session synchronously when it's created, and the guards check `isAuthenticated` synchronously. Firebase restores sessions asynchronously, so the store needs an "auth ready" state and the guards must wait for it.
+- **Login page:** phone sign-in needs a reCAPTCHA verifier attached to an element in `LoginView`.
+- **Refresh on `/verify`:** Firebase's `ConfirmationResult` lives in memory, so refreshing `/verify` can't resume the flow as it does now.
+- **Logout:** becomes `signOut()`, and `utils/authStorage.ts` goes away.
 
 Tenants are **mock data** (`data/tenants.mock.ts`) loaded by `stores/tenant.ts`; `loadTenants` becomes a `tenantService` call later. The store keeps `selectedTenantId` (not a copy) and the dashboard never auto-selects a tenant. Format money with `utils/currency.ts` (`formatINR`) and days with `utils/date.ts` (`formatOrdinal`).
 
