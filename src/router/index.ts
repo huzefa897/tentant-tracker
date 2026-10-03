@@ -51,6 +51,14 @@ const router = createRouter({
       props: true,
       meta: { requiresAuth: true },
     },
+    // After /entries/new, so "new" reads as its own route rather than an entry id.
+    {
+      path: '/tenants/:tenantId/entries/:entryId',
+      name: 'rent-entry-details',
+      component: () => import('@/views/RentEntryDetailsView.vue'),
+      props: true,
+      meta: { requiresAuth: true },
+    },
     {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'login' },

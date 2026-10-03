@@ -189,6 +189,16 @@ describe('RentEntryHistoryView', () => {
     expect(view!.text()).not.toContain('September 2026')
   })
 
+  it('opens an entry’s details', async () => {
+    storeEntries(september)
+    await openHistory()
+
+    await view!.get('[aria-label="View September 2026"]').trigger('click')
+
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
+    expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
+  })
+
   it('goes back to the dashboard', async () => {
     await openHistory()
 
