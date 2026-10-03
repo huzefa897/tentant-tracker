@@ -1,0 +1,183 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ArrowLeft, History, Plus, User } from '@lucide/vue'
+
+import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
+import RentEntryFilters from '@/components/rent/RentEntryFilters.vue'
+import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
+import RentEntryTotals from '@/components/rent/RentEntryTotals.vue'
+import { Button } from '@/components/ui/button'
+import AppLayout from '@/layouts/AppLayout.vue'
+import { useRentEntryStore } from '@/stores/rentEntry'
+import { useTenantStore } from '@/stores/tenant'
+import type { PaymentStatus } from '@/types/rentEntry'
+import { getEntryAmounts, sumEntryAmounts } from '@/utils/rentCalculations'
+
+// The URL is the source of truth, never the dashboard's selected tenant, so a saved link
+// always shows the tenant it names.
+const props = defineProps<{
+  tenantId: string
+}>()
+
+const tenantStore = useTenantStore()
+const rentEntryStore = useRentEntryStore()
+const router = useRouter()
+
+const tenantsReady = ref(tenantStore.tenants.length > 0)
+const tenant = computed(() => tenantStore.tenants.find((t) => t.id === props.tenantId) ?? null)
+
+onMounted(async () => {
+  rentEntryStore.initialize()
+
+  if (tenantsReady.value) return
+
+  await tenantStore.loadTenants()
+  tenantsReady.value = true
+})
+
+const tenantEntries = computed(() => rentEntryStore.getEntriesForTenant(props.tenantId))
+
+// YYYY-MM sorts as text. Copy first: sort() would reorder the store's array.
+const sortedEntries = computed(() =>
+  [...tenantEntries.value].sort((a, b) => b.billingMonth.localeCompare(a.billingMonth)),
+)
+
+const years = computed(() => [
+  ...new Set(sortedEntries.value.map((entry) => entry.billingMonth.slice(0, 4))),
+])
+
+const selectedYear = ref('all')
+const selectedStatus = ref<PaymentStatus | 'all'>('all')
+
+const filteredEntries = computed(() =>
+  sortedEntries.value.filter((entry) => {
+    const matchesYear =
+      selectedYear.value === 'all' || entry.billingMonth.startsWith(`${selectedYear.value}-`)
+    const matchesStatus =
+      selectedStatus.value === 'all' || getEntryAmounts(entry).status === selectedStatus.value
+
+    return matchesYear && matchesStatus
+  }),
+)
+
+const totals = computed(() => sumEntryAmounts(filteredEntries.value))
+
+function clearFilters() {
+  selectedYear.value = 'all'
+  selectedStatus.value = 'all'
+}
+
+function goToDashboard() {
+  router.push({ name: 'dashboard' })
+}
+
+function addEntry() {
+  router.push({ name: 'rent-entry-new', params: { tenantId: props.tenantId } })
+}
+
+function viewEntry(entryId: string) {
+  router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
+}
+</script>
+
+<template>
+  <AppLayout>
+    <template #header-actions>
+      <Button variant="ghost" class="h-11 text-muted-foreground" @click="goToDashboard">
+        <ArrowLeft aria-hidden="true" />
+        Back to Dashboard
+      </Button>
+    </template>
+
+    <p v-if="!tenantsReady" class="text-muted-foreground" role="status">Loading…</p>
+
+    <div
+      v-else-if="!tenant"
+      class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
+      role="alert"
+    >
+      <h1 class="text-lg font-semibold">Tenant not found</h1>
+      <p class="mt-1 max-w-sm text-sm text-muted-foreground">
+        This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
+      </p>
+      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to Dashboard</Button>
+    </div>
+
+    <template v-else>
+      <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Previous Entries</h1>
+          <p
+            class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
+            data-testid="tenant-chip"
+          >
+            <User class="size-4" aria-hidden="true" />
+            {{ tenant.name }} · Flat {{ tenant.flatNumber }}
+          </p>
+        </div>
+        <Button class="h-11 px-6" @click="addEntry">
+          <Plus aria-hidden="true" />
+          Add New Entry
+        </Button>
+      </header>
+
+      <!-- A failed load must never look like an empty history or a zero balance. -->
+      <RentEntriesLoadError
+        v-if="rentEntryStore.loadError"
+        :message="rentEntryStore.loadError"
+        @retry="rentEntryStore.initialize"
+      />
+
+      <p v-else-if="!rentEntryStore.initialized" class="text-muted-foreground" role="status">
+        Loading entries…
+      </p>
+
+      <div
+        v-else-if="sortedEntries.length === 0"
+        class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
+      >
+        <div
+          class="mb-4 flex size-14 items-center justify-center rounded-full bg-secondary text-primary"
+          aria-hidden="true"
+        >
+          <History class="size-7" />
+        </div>
+        <p class="max-w-sm text-muted-foreground">
+          No rent entries yet. Add the first entry for this tenant.
+        </p>
+        <Button class="mt-6 h-11 px-6" @click="addEntry">
+          <Plus aria-hidden="true" />
+          Add New Entry
+        </Button>
+      </div>
+
+      <div v-else class="space-y-6">
+        <RentEntryFilters
+          v-model:year="selectedYear"
+          v-model:status="selectedStatus"
+          :years="years"
+        />
+
+        <template v-if="filteredEntries.length > 0">
+          <RentEntryTotals :totals="totals" />
+          <RentEntryHistory :entries="filteredEntries" @view="viewEntry" />
+        </template>
+
+        <div
+          v-else
+          class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-10 text-center"
+        >
+          <p class="text-muted-foreground">No entries match these filters.</p>
+          <Button variant="outline" class="mt-4 h-11 px-6" @click="clearFilters">
+            Clear filters
+          </Button>
+        </div>
+      </div>
+    </template>
+
+    <p v-if="tenantStore.error" class="mt-6 text-sm text-destructive" role="alert">
+      {{ tenantStore.error }}
+    </p>
+  </AppLayout>
+</template>

@@ -45,6 +45,13 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/tenants/:tenantId/entries',
+      name: 'rent-entry-history',
+      component: () => import('@/views/RentEntryHistoryView.vue'),
+      props: true,
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'login' },
     },
