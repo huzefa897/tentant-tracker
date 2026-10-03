@@ -1,9 +1,13 @@
-import { ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import type { RentEntry, RentEntryInput } from '@/types/rentEntry'
 import { toDateValue } from '@/utils/date'
-import { loadRentEntries, saveRentEntries } from '@/utils/rentEntryStorage'
+import {
+  loadRentEntries,
+  RENT_ENTRIES_STORAGE_KEY,
+  saveRentEntries,
+} from '@/utils/rentEntryStorage'
 import { validateRentEntryInput } from '@/utils/rentEntryValidation'
 
 export const LOAD_ERROR_MESSAGE = 'Saved entries could not be loaded. Please retry.'
@@ -16,19 +20,39 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
   const initialized = ref(false)
   const loadError = ref<string | null>(null)
 
-  // Safe to call from every page that needs entries; also the Retry action after a failure.
-  function initialize() {
-    if (initialized.value) return
-
-    loadError.value = null
-
+  // Replaces state with what's stored. On failure the stored data is left untouched and saving
+  // stays blocked until a load succeeds.
+  function load(): boolean {
     try {
       entries.value = loadRentEntries()
       initialized.value = true
+      loadError.value = null
+      return true
     } catch {
-      // Stored data is left untouched, and saving stays blocked until a load succeeds.
+      initialized.value = false
       loadError.value = LOAD_ERROR_MESSAGE
+      return false
     }
+  }
+
+  // Another tab saved (or storage was cleared, key null): pick up its changes.
+  function handleStorage(event: StorageEvent) {
+    if (event.key === RENT_ENTRIES_STORAGE_KEY || event.key === null) load()
+  }
+
+  let listening = false
+  onScopeDispose(() => window.removeEventListener('storage', handleStorage))
+
+  // Safe to call from every page that needs entries; also the Retry action after a failure.
+  function initialize() {
+    if (!listening) {
+      window.addEventListener('storage', handleStorage)
+      listening = true
+    }
+
+    if (initialized.value) return
+
+    load()
   }
 
   function getEntriesForTenant(tenantId: string): RentEntry[] {
@@ -43,6 +67,13 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
 
     if (Object.keys(validateRentEntryInput(input, toDateValue(new Date()))).length > 0) {
       throw new Error('This entry is not valid. Check the form and try again.')
+    }
+
+    // Re-read right before writing: another tab may have saved since this one loaded, and
+    // writing this tab's stale list would erase that entry. Read, check and write happen in one
+    // synchronous step; a backend must do this atomically for real.
+    if (!load()) {
+      throw new Error(LOAD_ERROR_MESSAGE)
     }
 
     // One bill per tenant per month. The backend must enforce this too once it exists.

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { LOAD_ERROR_MESSAGE, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import type { RentEntryInput } from '@/types/rentEntry'
-import { RENT_ENTRIES_STORAGE_KEY } from '@/utils/rentEntryStorage'
+import { RENT_ENTRIES_STORAGE_KEY, saveRentEntries } from '@/utils/rentEntryStorage'
 
 const input: RentEntryInput = {
   tenantId: 'tenant-001',
@@ -201,6 +201,66 @@ describe('useRentEntryStore', () => {
 
       expect(() => store.addEntry(input)).toThrow(SAVE_ERROR_MESSAGE)
       expect(store.entries).toEqual([])
+    })
+  })
+
+  // Each tab has its own Pinia but shares localStorage.
+  describe('with two tabs open', () => {
+    function openTab() {
+      setActivePinia(createPinia())
+      const store = useRentEntryStore()
+      store.initialize()
+      return store
+    }
+
+    it('keeps both tabs’ entries instead of overwriting', () => {
+      const tabA = openTab()
+      const tabB = openTab()
+
+      tabA.addEntry(input)
+      tabB.addEntry({ ...input, billingMonth: '2026-10' })
+
+      expect(refresh().entries.map((e) => e.billingMonth)).toEqual(['2026-09', '2026-10'])
+      expect(tabB.entries).toHaveLength(2)
+    })
+
+    it('rejects a month the other tab already saved', () => {
+      const tabA = openTab()
+      const tabB = openTab()
+
+      tabA.addEntry(input)
+
+      expect(() => tabB.addEntry(input)).toThrow(
+        'An entry already exists for this tenant and billing month.',
+      )
+      expect(refresh().entries).toHaveLength(1)
+    })
+
+    it('blocks saving, without writing, if the other tab left unreadable data', () => {
+      const tab = openTab()
+      localStorage.setItem(RENT_ENTRIES_STORAGE_KEY, '{not json')
+
+      expect(() => tab.addEntry(input)).toThrow(LOAD_ERROR_MESSAGE)
+      expect(tab.loadError).toBe(LOAD_ERROR_MESSAGE)
+      expect(stored()).toBe('{not json')
+    })
+
+    it('picks up entries another tab saved', () => {
+      const tab = openTab()
+      saveRentEntries([{ ...input, id: 'entry-1', createdAt: '2026-10-03T06:00:00.000Z' }])
+
+      window.dispatchEvent(new StorageEvent('storage', { key: RENT_ENTRIES_STORAGE_KEY }))
+
+      expect(tab.getEntriesForTenant('tenant-001')).toHaveLength(1)
+    })
+
+    it('ignores changes to other keys', () => {
+      const tab = openTab()
+      saveRentEntries([{ ...input, id: 'entry-1', createdAt: '2026-10-03T06:00:00.000Z' }])
+
+      window.dispatchEvent(new StorageEvent('storage', { key: 'rent-tracker-auth-user' }))
+
+      expect(tab.entries).toEqual([])
     })
   })
 
