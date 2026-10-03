@@ -1,77 +1,40 @@
-# Overkill Vue Login
+# Rent Tracker
 
-This page deliberately **composes existing components** rather than recreating animation components from scratch.
+Frontend application for managing tenant rent and utility payments.
 
-## Components used
+## Stack
 
-- Inspira UI `ParticleWhirlpoolBg` — Three.js + postprocessing
-- Inspira UI `CardSpotlight`
-- Inspira UI `BorderBeam`
-- Inspira UI `ShimmerButton`
-- shadcn-vue `Input`
-- shadcn-vue `Label`
-- `lucide-vue-next` icons
+- Vue 3
+- TypeScript
+- Vite
+- Vue Router
+- Pinia
+- Tailwind CSS
+- shadcn-vue
+- Axios
 
-## Install
+## Development
 
-If Inspira UI/shadcn-vue is not configured yet, follow the current Inspira UI installation guide first:
-https://inspira-ui.com/docs/en/getting-started/installation
-
-Core dependencies:
-
-```bash
-npm install three postprocessing @vueuse/core motion-v tw-animate-css @inspira-ui/plugins lucide-vue-next
-npm install -D @types/three
+```sh
+npm install
+cp .env.example .env
+npm run dev
 ```
 
-Add the externally maintained components:
+## Scripts
 
-```bash
-npx shadcn-vue@latest add "https://inspira-ui.com/r/bg-particle-whirlpool.json"
-npx shadcn-vue@latest add "https://inspira-ui.com/r/card-spotlight.json"
-npx shadcn-vue@latest add "https://inspira-ui.com/r/border-beam.json"
-npx shadcn-vue@latest add "https://inspira-ui.com/r/shimmer-button.json"
+| Command          | What it does                              |
+| ---------------- | ----------------------------------------- |
+| `npm run dev`    | Start the Vite dev server                 |
+| `npm run build`  | Type-check and build for production       |
+| `npm run lint`   | Run oxlint and ESLint (with auto-fix)     |
+| `npm run format` | Format `src/` with Prettier               |
 
-npx shadcn-vue@latest add input label
-```
+## Environment
 
-Then copy `LoginView.vue` into your app, for example:
+Variables prefixed with `VITE_` are bundled into the frontend and visible to
+anyone using the app. Never put secrets in them.
 
-```text
-src/views/auth/LoginView.vue
-```
-
-Add a Vue Router route:
-
-```ts
-{
-  path: "/login",
-  name: "login",
-  component: () => import("@/views/auth/LoginView.vue"),
-}
-```
-
-## Wire your real auth
-
-Replace the fake delay inside `submit()`:
-
-```ts
-await new Promise((resolve) => setTimeout(resolve, 900))
-```
-
-with your existing auth store/API call.
-
-For a Django + DRF backend, this page should only own presentation and submit state. Keep token/cookie handling in your auth service/store rather than stuffing it into the view.
-
-## Performance
-
-The Three.js background is intentionally heavy. If laptops begin sounding like aircraft:
-
-```vue
-<ParticleWhirlpoolBg
-  :particle-count="1400"
-  :blur="1.5"
-/>
-```
-
-Also consider honoring `prefers-reduced-motion` before shipping to production.
+| Variable            | Purpose               |
+| ------------------- | --------------------- |
+| `VITE_API_BASE_URL` | Base URL for API calls |
