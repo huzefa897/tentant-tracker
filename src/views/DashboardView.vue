@@ -23,6 +23,13 @@ async function handleLogout() {
   await authStore.logout()
   await router.replace({ name: 'login' })
 }
+
+function openNewEntry() {
+  const tenant = tenantStore.selectedTenant
+  if (!tenant) return
+
+  router.push({ name: 'rent-entry-new', params: { tenantId: tenant.id } })
+}
 </script>
 
 <template>
@@ -61,7 +68,11 @@ async function handleLogout() {
       {{ tenantStore.error }}
     </p>
 
-    <TenantDetails v-if="tenantStore.selectedTenant" :tenant="tenantStore.selectedTenant" />
+    <TenantDetails
+      v-if="tenantStore.selectedTenant"
+      :tenant="tenantStore.selectedTenant"
+      @add-entry="openNewEntry"
+    />
 
     <div
       v-else

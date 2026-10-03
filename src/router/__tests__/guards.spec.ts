@@ -43,6 +43,10 @@ describe('route guards', () => {
       expect(await navigate('/dashboard')).toBe('login')
     })
 
+    it('redirects a new rent entry to login', async () => {
+      expect(await navigate('/tenants/tenant-001/entries/new')).toBe('login')
+    })
+
     it('redirects verify to login without a pending number', async () => {
       expect(await navigate('/verify')).toBe('login')
     })
@@ -59,6 +63,11 @@ describe('route guards', () => {
 
     it('allows the dashboard', async () => {
       expect(await navigate('/dashboard')).toBe('dashboard')
+    })
+
+    it('allows a new rent entry for a tenant', async () => {
+      expect(await navigate('/tenants/tenant-001/entries/new')).toBe('rent-entry-new')
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
     })
 
     it('redirects login to the dashboard', async () => {

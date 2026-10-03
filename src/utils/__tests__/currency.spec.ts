@@ -13,7 +13,22 @@ describe('formatINR', () => {
     expect(formatINR(value)).toBe(expected)
   })
 
-  it('rounds to whole rupees', () => {
-    expect(formatINR(1499.6)).toBe('₹1,500')
+  it.each([
+    [450.5, '₹450.50'],
+    [1499.6, '₹1,499.60'],
+    [0.25, '₹0.25'],
+    [15750.75, '₹15,750.75'],
+  ])('shows paise for %s as %s', (value, expected) => {
+    expect(formatINR(value)).toBe(expected)
+  })
+
+  it('rounds to two decimal places', () => {
+    expect(formatINR(10.456)).toBe('₹10.46')
+    expect(formatINR(10.001)).toBe('₹10')
+  })
+
+  it('never prints negative zero', () => {
+    expect(formatINR(-0)).toBe('₹0')
+    expect(formatINR(-0.001)).toBe('₹0')
   })
 })
