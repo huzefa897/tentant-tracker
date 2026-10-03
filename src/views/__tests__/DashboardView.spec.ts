@@ -75,6 +75,20 @@ describe('DashboardView', () => {
     expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
   })
 
+  it('opens the selected tenant’s previous entries', async () => {
+    await mountView()
+    useTenantStore().selectTenant('tenant-002')
+    await flushPromises()
+
+    const previousEntries = view!
+      .findAll('button')
+      .find((button) => button.text().startsWith('Previous Entries'))
+    await previousEntries!.trigger('click')
+
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
+    expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
+  })
+
   describe('saved entries', () => {
     function previousEntriesText() {
       return view!
