@@ -22,7 +22,7 @@ const props = defineProps<{
   tenant: Tenant
 }>()
 
-// Placeholders: wired up in later phases (add entry, payment history).
+// viewHistory is a placeholder until payment history is built.
 const emit = defineEmits<{
   addEntry: []
   viewHistory: []

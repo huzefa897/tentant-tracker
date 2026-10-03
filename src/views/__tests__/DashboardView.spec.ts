@@ -60,6 +60,19 @@ describe('DashboardView', () => {
     expect(view!.text()).not.toContain('Select a tenant')
   })
 
+  it('opens a new entry for the selected tenant', async () => {
+    await mountView()
+    useTenantStore().selectTenant('tenant-002')
+    await flushPromises()
+
+    const addEntry = view!.findAll('button').find((button) => button.text() === 'Add New Entry')
+    await addEntry!.trigger('click')
+
+    // The entry page is lazy loaded, so navigation finishes after its chunk is imported.
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-new'))
+    expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
+  })
+
   it('logs out, clears the selection and returns to login', async () => {
     await mountView()
     useTenantStore().selectTenant('tenant-002')
