@@ -43,6 +43,13 @@ function openNewEntry() {
 
   router.push({ name: 'rent-entry-new', params: { tenantId: tenant.id } })
 }
+
+function openHistory() {
+  const tenant = tenantStore.selectedTenant
+  if (!tenant) return
+
+  router.push({ name: 'rent-entry-history', params: { tenantId: tenant.id } })
+}
 </script>
 
 <template>
@@ -93,6 +100,7 @@ function openNewEntry() {
       :tenant="tenantStore.selectedTenant"
       :entry-count="selectedTenantEntryCount"
       @add-entry="openNewEntry"
+      @view-entries="openHistory"
     />
 
     <div

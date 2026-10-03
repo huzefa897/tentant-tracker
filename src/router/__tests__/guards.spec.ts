@@ -47,6 +47,13 @@ describe('route guards', () => {
       expect(await navigate('/tenants/tenant-001/entries/new')).toBe('login')
     })
 
+    it.each(['/tenants/tenant-001/entries', '/tenants/tenant-001/entries/entry-1'])(
+      'redirects %s to login',
+      async (path) => {
+        expect(await navigate(path)).toBe('login')
+      },
+    )
+
     it('redirects verify to login without a pending number', async () => {
       expect(await navigate('/verify')).toBe('login')
     })
@@ -68,6 +75,19 @@ describe('route guards', () => {
     it('allows a new rent entry for a tenant', async () => {
       expect(await navigate('/tenants/tenant-001/entries/new')).toBe('rent-entry-new')
       expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
+    })
+
+    it('allows a tenant’s entry history', async () => {
+      expect(await navigate('/tenants/tenant-001/entries')).toBe('rent-entry-history')
+    })
+
+    it('allows an entry’s details, keeping "new" for the new-entry page', async () => {
+      expect(await navigate('/tenants/tenant-001/entries/entry-1')).toBe('rent-entry-details')
+      expect(router.currentRoute.value.params).toEqual({
+        tenantId: 'tenant-001',
+        entryId: 'entry-1',
+      })
+      expect(await navigate('/tenants/tenant-001/entries/new')).toBe('rent-entry-new')
     })
 
     it('redirects login to the dashboard', async () => {

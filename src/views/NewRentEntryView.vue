@@ -17,9 +17,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
-import { useTenantStore } from '@/stores/tenant'
 import type { RentEntry, RentEntryInput } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
@@ -30,22 +30,18 @@ const props = defineProps<{
   tenantId: string
 }>()
 
-const tenantStore = useTenantStore()
 const rentEntryStore = useRentEntryStore()
 const router = useRouter()
 
-const tenantsReady = ref(tenantStore.tenants.length > 0)
-const tenant = computed(() => tenantStore.tenants.find((t) => t.id === props.tenantId) ?? null)
+const {
+  tenant,
+  status: tenantStatus,
+  error: tenantError,
+  retry: retryTenants,
+} = useRouteTenant(() => props.tenantId)
 
-onMounted(async () => {
-  // Needed for the duplicate check, even when this URL is opened directly.
-  rentEntryStore.initialize()
-
-  if (tenantsReady.value) return
-
-  await tenantStore.loadTenants()
-  tenantsReady.value = true
-})
+// Needed for the duplicate check, even when this URL is opened directly.
+onMounted(() => rentEntryStore.initialize())
 
 const savedEntry = ref<RentEntry | null>(null)
 const saveError = ref<string | null>(null)
@@ -120,7 +116,15 @@ function handleDialogOpenChange(open: boolean) {
       </Button>
     </template>
 
-    <template v-if="tenantsReady && !tenant">
+    <p v-if="tenantStatus === 'loading'" class="text-muted-foreground" role="status">Loading…</p>
+
+    <RentEntriesLoadError
+      v-else-if="tenantStatus === 'error'"
+      :message="tenantError ?? ''"
+      @retry="retryTenants"
+    />
+
+    <template v-else-if="!tenant">
       <div
         class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
         role="alert"
@@ -133,7 +137,7 @@ function handleDialogOpenChange(open: boolean) {
       </div>
     </template>
 
-    <template v-else-if="tenant">
+    <template v-else>
       <section
         v-if="savedSummary"
         class="mx-auto flex max-w-md flex-col items-center text-center"
@@ -211,10 +215,6 @@ function handleDialogOpenChange(open: boolean) {
         />
       </template>
     </template>
-
-    <p v-if="tenantStore.error" class="mt-6 text-sm text-destructive" role="alert">
-      {{ tenantStore.error }}
-    </p>
 
     <AlertDialog :open="discardDialogOpen" @update:open="handleDialogOpenChange">
       <AlertDialogContent>

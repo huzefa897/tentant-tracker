@@ -24,10 +24,9 @@ const props = defineProps<{
   entryCount?: number | null
 }>()
 
-// viewHistory is a placeholder until payment history is built.
 const emit = defineEmits<{
   addEntry: []
-  viewHistory: []
+  viewEntries: []
 }>()
 
 interface DetailItem {
@@ -126,7 +125,7 @@ const details = computed<DetailItem[]>(() => [
       <Button
         variant="secondary"
         class="h-12 px-8 text-base sm:min-w-52"
-        @click="emit('viewHistory')"
+        @click="emit('viewEntries')"
       >
         <History aria-hidden="true" />
         Previous Entries<template v-if="entryCount != null"> ({{ entryCount }})</template>

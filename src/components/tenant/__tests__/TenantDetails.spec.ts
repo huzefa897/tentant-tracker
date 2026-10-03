@@ -53,7 +53,7 @@ describe('TenantDetails', () => {
     expect(wrapper.get('h2').text()).toBe('Mohammed Yusuf')
   })
 
-  it('emits addEntry and viewHistory from the action buttons', async () => {
+  it('emits addEntry and viewEntries from the action buttons', async () => {
     const wrapper = mount(TenantDetails, { props: { tenant } })
     const buttons = wrapper.findAll('button')
 
@@ -61,7 +61,7 @@ describe('TenantDetails', () => {
     await buttons.find((b) => b.text() === 'Previous Entries')!.trigger('click')
 
     expect(wrapper.emitted('addEntry')).toHaveLength(1)
-    expect(wrapper.emitted('viewHistory')).toHaveLength(1)
+    expect(wrapper.emitted('viewEntries')).toHaveLength(1)
   })
 
   it('shows the saved entry count on Previous Entries', () => {
