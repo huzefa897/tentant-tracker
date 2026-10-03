@@ -41,6 +41,7 @@ Layering, top to bottom — each layer only calls the one below it:
 - Import via `@/` alias, not relative `../../`.
 - Use theme tokens (`bg-background`, `text-muted-foreground`, `text-destructive`) rather than raw colours.
 - Phone numbers are stored as E.164 (`+918341413827`); format for display only (`utils/phone.ts`).
+- Login accepts India, Australia and US mobiles. Countries live in one table (`utils/phoneCountries.ts`) that drives validation, input grouping, display and the login country picker; add a country there (and its flag in `components/brand/CountryFlag.vue`).
 - Errors are shown inline (`role="alert"`), never `alert()`.
 - `VITE_*` env vars are public — never put secrets in them.
 
