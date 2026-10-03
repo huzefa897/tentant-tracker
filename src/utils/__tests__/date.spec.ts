@@ -4,6 +4,7 @@ import {
   formatMonthValue,
   formatOrdinal,
   isValidDateValue,
+  isValidIsoTimestamp,
   isValidMonthValue,
   toDateValue,
   toMonthValue,
@@ -72,5 +73,25 @@ describe('formatMonthValue', () => {
 
   it('returns invalid input unchanged', () => {
     expect(formatMonthValue('nope')).toBe('nope')
+  })
+})
+
+describe('isValidIsoTimestamp', () => {
+  it.each(['2026-10-03T06:00:00.000Z', '2026-10-03T06:00:00Z', new Date(2026, 0, 1).toISOString()])(
+    'accepts %s',
+    (value) => {
+      expect(isValidIsoTimestamp(value)).toBe(true)
+    },
+  )
+
+  it.each([
+    '',
+    '2026-10-03',
+    '2026-10-03 06:00:00',
+    '2026-10-03T06:00:00+05:30',
+    '2026-02-30T00:00:00Z',
+    'nope',
+  ])('rejects %j', (value) => {
+    expect(isValidIsoTimestamp(value)).toBe(false)
   })
 })

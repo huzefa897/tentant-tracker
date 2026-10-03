@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import type { RentEntryInput } from '@/types/rentEntry'
 import {
   getDraftTotalDue,
   NOTES_MAX_LENGTH,
@@ -7,6 +8,7 @@ import {
   type RentEntryDraft,
   toAmount,
   validateRentEntryDraft,
+  validateRentEntryInput,
 } from '@/utils/rentEntryValidation'
 
 const today = '2026-10-03'
@@ -163,6 +165,68 @@ describe('validateRentEntryDraft', () => {
     expect(
       validateRentEntryDraft(draft({ notes: 'a'.repeat(NOTES_MAX_LENGTH + 1) }), today).notes,
     ).toBe('Notes must be 500 characters or fewer.')
+  })
+})
+
+describe('validateRentEntryDraft without today', () => {
+  it('skips the future paid date check', () => {
+    expect(validateRentEntryDraft(draft({ totalPaid: 100, paidDate: '2099-01-01' }))).toEqual({})
+  })
+})
+
+describe('validateRentEntryInput', () => {
+  const input: RentEntryInput = {
+    tenantId: 'tenant-001',
+    billingMonth: '2026-09',
+    rentAmount: 15000,
+    electricityUnits: 75,
+    electricityRate: 6,
+    waterAmount: 300,
+    totalPaid: 10000,
+    paidDate: '2026-10-01',
+    notes: '',
+  }
+
+  it('accepts a valid entry', () => {
+    expect(validateRentEntryInput(input, today)).toEqual({})
+    expect(validateRentEntryInput({ ...input, totalPaid: 0, paidDate: null }, today)).toEqual({})
+  })
+
+  it('applies the same rules as the form', () => {
+    expect(validateRentEntryInput({ ...input, totalPaid: 16000 }, today)).toEqual({
+      totalPaid: 'Total paid cannot exceed the total due.',
+    })
+    expect(validateRentEntryInput({ ...input, rentAmount: 0 }, today).rentAmount).toBeDefined()
+    expect(
+      validateRentEntryInput({ ...input, billingMonth: '2026-13' }, today).billingMonth,
+    ).toBeDefined()
+  })
+
+  it('requires a paid date when something was paid', () => {
+    expect(validateRentEntryInput({ ...input, paidDate: null }, today).paidDate).toBe(
+      'Select the date this payment was received.',
+    )
+  })
+
+  it('requires no paid date when nothing was paid', () => {
+    expect(validateRentEntryInput({ ...input, totalPaid: 0 }, today).paidDate).toBe(
+      'Paid date must be empty when nothing was paid.',
+    )
+  })
+
+  it('requires a tenant', () => {
+    expect(validateRentEntryInput({ ...input, tenantId: ' ' }, today).tenantId).toBe(
+      'The entry has no tenant.',
+    )
+  })
+
+  it('checks future paid dates only when given today', () => {
+    const future = { ...input, paidDate: '2026-10-04' }
+
+    expect(validateRentEntryInput(future, today).paidDate).toBe(
+      'Paid date cannot be in the future.',
+    )
+    expect(validateRentEntryInput(future)).toEqual({})
   })
 })
 

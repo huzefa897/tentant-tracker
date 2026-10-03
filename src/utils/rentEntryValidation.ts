@@ -21,7 +21,7 @@ export interface RentEntryDraft {
   notes: string
 }
 
-export type RentEntryErrors = Partial<Record<keyof RentEntryDraft, string>>
+export type RentEntryErrors = Partial<Record<keyof RentEntryDraft | 'tenantId', string>>
 
 export type ParsedRentEntry =
   { ok: true; input: RentEntryInput } | { ok: false; errors: RentEntryErrors }
@@ -62,8 +62,9 @@ function nonNegativeError(value: NumberInputValue, emptyMessage: string, label: 
   return undefined
 }
 
-// `today` is "YYYY-MM-DD" in local time.
-export function validateRentEntryDraft(draft: RentEntryDraft, today: string): RentEntryErrors {
+// `today` is "YYYY-MM-DD" in local time. Without it, future paid dates aren't checked
+// (used for stored entries, which were checked when saved; the clock may have moved since).
+export function validateRentEntryDraft(draft: RentEntryDraft, today?: string): RentEntryErrors {
   const errors: RentEntryErrors = {}
 
   if (!isValidMonthValue(draft.billingMonth)) {
@@ -106,7 +107,7 @@ export function validateRentEntryDraft(draft: RentEntryDraft, today: string): Re
   if (totalPaid !== null && totalPaid > 0) {
     if (!isValidDateValue(draft.paidDate)) {
       errors.paidDate = 'Select the date this payment was received.'
-    } else if (draft.paidDate > today) {
+    } else if (today !== undefined && draft.paidDate > today) {
       errors.paidDate = 'Paid date cannot be in the future.'
     }
   }
@@ -118,6 +119,21 @@ export function validateRentEntryDraft(draft: RentEntryDraft, today: string): Re
   // Drop the keys of passing checks so `Object.keys(errors).length` means "has errors".
   for (const key of Object.keys(errors) as (keyof RentEntryErrors)[]) {
     if (!errors[key]) delete errors[key]
+  }
+
+  return errors
+}
+
+// The same rules for a complete entry, used before saving it and when loading saved entries.
+export function validateRentEntryInput(input: RentEntryInput, today?: string): RentEntryErrors {
+  const errors = validateRentEntryDraft({ ...input, paidDate: input.paidDate ?? '' }, today)
+
+  if (input.tenantId.trim() === '') {
+    errors.tenantId = 'The entry has no tenant.'
+  }
+
+  if (input.totalPaid === 0 && input.paidDate !== null) {
+    errors.paidDate = 'Paid date must be empty when nothing was paid.'
   }
 
   return errors
