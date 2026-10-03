@@ -5,7 +5,8 @@ import { RouterView } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
-import { useRentEntryStore } from '@/stores/rentEntry'
+import { LOAD_ERROR_MESSAGE, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
+import { RENT_ENTRIES_STORAGE_KEY } from '@/utils/rentEntryStorage'
 
 vi.mock('@/services/auth.service', () => ({
   authService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), logout: vi.fn() },
@@ -67,8 +68,15 @@ beforeEach(() => {
 afterEach(() => {
   app?.unmount()
   app = undefined
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
+
+// Unmount and remount with a fresh Pinia over the same localStorage.
+async function refreshPage(tenantId?: string) {
+  app?.unmount()
+  return openEntryPage(tenantId)
+}
 
 describe('NewRentEntryView', () => {
   it('loads tenants and shows the form for the tenant in the URL', async () => {
@@ -161,6 +169,97 @@ describe('NewRentEntryView', () => {
 
     expect(router.currentRoute.value.name).toBe('dashboard')
     expect(body.find('[role="alertdialog"]').exists()).toBe(false)
+  })
+
+  describe('persistence', () => {
+    it('keeps a saved entry after a refresh', async () => {
+      await openEntryPage()
+      await fill(validEntry)
+      await save()
+      const [saved] = useRentEntryStore().entries
+
+      await refreshPage()
+
+      expect(useRentEntryStore().entries).toEqual([saved])
+    })
+
+    it('blocks a duplicate month after a refresh', async () => {
+      await openEntryPage()
+      await fill(validEntry)
+      await save()
+
+      await refreshPage()
+      await fill(validEntry)
+      await save()
+
+      expect(app!.get('[role="alert"]').text()).toBe(
+        'An entry already exists for this tenant and billing month.',
+      )
+      expect(useRentEntryStore().entries).toHaveLength(1)
+    })
+
+    it('shows no confirmation and keeps the form when writing fails', async () => {
+      await openEntryPage()
+      await fill(validEntry)
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError')
+      })
+
+      await save()
+
+      expect(app!.find('#entry-saved-heading').exists()).toBe(false)
+      expect(useRentEntryStore().entries).toEqual([])
+      expect(app!.get('[role="alert"]').text()).toBe(SAVE_ERROR_MESSAGE)
+      expect(app!.get<HTMLInputElement>('#electricityUnits').element.value).toBe('75')
+      expect(app!.get<HTMLInputElement>('#totalPaid').element.value).toBe('10000')
+    })
+
+    it('can save after a failed write once storage works again', async () => {
+      await openEntryPage()
+      await fill(validEntry)
+      const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError')
+      })
+      await save()
+
+      await save()
+
+      expect(setItem).toHaveBeenCalledTimes(2)
+      expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+    })
+
+    describe('when saved entries are corrupt', () => {
+      beforeEach(() => {
+        localStorage.setItem(RENT_ENTRIES_STORAGE_KEY, '{not json')
+      })
+
+      it('shows a load error and blocks saving without touching the data', async () => {
+        await openEntryPage()
+
+        expect(app!.text()).toContain(LOAD_ERROR_MESSAGE)
+
+        await fill(validEntry)
+        await save()
+
+        expect(app!.find('#entry-saved-heading').exists()).toBe(false)
+        expect(app!.text()).toContain(
+          'Saved entries must load successfully before adding an entry.',
+        )
+        expect(localStorage.getItem(RENT_ENTRIES_STORAGE_KEY)).toBe('{not json')
+      })
+
+      it('recovers on Retry once the data can be read', async () => {
+        await openEntryPage()
+        localStorage.removeItem(RENT_ENTRIES_STORAGE_KEY)
+
+        await button('Retry').trigger('click')
+        await fill(validEntry)
+        await save()
+
+        expect(app!.text()).not.toContain(LOAD_ERROR_MESSAGE)
+        expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+      })
+    })
   })
 
   describe('with unsaved changes', () => {
