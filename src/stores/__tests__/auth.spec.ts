@@ -154,4 +154,15 @@ describe('logout', () => {
     expect(store.isAuthenticated).toBe(false)
     expect(localStorage.getItem('rent-tracker-auth-user')).toBeNull()
   })
+
+  // Saved rent entries belong to the device for now, not the session.
+  it('keeps saved rent entries', async () => {
+    localStorage.setItem('rent-tracker-auth-user', JSON.stringify(user))
+    localStorage.setItem('rent-tracker:rent-entries:v1', '{"version":1,"entries":[]}')
+    const store = useAuthStore()
+
+    await store.logout()
+
+    expect(localStorage.getItem('rent-tracker:rent-entries:v1')).toBe('{"version":1,"entries":[]}')
+  })
 })
