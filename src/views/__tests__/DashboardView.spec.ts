@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
 import { authService } from '@/services/auth.service'
+import { LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
+import { RENT_ENTRIES_STORAGE_KEY } from '@/utils/rentEntryStorage'
 import DashboardView from '@/views/DashboardView.vue'
 
 vi.mock('@/services/auth.service', () => ({
@@ -71,6 +73,86 @@ describe('DashboardView', () => {
     // The entry page is lazy loaded, so navigation finishes after its chunk is imported.
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-new'))
     expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
+  })
+
+  describe('saved entries', () => {
+    function previousEntriesText() {
+      return view!
+        .findAll('button')
+        .find((b) => b.text().startsWith('Previous Entries'))!
+        .text()
+    }
+
+    function storeEntries(...months: string[]) {
+      localStorage.setItem(
+        RENT_ENTRIES_STORAGE_KEY,
+        JSON.stringify({
+          version: 1,
+          entries: months.map((billingMonth, index) => ({
+            id: `entry-${index}`,
+            tenantId: 'tenant-001',
+            billingMonth,
+            rentAmount: 15000,
+            electricityUnits: 75,
+            electricityRate: 6,
+            waterAmount: 300,
+            totalPaid: 0,
+            paidDate: null,
+            notes: '',
+            createdAt: '2026-10-03T06:00:00.000Z',
+          })),
+        }),
+      )
+    }
+
+    it('shows the selected tenant’s saved entry count', async () => {
+      storeEntries('2026-08', '2026-09')
+      await mountView()
+
+      useTenantStore().selectTenant('tenant-001')
+      await flushPromises()
+      expect(previousEntriesText()).toBe('Previous Entries (2)')
+
+      useTenantStore().selectTenant('tenant-002')
+      await flushPromises()
+      expect(previousEntriesText()).toBe('Previous Entries (0)')
+    })
+
+    it('shows a load error with Retry instead of a count when entries are corrupt', async () => {
+      localStorage.setItem(RENT_ENTRIES_STORAGE_KEY, 'corrupt')
+      await mountView()
+      useTenantStore().selectTenant('tenant-001')
+      await flushPromises()
+
+      expect(view!.text()).toContain(LOAD_ERROR_MESSAGE)
+      expect(previousEntriesText()).toBe('Previous Entries')
+      expect(localStorage.getItem(RENT_ENTRIES_STORAGE_KEY)).toBe('corrupt')
+
+      storeEntries('2026-09')
+      await view!
+        .findAll('button')
+        .find((b) => b.text() === 'Retry')!
+        .trigger('click')
+      await flushPromises()
+
+      expect(view!.text()).not.toContain(LOAD_ERROR_MESSAGE)
+      expect(previousEntriesText()).toBe('Previous Entries (1)')
+    })
+
+    it('keeps saved entries across logout and login', async () => {
+      storeEntries('2026-09')
+      await mountView()
+
+      await view!.get('button[aria-label="Logout"]').trigger('click')
+      await flushPromises()
+      view!.unmount()
+
+      await mountView()
+      useTenantStore().selectTenant('tenant-001')
+      await flushPromises()
+
+      expect(previousEntriesText()).toBe('Previous Entries (1)')
+    })
   })
 
   it('logs out, clears the selection and returns to login', async () => {

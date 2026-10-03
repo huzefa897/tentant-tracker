@@ -20,6 +20,8 @@ import { formatIndianPhoneNumberNational } from '@/utils/phone'
 
 const props = defineProps<{
   tenant: Tenant
+  // Saved entries for this tenant; null while unknown (not loaded, or loading failed).
+  entryCount?: number | null
 }>()
 
 // viewHistory is a placeholder until payment history is built.
@@ -127,7 +129,7 @@ const details = computed<DetailItem[]>(() => [
         @click="emit('viewHistory')"
       >
         <History aria-hidden="true" />
-        Previous Entries
+        Previous Entries<template v-if="entryCount != null"> ({{ entryCount }})</template>
       </Button>
     </div>
   </section>

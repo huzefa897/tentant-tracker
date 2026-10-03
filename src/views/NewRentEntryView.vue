@@ -4,6 +4,7 @@ import { onBeforeRouteLeave, useRouter, type RouteLocationRaw } from 'vue-router
 import { ArrowLeft, CircleCheck, User } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
+import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import RentEntryForm from '@/components/rent/RentEntryForm.vue'
 import {
   AlertDialog,
@@ -37,6 +38,9 @@ const tenantsReady = ref(tenantStore.tenants.length > 0)
 const tenant = computed(() => tenantStore.tenants.find((t) => t.id === props.tenantId) ?? null)
 
 onMounted(async () => {
+  // Needed for the duplicate check, even when this URL is opened directly.
+  rentEntryStore.initialize()
+
   if (tenantsReady.value) return
 
   await tenantStore.loadTenants()
@@ -46,13 +50,22 @@ onMounted(async () => {
 const savedEntry = ref<RentEntry | null>(null)
 const saveError = ref<string | null>(null)
 
+// The store writes to storage first, so the confirmation only appears once the entry is saved.
+// On failure the form stays open with its values.
 function handleSave(input: RentEntryInput) {
+  saveError.value = null
+
   try {
     savedEntry.value = rentEntryStore.addEntry(input)
-    saveError.value = null
   } catch (error) {
-    saveError.value = error instanceof Error ? error.message : 'Unable to save the entry.'
+    saveError.value =
+      error instanceof Error ? error.message : 'Unable to save the entry. Please try again.'
   }
+}
+
+function retryLoad() {
+  saveError.value = null
+  rentEntryStore.initialize()
 }
 
 const savedSummary = computed(() => {
@@ -180,6 +193,13 @@ function handleDialogOpenChange(open: boolean) {
             {{ tenant.name }} · Flat {{ tenant.flatNumber }}
           </p>
         </header>
+
+        <RentEntriesLoadError
+          v-if="rentEntryStore.loadError"
+          class="mb-6"
+          :message="rentEntryStore.loadError"
+          @retry="retryLoad"
+        />
 
         <RentEntryForm
           :key="tenant.id"

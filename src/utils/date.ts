@@ -58,3 +58,15 @@ export function formatMonthValue(value: string): string {
   const date = new Date(Number(match[1]), Number(match[2]) - 1, 1)
   return date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
 }
+
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/
+
+// "2026-10-03T06:00:00.000Z", as produced by Date#toISOString.
+// Date.parse alone rolls impossible days over ("02-30" -> March), so check the date part too.
+export function isValidIsoTimestamp(value: string): boolean {
+  return (
+    ISO_TIMESTAMP.test(value) &&
+    isValidDateValue(value.slice(0, 10)) &&
+    !Number.isNaN(Date.parse(value))
+  )
+}

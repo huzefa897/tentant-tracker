@@ -1,7 +1,8 @@
 import type { AuthUser, SendOtpRequest, VerifyOtpRequest } from '@/types/auth'
 import { isValidIndianPhoneNumber, isValidOtpCode } from '@/utils/authValidation'
 
-// Mock implementation. Swapped for Firebase later; callers should not change.
+// Development-only mock: a hard-coded OTP is not authentication. Replaced by Firebase phone
+// auth later, which also changes session restore and the OTP flow (see CLAUDE.md).
 const MOCK_OTP = '924636'
 const MOCK_DELAY_MS = 500
 
