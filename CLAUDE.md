@@ -50,4 +50,6 @@ Auth is **mocked** (`services/auth.service.ts`, OTP `924636`) with the session i
 
 Tenants are **mock data** (`data/tenants.mock.ts`) loaded by `stores/tenant.ts`; `loadTenants` becomes a `tenantService` call later. The store keeps `selectedTenantId` (not a copy) and the dashboard never auto-selects a tenant. Format money with `utils/currency.ts` (`formatINR`) and days with `utils/date.ts` (`formatOrdinal`).
 
+Rent entries (`types/rentEntry.ts`) are saved **in memory** by `stores/rentEntry.ts` (lost on refresh), one per tenant per billing month. Entries store rent and electricity rate as historical values; total due, outstanding and payment status are always derived with `utils/rentCalculations.ts`, never stored or typed in. `RentEntryForm` keeps the draft locally and validates with `utils/rentEntryValidation.ts` before emitting `save`; `NewRentEntryView` (`/tenants/:tenantId/entries/new`) saves it and confirms before discarding unsaved changes. Payments over the total due are rejected and previous balances are not carried forward yet.
+
 Route guards live in `router/index.ts` (`meta.requiresAuth`, `meta.guestOnly`). Pinia is installed before the router in `main.ts` so guards can use stores.
