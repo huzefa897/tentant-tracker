@@ -45,11 +45,13 @@ const filteredTenants = computed(() => {
   )
 })
 
+// Start each open from the full list rather than the last filter.
 function handleSelect(value: AcceptableValue) {
+  search.value = ''
   if (typeof value === 'string') emit('select', value)
 }
 
-// Reka resets the search box to this after a selection; keep it empty rather than the id.
+// Reka also resets the input after a selection; without this it would show the tenant id.
 const emptySearch = () => ''
 </script>
 
