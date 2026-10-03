@@ -35,6 +35,6 @@ Layering, top to bottom — each layer only calls the one below it:
 
 ## Current state
 
-Auth is **mocked** (`services/auth.service.ts`, OTP `924636`) with the session in localStorage (`utils/authStorage.ts`). Both get replaced by Firebase phone auth later; the store, views and guards should not need to change.
+Auth is **mocked** (`services/auth.service.ts`, OTP `924636`) with the session in localStorage and the pending OTP phone number in sessionStorage, so refreshing `/verify` keeps the flow (`utils/authStorage.ts`). Both get replaced by Firebase phone auth later; the store, views and guards should not need to change.
 
 Route guards live in `router/index.ts` (`meta.requiresAuth`, `meta.guestOnly`). Pinia is installed before the router in `main.ts` so guards can use stores.

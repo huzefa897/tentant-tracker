@@ -56,7 +56,7 @@ router.beforeEach((to) => {
     return { name: 'dashboard' }
   }
 
-  // /verify only makes sense mid-flow (e.g. not after a refresh or direct visit)
+  // /verify only makes sense mid-flow (pending number survives a refresh, not a new tab)
   if (to.name === 'verify' && !authStore.pendingPhoneNumber) {
     return { name: 'login' }
   }

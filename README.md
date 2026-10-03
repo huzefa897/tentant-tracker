@@ -26,6 +26,10 @@ npm run dev
 Authentication is mocked for now. Sign in with any valid Indian mobile number
 (10 digits starting 6–9) and the OTP **`924636`**.
 
+The signed-in session is kept in `localStorage`. While you're on the
+verification step, the phone number is kept in `sessionStorage`, so a refresh
+stays on that screen; a new tab starts again from login.
+
 ## Scripts
 
 | Command              | What it does                          |

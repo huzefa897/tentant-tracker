@@ -3,15 +3,30 @@ import { defineStore } from 'pinia'
 
 import { authService } from '@/services/auth.service'
 import type { AuthUser } from '@/types/auth'
-import { clearStoredAuthUser, getStoredAuthUser, saveAuthUser } from '@/utils/authStorage'
+import {
+  clearStoredAuthUser,
+  clearStoredPendingPhoneNumber,
+  getStoredAuthUser,
+  getStoredPendingPhoneNumber,
+  saveAuthUser,
+  savePendingPhoneNumber,
+} from '@/utils/authStorage'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(getStoredAuthUser())
-  const pendingPhoneNumber = ref<string | null>(null)
+  const pendingPhoneNumber = ref<string | null>(getStoredPendingPhoneNumber())
   const loading = ref(false)
   const error = ref<string | null>(null)
 
   const isAuthenticated = computed(() => user.value !== null)
+
+  // Kept in sessionStorage so refreshing /verify doesn't drop the user back to login.
+  function setPendingPhoneNumber(phoneNumber: string | null) {
+    pendingPhoneNumber.value = phoneNumber
+
+    if (phoneNumber) savePendingPhoneNumber(phoneNumber)
+    else clearStoredPendingPhoneNumber()
+  }
 
   async function sendOtp(phoneNumber: string) {
     loading.value = true
@@ -19,7 +34,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     try {
       await authService.sendOtp({ phoneNumber })
-      pendingPhoneNumber.value = phoneNumber
+      setPendingPhoneNumber(phoneNumber)
     } catch (err) {
       error.value = 'Unable to send verification code. Please try again.'
       throw err
@@ -44,7 +59,7 @@ export const useAuthStore = defineStore('auth', () => {
 
       user.value = authenticatedUser
       saveAuthUser(authenticatedUser)
-      pendingPhoneNumber.value = null
+      setPendingPhoneNumber(null)
     } catch (err) {
       error.value = 'Invalid verification code. Please try again.'
       throw err
@@ -54,7 +69,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function resetOtpFlow() {
-    pendingPhoneNumber.value = null
+    setPendingPhoneNumber(null)
     error.value = null
   }
 
