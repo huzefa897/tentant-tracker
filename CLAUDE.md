@@ -37,4 +37,6 @@ Layering, top to bottom — each layer only calls the one below it:
 
 Auth is **mocked** (`services/auth.service.ts`, OTP `924636`) with the session in localStorage and the pending OTP phone number in sessionStorage, so refreshing `/verify` keeps the flow (`utils/authStorage.ts`). Both get replaced by Firebase phone auth later; the store, views and guards should not need to change.
 
+Tenants are **mock data** (`data/tenants.mock.ts`) loaded by `stores/tenant.ts`; `loadTenants` becomes a `tenantService` call later. The store keeps `selectedTenantId` (not a copy) and the dashboard never auto-selects a tenant. Format money with `utils/currency.ts` (`formatINR`) and days with `utils/date.ts` (`formatOrdinal`).
+
 Route guards live in `router/index.ts` (`meta.requiresAuth`, `meta.guestOnly`). Pinia is installed before the router in `main.ts` so guards can use stores.

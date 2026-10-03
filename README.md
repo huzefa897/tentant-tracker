@@ -30,6 +30,11 @@ The signed-in session is kept in `localStorage`. While you're on the
 verification step, the phone number is kept in `sessionStorage`, so a refresh
 stays on that screen; a new tab starts again from login.
 
+## Mock data
+
+The dashboard lists three mock tenants from `src/data/tenants.mock.ts`. Search
+by name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
+
 ## Scripts
 
 | Command              | What it does                          |
