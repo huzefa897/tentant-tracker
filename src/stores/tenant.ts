@@ -22,6 +22,11 @@ export const useTenantStore = defineStore('tenant', () => {
 
     try {
       tenants.value = mockTenants
+
+      // Drop a selection that no longer exists, so the selector and details never disagree.
+      if (selectedTenantId.value && !tenants.value.some((t) => t.id === selectedTenantId.value)) {
+        clearSelectedTenant()
+      }
     } catch {
       error.value = 'Unable to load tenants. Please try again.'
     } finally {
