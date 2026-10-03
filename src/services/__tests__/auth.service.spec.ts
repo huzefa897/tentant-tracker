@@ -13,15 +13,18 @@ afterEach(() => {
 })
 
 describe('authService.sendOtp', () => {
-  it('resolves for a valid Indian number', async () => {
-    const result = authService.sendOtp({ phoneNumber })
-    await vi.runAllTimersAsync()
+  it.each([phoneNumber, '+61412345678', '+12015550123'])(
+    'resolves for a valid number in a supported country (%s)',
+    async (value) => {
+      const result = authService.sendOtp({ phoneNumber: value })
+      await vi.runAllTimersAsync()
 
-    await expect(result).resolves.toBeUndefined()
-  })
+      await expect(result).resolves.toBeUndefined()
+    },
+  )
 
-  it('rejects an invalid number', async () => {
-    await expect(authService.sendOtp({ phoneNumber: '8341413827' })).rejects.toThrow(
+  it.each(['8341413827', '+447911123456'])('rejects %s', async (value) => {
+    await expect(authService.sendOtp({ phoneNumber: value })).rejects.toThrow(
       'Invalid phone number',
     )
   })

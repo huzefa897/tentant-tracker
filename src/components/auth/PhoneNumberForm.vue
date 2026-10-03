@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ArrowRight } from '@lucide/vue'
+import { ArrowRight, ChevronDown } from '@lucide/vue'
 
-import IndiaFlag from '@/components/brand/IndiaFlag.vue'
+import CountryFlag from '@/components/brand/CountryFlag.vue'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { isValidIndianMobileDigits } from '@/utils/authValidation'
-
-const COUNTRY_CODE = '+91'
+import { isValidMobileDigits } from '@/utils/authValidation'
+import {
+  DEFAULT_PHONE_COUNTRY,
+  getPhoneCountry,
+  groupNationalDigits,
+  PHONE_COUNTRIES,
+  toNationalDigits,
+  type PhoneCountryCode,
+} from '@/utils/phoneCountries'
 
 const props = defineProps<{
   loading: boolean
@@ -18,23 +24,29 @@ const emit = defineEmits<{
   submit: [phoneNumber: string]
 }>()
 
+const countryCode = ref<PhoneCountryCode>(DEFAULT_PHONE_COUNTRY.code)
+const country = computed(() => getPhoneCountry(countryCode.value))
 const digits = ref('')
 
-// Display as "83414 13827"; keep only digits in state.
+// Display grouped per country ("83414 13827", "412 345 678"); keep only digits in state.
 const displayValue = computed({
-  get: () =>
-    digits.value.length > 5 ? `${digits.value.slice(0, 5)} ${digits.value.slice(5)}` : digits.value,
+  get: () => groupNationalDigits(country.value, digits.value),
   set: (value: string) => {
-    digits.value = value.replace(/\D/g, '').slice(0, 10)
+    digits.value = toNationalDigits(country.value, value)
   },
 })
 
-const isPhoneValid = computed(() => isValidIndianMobileDigits(digits.value))
+const isPhoneValid = computed(() => isValidMobileDigits(country.value, digits.value))
+
+function handleCountryChange() {
+  // Keep what was typed, trimmed to the new country's length.
+  digits.value = digits.value.slice(0, country.value.maxDigits)
+}
 
 function handleSubmit() {
   if (!isPhoneValid.value || props.loading) return
 
-  emit('submit', `${COUNTRY_CODE}${digits.value}`)
+  emit('submit', `${country.value.dialCode}${digits.value}`)
 }
 </script>
 
@@ -47,9 +59,23 @@ function handleSubmit() {
         class="flex h-13 items-center rounded-lg border border-input bg-muted transition-shadow focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30"
         :class="{ 'border-destructive': !!error }"
       >
-        <div class="flex items-center gap-2.5 pl-4 pr-3">
-          <IndiaFlag />
-          <span class="text-base">{{ COUNTRY_CODE }}</span>
+        <!-- Native select over the flag + dial code: accessible and uses the OS picker on phones. -->
+        <div class="relative flex h-full items-center gap-2 pl-4 pr-3">
+          <CountryFlag :code="country.code" />
+          <span class="text-base">{{ country.dialCode }}</span>
+          <ChevronDown class="size-4 text-muted-foreground" aria-hidden="true" />
+
+          <select
+            id="phone-country"
+            v-model="countryCode"
+            aria-label="Country"
+            class="absolute inset-0 cursor-pointer opacity-0"
+            @change="handleCountryChange"
+          >
+            <option v-for="option in PHONE_COUNTRIES" :key="option.code" :value="option.code">
+              {{ option.name }} ({{ option.dialCode }})
+            </option>
+          </select>
         </div>
 
         <span class="h-7 w-px bg-input" aria-hidden="true" />
@@ -60,7 +86,7 @@ function handleSubmit() {
           type="tel"
           inputmode="numeric"
           autocomplete="tel-national"
-          placeholder="98765 43210"
+          :placeholder="country.placeholder"
           class="h-full min-w-0 flex-1 bg-transparent px-4 text-base outline-none placeholder:text-muted-foreground/60"
           :aria-invalid="!!error"
           :aria-describedby="error ? 'phone-error' : undefined"

@@ -7,7 +7,7 @@ import OtpForm from '@/components/auth/OtpForm.vue'
 import { Button } from '@/components/ui/button'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import { useAuthStore } from '@/stores/auth'
-import { formatIndianPhoneNumber } from '@/utils/phone'
+import { formatPhoneNumber } from '@/utils/phone'
 
 const RESEND_COOLDOWN_SECONDS = 60
 
@@ -19,7 +19,7 @@ const secondsLeft = ref(0)
 let countdown: ReturnType<typeof setInterval> | undefined
 
 const displayPhoneNumber = computed(() =>
-  authStore.pendingPhoneNumber ? formatIndianPhoneNumber(authStore.pendingPhoneNumber) : '',
+  authStore.pendingPhoneNumber ? formatPhoneNumber(authStore.pendingPhoneNumber) : '',
 )
 
 const countdownLabel = computed(() => {
