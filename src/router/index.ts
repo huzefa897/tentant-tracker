@@ -38,6 +38,13 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/tenants/:tenantId/entries/new',
+      name: 'rent-entry-new',
+      component: () => import('@/views/NewRentEntryView.vue'),
+      props: true,
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'login' },
     },
