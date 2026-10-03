@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, History, Plus, User } from '@lucide/vue'
 
@@ -67,6 +67,10 @@ function clearFilters() {
   selectedYear.value = 'all'
   selectedStatus.value = 'all'
 }
+
+// The router reuses this page when only the tenant in the URL changes; one tenant's filters
+// shouldn't hide another's entries.
+watch(() => props.tenantId, clearFilters)
 
 function goToDashboard() {
   router.push({ name: 'dashboard' })

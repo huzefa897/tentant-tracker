@@ -164,3 +164,15 @@ describe('RentEntryDetailsView', () => {
     expect(back).not.toHaveBeenCalled()
   })
 })
+
+describe('RentEntryDetailsView when the URL changes in place', () => {
+  it('shows the new entry without a reload', async () => {
+    storeEntries(entry, makeEntry({ id: 'aug', billingMonth: '2026-08' }))
+    await openDetails('tenant-001', 'sep')
+
+    await router.push('/tenants/tenant-001/entries/aug')
+    await flushPromises()
+
+    expect(view!.get('h1').text()).toBe('August 2026')
+  })
+})

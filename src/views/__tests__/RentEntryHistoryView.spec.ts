@@ -208,3 +208,18 @@ describe('RentEntryHistoryView', () => {
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 })
+
+describe('RentEntryHistoryView when the URL changes in place', () => {
+  it('shows the new tenant’s entries with filters reset', async () => {
+    storeEntries(lastYear, september, otherTenant)
+    await openHistory()
+    await view!.get('#filter-year').setValue('2025')
+
+    await router.push('/tenants/tenant-002/entries')
+    await flushPromises()
+
+    expect(view!.get('[data-testid="tenant-chip"]').text()).toBe('Mohammed Yusuf · Flat 301')
+    expect((view!.get('#filter-year').element as HTMLSelectElement).value).toBe('all')
+    expect(rows().map((row) => row[0])).toEqual(['July 2026'])
+  })
+})
