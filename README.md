@@ -44,6 +44,8 @@ by name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
 | `npm run lint`       | Run oxlint and ESLint (with auto-fix) |
 | `npm run lint:check` | Run oxlint and ESLint without fixing  |
 | `npm run format`     | Format `src/` with Prettier           |
+| `npm test`           | Run the Vitest unit tests once        |
+| `npm run test:watch` | Run Vitest in watch mode              |
 
 ## Environment
 
