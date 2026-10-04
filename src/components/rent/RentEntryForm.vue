@@ -208,7 +208,7 @@ const lockedClass =
 <template>
   <form
     ref="form"
-    class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
+    class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_22rem]"
     novalidate
     @submit.prevent="handleSubmit"
   >
