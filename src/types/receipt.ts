@@ -17,6 +17,9 @@ export interface PaymentReceipt {
   paymentId: string
   entryId: string
   issuedAt: string // ISO timestamp
+  // The date printed on the receipt: the issuer's local date when it was issued. Saved rather
+  // than worked out from issuedAt, which would depend on the time zone of whoever downloads it.
+  issuedDate: string // YYYY-MM-DD
 
   issuer: ReceiptIssuer
 

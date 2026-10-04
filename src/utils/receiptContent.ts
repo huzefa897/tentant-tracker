@@ -3,13 +3,7 @@
 
 import type { PaymentReceipt } from '@/types/receipt'
 import { formatAmount, formatINR, formatINRWithPaise } from '@/utils/currency'
-import {
-  formatDateValueNumeric,
-  formatMonthValue,
-  formatOrdinal,
-  isValidIsoTimestamp,
-  toDateValue,
-} from '@/utils/date'
+import { formatDateValueNumeric, formatMonthValue, formatOrdinal } from '@/utils/date'
 import { formatPhoneNumber } from '@/utils/phone'
 import { calculateElectricity } from '@/utils/rentCalculations'
 
@@ -109,9 +103,7 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
     title: 'PAYMENT RECEIPT',
     subtitle: 'Rental / Tenant Payment Receipt',
     receiptNumber: receipt.reference,
-    receiptDate: isValidIsoTimestamp(receipt.issuedAt)
-      ? formatDateValueNumeric(toDateValue(new Date(receipt.issuedAt)))
-      : receipt.issuedAt,
+    receiptDate: formatDateValueNumeric(receipt.issuedDate),
     paidInFull,
     status: paidInFull ? 'PAID' : 'PARTIALLY PAID',
     issuer: present([

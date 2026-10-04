@@ -39,6 +39,7 @@ const receipt: PaymentReceipt = {
   paymentId: 'payment-001',
   entryId: 'entry-001',
   issuedAt: '2026-10-03T07:00:00.000Z',
+  issuedDate: '2026-10-03',
   issuer: {
     name: 'Saleem Towers',
     managerName: 'Test Manager',
@@ -441,6 +442,8 @@ describe('loadRentLedger', () => {
       ['no payment id', { ...receipt, paymentId: undefined }],
       ['no entry id', { ...receipt, entryId: '' }],
       ['an invalid issued time', { ...receipt, issuedAt: '2026-02-30T00:00:00.000Z' }],
+      ['no issued date', { ...receipt, issuedDate: undefined }],
+      ['an invalid issued date', { ...receipt, issuedDate: '2026-02-30' }],
       ['no issuer', { ...receipt, issuer: null }],
       ['an empty issuer name', { ...receipt, issuer: { ...receipt.issuer, name: ' ' } }],
       ['no issuer address', { ...receipt, issuer: { ...receipt.issuer, address: undefined } }],
