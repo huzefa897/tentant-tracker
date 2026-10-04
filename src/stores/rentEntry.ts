@@ -25,13 +25,15 @@ export const RECEIPT_SAVE_ERROR_MESSAGE =
 // the payment's place among its bill's payments, not a counter, so it's the same whenever it's
 // issued. Saved with the receipt and never regenerated. A backend can allocate references
 // under a uniqueness constraint later.
+export const RECEIPT_REFERENCE_PREFIX = 'RCP'
+
 export function receiptReferenceFor(
   flatNumber: string,
   billingMonth: string,
   paymentNumber: number,
 ): string {
   const flat = flatNumber.trim().replace(/\s+/g, '-')
-  const base = `RCP-${flat}-${billingMonth.replace('-', '')}`
+  const base = `${RECEIPT_REFERENCE_PREFIX}-${flat}-${billingMonth.replace('-', '')}`
   return paymentNumber > 1 ? `${base}-${paymentNumber}` : base
 }
 

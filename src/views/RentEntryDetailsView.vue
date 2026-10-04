@@ -15,12 +15,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
 import { formatINR } from '@/utils/currency'
 import type { PaymentInput } from '@/types/payment'
-import type { PaymentReceipt } from '@/types/receipt'
 import { formatMonthValue, formatTimestamp } from '@/utils/date'
 import {
   calculateElectricity,
@@ -94,34 +94,14 @@ function handleSavePayment({ id, input }: { id: string; input: PaymentInput }) {
   }
 }
 
-const issuingReceipt = ref(false)
-const receiptError = ref<string | null>(null)
-
-function goToReceipt(receipt: PaymentReceipt) {
-  router.push({
-    name: 'payment-receipt',
-    params: { tenantId: props.tenantId, entryId: props.entryId, receiptId: receipt.id },
-    query: { from: 'entry' },
-  })
-}
-
-// Saved before navigating, so the receipt page always opens a stored receipt. A failure shows
-// here and leaves the payment as it was: it's already recorded.
-function handleIssueReceipt(paymentId: string) {
-  if (issuingReceipt.value) return
-
-  issuingReceipt.value = true
-  receiptError.value = null
-
-  try {
-    goToReceipt(rentEntryStore.issueReceipt(paymentId))
-  } catch (error) {
-    receiptError.value =
-      error instanceof Error ? error.message : 'Unable to issue the receipt. Please try again.'
-  } finally {
-    issuingReceipt.value = false
-  }
-}
+// Each payment's receipt downloads as a PDF. A failure shows here and leaves the payment as it
+// was: it's already recorded.
+const {
+  downloadingPaymentId,
+  error: receiptError,
+  downloadReceipt,
+  clearError: clearReceiptError,
+} = useReceiptDownload()
 
 // The router reuses this page when only the ids in the URL change: nothing from one entry
 // should show on another.
@@ -131,7 +111,7 @@ watch(
     paymentDialogOpen.value = false
     paymentError.value = null
     confirmation.value = null
-    receiptError.value = null
+    clearReceiptError()
   },
 )
 
@@ -300,10 +280,8 @@ function goToHistory() {
           </p>
           <PaymentHistory
             :payments="payments"
-            :receipts="rentEntryStore.receipts"
-            :issuing="issuingReceipt"
-            @issue-receipt="handleIssueReceipt"
-            @view-receipt="goToReceipt"
+            :downloading-payment-id="downloadingPaymentId"
+            @download-receipt="downloadReceipt"
           />
         </section>
 

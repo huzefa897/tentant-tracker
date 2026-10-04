@@ -1,28 +1,22 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { FileText, Receipt } from '@lucide/vue'
+import { Download } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import type { Payment } from '@/types/payment'
-import type { PaymentReceipt } from '@/types/receipt'
 import { formatINR } from '@/utils/currency'
 import { formatDateValue } from '@/utils/date'
 
-// Shown in the given order; the page sorts them. `receipts` may include other entries' receipts.
-const props = defineProps<{
+// Shown in the given order; the page sorts them.
+defineProps<{
   payments: Payment[]
-  receipts: PaymentReceipt[]
-  issuing?: boolean
+  // The payment whose receipt is being prepared; every button waits until it's done.
+  downloadingPaymentId?: string | null
 }>()
 
 const emit = defineEmits<{
-  'issue-receipt': [paymentId: string]
-  'view-receipt': [receipt: PaymentReceipt]
+  // Issues the receipt if needed, then downloads it as a PDF.
+  'download-receipt': [paymentId: string]
 }>()
-
-const receiptsByPayment = computed(
-  () => new Map(props.receipts.map((receipt) => [receipt.paymentId, receipt])),
-)
 </script>
 
 <template>
@@ -57,27 +51,15 @@ const receiptsByPayment = computed(
           </td>
           <td class="py-1.5 text-right whitespace-nowrap">
             <Button
-              v-if="receiptsByPayment.get(payment.id)"
               variant="outline"
               size="sm"
               class="h-9"
-              data-testid="view-receipt"
-              @click="emit('view-receipt', receiptsByPayment.get(payment.id)!)"
+              :disabled="!!downloadingPaymentId"
+              data-testid="download-receipt"
+              @click="emit('download-receipt', payment.id)"
             >
-              <FileText aria-hidden="true" />
-              View receipt
-            </Button>
-            <Button
-              v-else
-              variant="outline"
-              size="sm"
-              class="h-9"
-              :disabled="issuing"
-              data-testid="issue-receipt"
-              @click="emit('issue-receipt', payment.id)"
-            >
-              <Receipt aria-hidden="true" />
-              Issue receipt
+              <Download aria-hidden="true" />
+              {{ downloadingPaymentId === payment.id ? 'Preparing…' : 'Download receipt' }}
             </Button>
           </td>
         </tr>

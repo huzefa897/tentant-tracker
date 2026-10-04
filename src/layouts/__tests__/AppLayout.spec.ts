@@ -16,20 +16,12 @@ describe('AppLayout', () => {
   it('renders the page content and header actions', () => {
     const wrapper = mountLayout()
 
-    expect(wrapper.find('.app-content [data-testid="page"]').exists()).toBe(true)
-    expect(wrapper.find('.app-navigation [data-testid="action"]').exists()).toBe(true)
-  })
-
-  it('keeps the classes the print styles rely on', () => {
-    const wrapper = mountLayout()
-
-    for (const name of ['app-shell', 'app-backdrop', 'app-card', 'app-navigation', 'app-content']) {
-      expect(wrapper.find(`.${name}`).exists()).toBe(true)
-    }
+    expect(wrapper.find('[data-testid="app-content"] [data-testid="page"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="app-header"] [data-testid="action"]').exists()).toBe(true)
   })
 
   it('fills the screen instead of a narrow centred card', () => {
-    const card = mountLayout().find('.app-card')
+    const card = mountLayout().get('[data-testid="app-card"]')
 
     expect(card.classes()).not.toContain('max-w-5xl')
     expect(card.classes()).toContain('w-full')

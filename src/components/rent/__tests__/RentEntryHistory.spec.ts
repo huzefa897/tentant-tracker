@@ -38,9 +38,9 @@ describe('RentEntryHistory', () => {
         '₹10,000',
         '₹5,750',
         'Partially paid',
-        'View Summary  Print Receipt',
+        'View Summary  Download Receipt',
       ],
-      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'View Summary  Print Receipt'],
+      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'View Summary  Download Receipt'],
       // Nothing paid, so nothing to receipt.
       ['August 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
     ])
@@ -67,17 +67,26 @@ describe('RentEntryHistory', () => {
     expect(wrapper.emitted('view')).toEqual([['b'], ['b']])
   })
 
-  it('emits view-receipt from the table and the cards, only for bills with a payment', async () => {
+  it('emits download-receipt from the table and the cards, only for bills with a payment', async () => {
     const wrapper = mount(RentEntryHistory, { props: { bills } })
-    const receipts = wrapper.findAll('[aria-label="View or print receipt for October 2026"]')
+    const receipts = wrapper.findAll('[aria-label="Download receipt for October 2026"]')
 
     expect(receipts).toHaveLength(2)
     await receipts[0]!.trigger('click')
     await receipts[1]!.trigger('click')
 
-    expect(wrapper.emitted('view-receipt')).toEqual([['a'], ['a']])
-    expect(wrapper.find('[aria-label="View or print receipt for August 2026"]').exists()).toBe(
-      false,
-    )
+    expect(wrapper.emitted('download-receipt')).toEqual([['a'], ['a']])
+    expect(wrapper.find('[aria-label="Download receipt for August 2026"]').exists()).toBe(false)
+  })
+
+  it('shows which bill’s receipt is being prepared and disables the others meanwhile', () => {
+    const wrapper = mount(RentEntryHistory, { props: { bills, downloadingEntryId: 'a' } })
+    const [october, september] = wrapper.findAll('[data-testid="history-row"]')
+
+    expect(october!.text()).toContain('Preparing…')
+    expect(september!.text()).toContain('Download Receipt')
+    expect(
+      september!.get('[aria-label="Download receipt for September 2026"]').attributes('disabled'),
+    ).toBeDefined()
   })
 })

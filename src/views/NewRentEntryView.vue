@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRouter, type RouteLocationRaw } from 'vue-router'
-import { ArrowLeft, CircleCheck, FileText, User } from '@lucide/vue'
+import { ArrowLeft, CircleCheck, Download, User } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
@@ -79,28 +80,12 @@ const initialPayment = computed(() =>
   savedEntry.value ? (rentEntryStore.getPaymentsForEntry(savedEntry.value.id)[0] ?? null) : null,
 )
 
-const receiptError = ref<string | null>(null)
+// Issues (or reuses) the receipt and downloads it as a PDF. A failure shows here; the entry and
+// payment are already saved.
+const { downloadingPaymentId, error: receiptError, downloadReceipt } = useReceiptDownload()
 
-// Issues (or reuses) the receipt, then opens it, where Print / Save as PDF lives. A failure
-// shows here; the entry and payment are already saved.
-function openReceipt() {
-  const payment = initialPayment.value
-  const entry = savedEntry.value
-  if (!payment || !entry) return
-
-  receiptError.value = null
-
-  try {
-    const receipt = rentEntryStore.issueReceipt(payment.id)
-    router.push({
-      name: 'payment-receipt',
-      params: { tenantId: entry.tenantId, entryId: entry.id, receiptId: receipt.id },
-      query: { from: 'new-entry' },
-    })
-  } catch (error) {
-    receiptError.value =
-      error instanceof Error ? error.message : 'Unable to issue the receipt. Please try again.'
-  }
+function downloadInitialReceipt() {
+  if (initialPayment.value) downloadReceipt(initialPayment.value.id)
 }
 
 // Leaving with unsaved changes (Cancel, or any in-app navigation) asks first.
@@ -218,10 +203,11 @@ function handleDialogOpenChange(open: boolean) {
           v-if="initialPayment"
           variant="outline"
           class="mt-6 h-12 w-full text-base"
-          @click="openReceipt"
+          :disabled="!!downloadingPaymentId"
+          @click="downloadInitialReceipt"
         >
-          <FileText aria-hidden="true" />
-          Receipt (PDF)
+          <Download aria-hidden="true" />
+          {{ downloadingPaymentId ? 'Preparing…' : 'Download Receipt' }}
         </Button>
 
         <Button

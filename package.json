@@ -20,12 +20,14 @@
     "check:conflicts": "scripts/check-merge-conflicts.sh"
   },
   "dependencies": {
+    "@expo-google-fonts/poppins": "^0.4.1",
     "@lucide/vue": "^1.50.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vueuse/core": "^15.0.0",
     "axios": "^1.20.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "jspdf": "^4.2.1",
     "pinia": "^4.0.3",
     "reka-ui": "^2.10.5",
     "shadcn-vue": "^2.8.2",
