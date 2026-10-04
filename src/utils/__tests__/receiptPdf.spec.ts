@@ -20,8 +20,8 @@ vi.mock('jspdf', async (importOriginal) => {
         for (const line of [value].flat()) {
           drawn.push({ text: line, y, page: this.getCurrentPageInfo().pageNumber })
         }
-        return (text as (...all: unknown[]) => jsPDF)(value, x, y, ...rest)
-      }) as jsPDF['text']
+        return (text as (...all: unknown[]) => RecordingPdf)(value, x, y, ...rest)
+      }) as RecordingPdf['text']
     }
   }
 
