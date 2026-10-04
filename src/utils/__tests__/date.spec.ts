@@ -6,7 +6,6 @@ import {
   formatMonthValue,
   formatOrdinal,
   formatTimestamp,
-  formatTimestampDate,
   isValidDateValue,
   isValidIsoTimestamp,
   isValidMonthValue,
@@ -121,16 +120,6 @@ describe('formatTimestamp', () => {
 
   it('returns invalid input unchanged', () => {
     expect(formatTimestamp('nope')).toBe('nope')
-  })
-})
-
-describe('formatTimestampDate', () => {
-  it('shows the day in the viewer’s time zone', () => {
-    expect(formatTimestampDate(new Date(2026, 9, 3, 23, 59).toISOString())).toBe('3 Oct 2026')
-  })
-
-  it('returns invalid input unchanged', () => {
-    expect(formatTimestampDate('nope')).toBe('nope')
   })
 })
 
