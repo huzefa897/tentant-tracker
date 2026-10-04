@@ -46,4 +46,5 @@ __screenshots__/
 
 # Google Apps Script (clasp): the script ID stays local; commit .clasp.json.example only
 google-api/.clasp.json
+whatsapp-bot/.clasp.json
 .clasprc.json

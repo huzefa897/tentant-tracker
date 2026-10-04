@@ -20,6 +20,7 @@ Apps Script. How it fits with the app is in
 | `src/Receipts.gs` | The on-edit trigger (`onPaidDateEditV2`), receipt PDF and email, sheet helpers, `resetActiveRowReceipt()`, `checkMailQuota()` |
 | `src/Logging.gs` | `Email Log` tab writer and the failure-alert email |
 | `src/Maintenance.gs` | One-off helpers already run on the live sheet: column migration, header diagnosis, formula repair |
+| `src/ReceiptQueue.gs` | Emails receipts the WhatsApp bot ([`whatsapp-bot/`](../whatsapp-bot/README.md)) asked for: `processPendingReceipts()` on a 5-minute trigger, `installReceiptQueueTrigger()` |
 | `src/appsscript.json` | Project manifest (not committed yet; see first-time setup) |
 
 Apps Script loads every file into **one shared global scope**, so a name declared in two files
@@ -71,7 +72,10 @@ Before the repo version replaces what's running in Apps Script:
 6. **Check the trigger** still exists: **Triggers** → `onPaidDateEditV2`, *From spreadsheet*,
    *On edit*. It's installable, not a simple `onEdit`, because sending email needs
    authorisation.
-7. **Test** with `CONFIG.dryRun = true` on a test tab, then set it back to `false`.
+7. **Install the receipt queue trigger** for receipts requested from WhatsApp: run
+   `installReceiptQueueTrigger()` once (safe to re-run). The bot's writes can't fire the
+   on-edit trigger, so it tags the row and this trigger sends the receipt within 5 minutes.
+8. **Test** with `CONFIG.dryRun = true` on a test tab, then set it back to `false`.
 
 ## Day to day
 
