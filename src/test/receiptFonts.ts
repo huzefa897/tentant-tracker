@@ -9,6 +9,5 @@ function read(path: string): string {
 
 export const receiptFonts: ReceiptFonts = {
   regular: read('400Regular/Poppins_400Regular.ttf'),
-  semibold: read('600SemiBold/Poppins_600SemiBold.ttf'),
   bold: read('700Bold/Poppins_700Bold.ttf'),
 }

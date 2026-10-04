@@ -9,7 +9,6 @@ import type { ReceiptContent, ReceiptField } from '@/utils/receiptContent'
 // TTF files as base64. The PDF standard fonts have no ₹, so Poppins (the app's font) is embedded.
 export interface ReceiptFonts {
   regular: string
-  semibold: string
   bold: string
 }
 
@@ -31,7 +30,7 @@ const X = MARGIN + PAD
 const W = PAGE_W - 2 * (MARGIN + PAD)
 const BOTTOM = PAGE_H - MARGIN - PAD
 
-type Face = 'regular' | 'semibold' | 'bold'
+type Face = 'regular' | 'bold'
 
 export function renderReceiptPdf(content: ReceiptContent, fonts: ReceiptFonts): jsPDF {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true })
