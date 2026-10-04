@@ -15,6 +15,22 @@ Stack: Vue Router, Pinia (setup stores), Tailwind v4, shadcn-vue (reka-ui), Axio
 
 Before calling work done: `npm run format && npm run lint:check && npm test && npm run build`. CI (`.github/workflows/ci.yml`) runs the same checks on every PR and push to `main`, plus the conflict check on PRs (fails only on conflicts with `main`; conflicts with other PRs are warnings).
 
+## Backend
+
+Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). The frontend doesn't call it yet. PostgreSQL runs in Docker (`docker compose up -d --wait db` from the root, host port 5434); Django runs on the host with pipenv, from `backend/`:
+
+- `pipenv run start` — dev server (`runserver`, port 8000)
+- `pipenv run makemigrate` — `makemigrations` (alias `makemigrations`); `pipenv run migrate` — apply them
+- `pipenv run test` — Django tests (needs the database up); `pipenv run check`; `pipenv run dbcheck` prints `postgresql`
+
+Before calling backend work done: `pipenv run check && pipenv run python manage.py makemigrations --check --dry-run && pipenv run test`. CI's `backend` job runs the same against a Postgres service.
+
+- Settings come from the gitignored `backend/.env`; every variable is listed in `backend/.env.example`. Add new ones to both.
+- `AUTH_USER_MODEL` is `accounts.User` (`AbstractUser` + nullable unique `firebase_uid`, `phone_number`). Roles belong on property membership, never on the user.
+- DRF requires authentication by default; a public endpoint opts out with `AllowAny` (only `/api/v1/health/` today). CORS is not authentication.
+- Apps: `accounts`, `properties`, `billing` (the last two have no models yet). Tests live in each app's `tests.py`.
+- Add packages with `pipenv install <name>` and commit `Pipfile.lock`.
+
 ## Architecture
 
 Layering, top to bottom — each layer only calls the one below it:
