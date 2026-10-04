@@ -56,7 +56,7 @@ describe('RentEntryForm', () => {
       expect(wrapper!.get<HTMLInputElement>('#rentAmount').element.value).toBe('15000')
       expect(wrapper!.get<HTMLInputElement>('#electricityUnits').element.value).toBe('')
       expect(wrapper!.get<HTMLInputElement>('#waterAmount').element.value).toBe('0')
-      expect(wrapper!.get<HTMLInputElement>('#totalPaid').element.value).toBe('0')
+      expect(wrapper!.get<HTMLInputElement>('#paymentAmount').element.value).toBe('0')
       expect(wrapper!.get<HTMLTextAreaElement>('#notes').element.value).toBe('')
       expect(text('rate')).toBe('₹6 / unit')
     })
@@ -111,7 +111,7 @@ describe('RentEntryForm', () => {
 
     it('shows Partially paid for a part payment', async () => {
       mountForm()
-      await fill({ electricityUnits: '75', waterAmount: '300', totalPaid: '10000' })
+      await fill({ electricityUnits: '75', waterAmount: '300', paymentAmount: '10000' })
 
       expect(text('status')).toBe('Partially paid')
       expect(text('outstanding')).toBe('₹5,750')
@@ -119,7 +119,7 @@ describe('RentEntryForm', () => {
 
     it('shows Paid when the total due is paid', async () => {
       mountForm()
-      await fill({ electricityUnits: '75', waterAmount: '300', totalPaid: '15750' })
+      await fill({ electricityUnits: '75', waterAmount: '300', paymentAmount: '15750' })
 
       expect(text('status')).toBe('Paid')
       expect(text('outstanding')).toBe('₹0')
@@ -135,7 +135,7 @@ describe('RentEntryForm', () => {
 
     it('shows — for outstanding when the payment exceeds the total', async () => {
       mountForm()
-      await fill({ electricityUnits: '75', waterAmount: '300', totalPaid: '16000' })
+      await fill({ electricityUnits: '75', waterAmount: '300', paymentAmount: '16000' })
 
       expect(text('outstanding')).toBe('—')
       expect(text('status')).toBe('—')
@@ -182,20 +182,20 @@ describe('RentEntryForm', () => {
       await fill({
         electricityUnits: '75',
         waterAmount: '300',
-        totalPaid: '16000',
+        paymentAmount: '16000',
         paidDate: '2026-10-01',
       })
       await save()
 
       expect(wrapper!.emitted('save')).toBeUndefined()
-      expect(wrapper!.get('#totalPaid-error').text()).toBe(
-        'Total paid cannot exceed the total due.',
+      expect(wrapper!.get('#paymentAmount-error').text()).toBe(
+        'Amount cannot exceed the outstanding ₹15,750.',
       )
     })
 
     it('requires a paid date once something is paid', async () => {
       mountForm()
-      await fill({ electricityUnits: '75', totalPaid: '5000' })
+      await fill({ electricityUnits: '75', paymentAmount: '5000' })
 
       expect(wrapper!.get('#paidDate').attributes('disabled')).toBeUndefined()
 
@@ -209,7 +209,7 @@ describe('RentEntryForm', () => {
 
     it('rejects a paid date in the future', async () => {
       mountForm()
-      await fill({ electricityUnits: '75', totalPaid: '5000', paidDate: '2026-10-04' })
+      await fill({ electricityUnits: '75', paymentAmount: '5000', paidDate: '2026-10-04' })
       await save()
 
       expect(wrapper!.get('#paidDate-error').text()).toBe('Paid date cannot be in the future.')
@@ -218,7 +218,7 @@ describe('RentEntryForm', () => {
   })
 
   describe('saving', () => {
-    it('emits an unpaid entry with a null paid date', async () => {
+    it('emits an unpaid bill with no initial payment', async () => {
       mountForm()
       await fill({ billingMonth: '2026-09', electricityUnits: '75', waterAmount: '300' })
       await save()
@@ -226,49 +226,60 @@ describe('RentEntryForm', () => {
       expect(wrapper!.emitted('save')).toEqual([
         [
           {
-            tenantId: 'tenant-001',
-            billingMonth: '2026-09',
-            rentAmount: 15000,
-            electricityUnits: 75,
-            electricityRate: 6,
-            waterAmount: 300,
-            totalPaid: 0,
-            paidDate: null,
-            notes: '',
+            entry: {
+              tenantId: 'tenant-001',
+              billingMonth: '2026-09',
+              rentAmount: 15000,
+              electricityUnits: 75,
+              electricityRate: 6,
+              waterAmount: 300,
+              notes: '',
+            },
+            initialPayment: null,
           },
         ],
       ])
     })
 
-    it('emits a partly paid entry with its paid date and notes', async () => {
+    it('emits the bill and its initial payment separately, each with its own notes', async () => {
       mountForm()
       await fill({
         billingMonth: '2026-09',
         electricityUnits: '75',
         waterAmount: '300',
-        totalPaid: '10000',
-        paidDate: '2026-10-02',
-        notes: 'Paid via UPI',
+        notes: ' Meter read on the 1st ',
+        paymentAmount: '10000',
       })
+      await fill({ paidDate: '2026-10-02', paymentNotes: ' Paid via UPI ' })
       await save()
 
       expect(wrapper!.emitted('save')![0]![0]).toMatchObject({
-        totalPaid: 10000,
-        paidDate: '2026-10-02',
-        notes: 'Paid via UPI',
+        entry: { billingMonth: '2026-09', notes: 'Meter read on the 1st' },
+        initialPayment: { amount: 10000, paidDate: '2026-10-02', notes: 'Paid via UPI' },
       })
     })
 
-    it('drops a paid date typed before the payment was set back to 0', async () => {
+    it('rejects a payment with more than two decimal places', async () => {
       mountForm()
-      await fill({ electricityUnits: '75', totalPaid: '100', paidDate: '2026-10-02' })
-      await fill({ totalPaid: '0' })
+      await fill({ electricityUnits: '75', paymentAmount: '100.005', paidDate: '2026-10-02' })
+      await save()
+
+      expect(wrapper!.emitted('save')).toBeUndefined()
+      expect(wrapper!.get('#paymentAmount-error').text()).toBe(
+        'Amount can have at most two decimal places.',
+      )
+    })
+
+    it('sends no payment once the amount is set back to 0', async () => {
+      mountForm()
+      await fill({ electricityUnits: '75', paymentAmount: '100', paidDate: '2026-10-02' })
+      await fill({ paymentAmount: '0' })
 
       expect(wrapper!.get<HTMLInputElement>('#paidDate').element.value).toBe('')
 
       await save()
 
-      expect(wrapper!.emitted('save')![0]![0]).toMatchObject({ totalPaid: 0, paidDate: null })
+      expect(wrapper!.emitted('save')![0]![0]).toMatchObject({ initialPayment: null })
     })
 
     it('keeps the entry’s own rent when it is changed', async () => {
@@ -276,7 +287,7 @@ describe('RentEntryForm', () => {
       await fill({ rentAmount: '16000', electricityUnits: '10' })
       await save()
 
-      expect(wrapper!.emitted('save')![0]![0]).toMatchObject({ rentAmount: 16000 })
+      expect(wrapper!.emitted('save')![0]![0]).toMatchObject({ entry: { rentAmount: 16000 } })
     })
 
     it('shows a save error from the parent', () => {

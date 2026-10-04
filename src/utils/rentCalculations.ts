@@ -1,4 +1,6 @@
+import type { Payment } from '@/types/payment'
 import type { PaymentStatus, RentEntryInput } from '@/types/rentEntry'
+import { fromPaise, toPaise } from '@/utils/money'
 
 type Charges = Pick<
   RentEntryInput,
@@ -25,16 +27,14 @@ export function calculateTotalDue(entry: Charges): number {
   )
 }
 
-// Total due − total paid
+// Total due − total paid, in paise so the result is exact.
 export function calculateOutstanding(totalDue: number, totalPaid: number): number {
-  return roundMoney(totalDue - totalPaid)
+  return fromPaise(toPaise(totalDue) - toPaise(totalPaid))
 }
 
 export function getPaymentStatus(totalDue: number, totalPaid: number): PaymentStatus {
-  const outstanding = calculateOutstanding(totalDue, totalPaid)
-
-  if (outstanding === 0) return 'paid'
-  if (totalPaid === 0) return 'unpaid'
+  if (toPaise(totalDue) - toPaise(totalPaid) <= 0) return 'paid'
+  if (toPaise(totalPaid) === 0) return 'unpaid'
   return 'partially_paid'
 }
 
@@ -48,7 +48,21 @@ export function formatPaymentStatus(status: PaymentStatus): string {
   return PAYMENT_STATUS_LABELS[status]
 }
 
-type Bill = Charges & Pick<RentEntryInput, 'totalPaid'>
+// Total paid for a bill is always the sum of its payment records, added as paise.
+export function sumPayments(payments: Pick<Payment, 'amount'>[]): number {
+  return fromPaise(payments.reduce((sum, payment) => sum + toPaise(payment.amount), 0))
+}
+
+// Newest received first; payments received the same day by when they were recorded.
+// Copies first: sort() would reorder the caller's array.
+export function sortPaymentsNewestFirst(payments: Payment[]): Payment[] {
+  return [...payments].sort(
+    (a, b) =>
+      b.paidDate.localeCompare(a.paidDate) ||
+      b.createdAt.localeCompare(a.createdAt) ||
+      b.id.localeCompare(a.id),
+  )
+}
 
 export interface EntryAmounts {
   totalDue: number
@@ -58,15 +72,22 @@ export interface EntryAmounts {
 }
 
 // Everything derived for one bill, so every screen calculates it the same way.
-export function getEntryAmounts(entry: Bill): EntryAmounts {
+// `totalPaid` comes from the bill's payments (sumPayments / the store's getTotalPaid).
+export function getEntryAmounts(entry: Charges, totalPaid: number): EntryAmounts {
   const totalDue = calculateTotalDue(entry)
 
   return {
     totalDue,
-    totalPaid: entry.totalPaid,
-    outstanding: calculateOutstanding(totalDue, entry.totalPaid),
-    status: getPaymentStatus(totalDue, entry.totalPaid),
+    totalPaid,
+    outstanding: calculateOutstanding(totalDue, totalPaid),
+    status: getPaymentStatus(totalDue, totalPaid),
   }
+}
+
+// A bill with what has been paid against it, as the history screens list it.
+export interface BilledEntry<T extends Charges = Charges> {
+  entry: T
+  totalPaid: number
 }
 
 export interface EntryTotals {
@@ -76,22 +97,22 @@ export interface EntryTotals {
 }
 
 // Sums the given bills only. The deposit is deliberately not applied: that needs a business rule.
-export function sumEntryAmounts(entries: Bill[]): EntryTotals {
-  const totals = entries.reduce(
-    (sum, entry) => {
-      const amounts = getEntryAmounts(entry)
+export function sumEntryAmounts(bills: BilledEntry[]): EntryTotals {
+  const paise = bills.reduce(
+    (sum, bill) => {
+      const amounts = getEntryAmounts(bill.entry, bill.totalPaid)
       return {
-        totalBilled: sum.totalBilled + amounts.totalDue,
-        totalPaid: sum.totalPaid + amounts.totalPaid,
-        outstanding: sum.outstanding + amounts.outstanding,
+        totalBilled: sum.totalBilled + toPaise(amounts.totalDue),
+        totalPaid: sum.totalPaid + toPaise(amounts.totalPaid),
+        outstanding: sum.outstanding + toPaise(amounts.outstanding),
       }
     },
     { totalBilled: 0, totalPaid: 0, outstanding: 0 },
   )
 
   return {
-    totalBilled: roundMoney(totals.totalBilled),
-    totalPaid: roundMoney(totals.totalPaid),
-    outstanding: roundMoney(totals.outstanding),
+    totalBilled: fromPaise(paise.totalBilled),
+    totalPaid: fromPaise(paise.totalPaid),
+    outstanding: fromPaise(paise.outstanding),
   }
 }

@@ -1,17 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, User } from '@lucide/vue'
+import { ArrowLeft, CircleCheck, Plus, User } from '@lucide/vue'
 
+import PaymentHistory from '@/components/rent/PaymentHistory.vue'
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
+import RecordPaymentForm from '@/components/rent/RecordPaymentForm.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
 import { formatINR } from '@/utils/currency'
-import { formatDateValue, formatMonthValue, formatTimestamp } from '@/utils/date'
-import { calculateElectricity, getEntryAmounts } from '@/utils/rentCalculations'
+import type { PaymentInput } from '@/types/payment'
+import { formatMonthValue, formatTimestamp } from '@/utils/date'
+import {
+  calculateElectricity,
+  getEntryAmounts,
+  sortPaymentsNewestFirst,
+} from '@/utils/rentCalculations'
 
 const props = defineProps<{
   tenantId: string
@@ -38,7 +52,57 @@ const entry = computed(
     ) ?? null,
 )
 
-const amounts = computed(() => (entry.value ? getEntryAmounts(entry.value) : null))
+// Paid and outstanding come from the entry's payment records.
+const amounts = computed(() =>
+  entry.value ? getEntryAmounts(entry.value, rentEntryStore.getTotalPaid(entry.value.id)) : null,
+)
+
+const payments = computed(() =>
+  entry.value ? sortPaymentsNewestFirst(rentEntryStore.getPaymentsForEntry(entry.value.id)) : [],
+)
+
+const paymentDialogOpen = ref(false)
+const savingPayment = ref(false)
+const paymentError = ref<string | null>(null)
+const confirmation = ref<string | null>(null)
+
+function openPaymentDialog() {
+  paymentError.value = null
+  confirmation.value = null
+  paymentDialogOpen.value = true
+}
+
+// The store re-checks the outstanding balance and writes before updating state, so the
+// confirmation only appears once the payment is saved. On failure the dialog stays open with
+// the entered values.
+function handleSavePayment({ id, input }: { id: string; input: PaymentInput }) {
+  if (savingPayment.value) return
+
+  savingPayment.value = true
+  paymentError.value = null
+
+  try {
+    const payment = rentEntryStore.addPayment(input, id)
+    paymentDialogOpen.value = false
+    confirmation.value = `Payment of ${formatINR(payment.amount)} recorded.`
+  } catch (error) {
+    paymentError.value =
+      error instanceof Error ? error.message : 'Unable to save the payment. Please try again.'
+  } finally {
+    savingPayment.value = false
+  }
+}
+
+// The router reuses this page when only the ids in the URL change: nothing from one entry
+// should show on another.
+watch(
+  () => [props.tenantId, props.entryId],
+  () => {
+    paymentDialogOpen.value = false
+    paymentError.value = null
+    confirmation.value = null
+  },
+)
 
 // Rent and rate come from the entry, not the tenant: the tenant's current rates may have changed.
 const charges = computed(() => {
@@ -137,6 +201,14 @@ function goToHistory() {
           <User class="size-4" aria-hidden="true" />
           {{ tenant.name }} · Flat {{ tenant.flatNumber }}
         </p>
+        <p
+          v-if="confirmation"
+          class="mt-4 flex items-center gap-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
+          role="status"
+        >
+          <CircleCheck class="size-5 shrink-0" aria-hidden="true" />
+          {{ confirmation }}
+        </p>
       </header>
 
       <div class="grid gap-6 lg:grid-cols-2">
@@ -165,11 +237,28 @@ function goToHistory() {
               <dt>Outstanding</dt>
               <dd class="tabular-nums">{{ formatINR(amounts.outstanding) }}</dd>
             </div>
-            <div class="flex justify-between gap-4">
-              <dt class="text-muted-foreground">Paid date</dt>
-              <dd>{{ entry.paidDate ? formatDateValue(entry.paidDate) : '—' }}</dd>
-            </div>
           </dl>
+
+          <p
+            v-if="amounts.status === 'paid'"
+            class="mt-4 flex h-11 items-center justify-center gap-2 rounded-lg bg-success/10 font-medium text-success"
+            data-testid="fully-paid"
+          >
+            <CircleCheck class="size-5" aria-hidden="true" />
+            Fully paid
+          </p>
+          <Button v-else class="mt-4 h-11 w-full" @click="openPaymentDialog">
+            <Plus aria-hidden="true" />
+            Record Payment
+          </Button>
+        </section>
+
+        <section
+          aria-labelledby="payment-history-heading"
+          class="rounded-xl border p-4 sm:p-6 lg:col-span-2"
+        >
+          <h2 id="payment-history-heading" class="mb-3 font-semibold">Payment history</h2>
+          <PaymentHistory :payments="payments" />
         </section>
 
         <section aria-labelledby="other-heading" class="rounded-xl border p-4 sm:p-6 lg:col-span-2">
@@ -189,6 +278,25 @@ function goToHistory() {
           </dl>
         </section>
       </div>
+
+      <Dialog v-model:open="paymentDialogOpen">
+        <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record Payment</DialogTitle>
+            <DialogDescription>Money received against this bill.</DialogDescription>
+          </DialogHeader>
+          <RecordPaymentForm
+            :tenant="tenant"
+            :entry-id="entry.id"
+            :billing-month="entry.billingMonth"
+            :outstanding="amounts.outstanding"
+            :saving="savingPayment"
+            :save-error="paymentError"
+            @save="handleSavePayment"
+            @cancel="paymentDialogOpen = false"
+          />
+        </DialogContent>
+      </Dialog>
     </template>
   </AppLayout>
 </template>

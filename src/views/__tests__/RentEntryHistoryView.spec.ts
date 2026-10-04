@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import router from '@/router'
 import { LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
-import { makeEntry, openPage, storeEntries } from '@/test/rentEntries'
-import { RENT_ENTRIES_STORAGE_KEY } from '@/utils/rentEntryStorage'
+import { makeEntry, makePayment, openPage, storeLedger } from '@/test/rentEntries'
+import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 
 vi.mock('@/services/auth.service', () => ({
   authService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), logout: vi.fn() },
@@ -37,18 +37,8 @@ function button(label: string) {
   return match
 }
 
-const october = makeEntry({
-  id: 'oct',
-  billingMonth: '2026-10',
-  totalPaid: 10000,
-  paidDate: '2026-10-02',
-})
-const september = makeEntry({
-  id: 'sep',
-  billingMonth: '2026-09',
-  totalPaid: 15750,
-  paidDate: '2026-09-10',
-})
+const october = makeEntry({ id: 'oct', billingMonth: '2026-10' })
+const september = makeEntry({ id: 'sep', billingMonth: '2026-09' })
 const august = makeEntry({ id: 'aug', billingMonth: '2026-08' })
 const lastYear = makeEntry({ id: 'dec', billingMonth: '2025-12' })
 const otherTenant = makeEntry({
@@ -57,6 +47,21 @@ const otherTenant = makeEntry({
   billingMonth: '2026-07',
   rentAmount: 18000,
 })
+
+// October: ₹10,000 of ₹15,750 paid. September: paid in full over two payments.
+const payments = [
+  makePayment({ id: 'oct-1', entryId: 'oct', amount: 10000, paidDate: '2026-10-02' }),
+  makePayment({ id: 'sep-1', entryId: 'sep', amount: 10000, paidDate: '2026-09-05' }),
+  makePayment({ id: 'sep-2', entryId: 'sep', amount: 5750, paidDate: '2026-09-10' }),
+]
+
+function storeEntries(...entries: ReturnType<typeof makeEntry>[]) {
+  const ids = new Set(entries.map((entry) => entry.id))
+  storeLedger(
+    entries,
+    payments.filter((payment) => ids.has(payment.entryId)),
+  )
+}
 
 beforeEach(() => {
   localStorage.clear()
@@ -166,7 +171,7 @@ describe('RentEntryHistoryView', () => {
   })
 
   it('shows a load error and no zero-balance summary when stored data can’t load, then retries', async () => {
-    localStorage.setItem(RENT_ENTRIES_STORAGE_KEY, '{not json')
+    localStorage.setItem(RENT_LEDGER_STORAGE_KEY, '{not json')
     await openHistory()
 
     expect(view!.get('[role="alert"]').text()).toContain(LOAD_ERROR_MESSAGE)
