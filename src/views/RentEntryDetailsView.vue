@@ -20,6 +20,7 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
 import { formatINR } from '@/utils/currency'
 import type { PaymentInput } from '@/types/payment'
+import type { PaymentReceipt } from '@/types/receipt'
 import { formatMonthValue, formatTimestamp } from '@/utils/date'
 import {
   calculateElectricity,
@@ -93,6 +94,34 @@ function handleSavePayment({ id, input }: { id: string; input: PaymentInput }) {
   }
 }
 
+const issuingReceipt = ref(false)
+const receiptError = ref<string | null>(null)
+
+function goToReceipt(receipt: PaymentReceipt) {
+  router.push({
+    name: 'payment-receipt',
+    params: { tenantId: props.tenantId, entryId: props.entryId, receiptId: receipt.id },
+  })
+}
+
+// Saved before navigating, so the receipt page always opens a stored receipt. A failure shows
+// here and leaves the payment as it was: it's already recorded.
+function handleIssueReceipt(paymentId: string) {
+  if (issuingReceipt.value) return
+
+  issuingReceipt.value = true
+  receiptError.value = null
+
+  try {
+    goToReceipt(rentEntryStore.issueReceipt(paymentId))
+  } catch (error) {
+    receiptError.value =
+      error instanceof Error ? error.message : 'Unable to issue the receipt. Please try again.'
+  } finally {
+    issuingReceipt.value = false
+  }
+}
+
 // The router reuses this page when only the ids in the URL change: nothing from one entry
 // should show on another.
 watch(
@@ -101,6 +130,7 @@ watch(
     paymentDialogOpen.value = false
     paymentError.value = null
     confirmation.value = null
+    receiptError.value = null
   },
 )
 
@@ -258,7 +288,21 @@ function goToHistory() {
           class="rounded-xl border p-4 sm:p-6 lg:col-span-2"
         >
           <h2 id="payment-history-heading" class="mb-3 font-semibold">Payment history</h2>
-          <PaymentHistory :payments="payments" />
+          <p
+            v-if="receiptError"
+            class="mb-3 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            role="alert"
+            data-testid="receipt-error"
+          >
+            {{ receiptError }}
+          </p>
+          <PaymentHistory
+            :payments="payments"
+            :receipts="rentEntryStore.receipts"
+            :issuing="issuingReceipt"
+            @issue-receipt="handleIssueReceipt"
+            @view-receipt="goToReceipt"
+          />
         </section>
 
         <section aria-labelledby="other-heading" class="rounded-xl border p-4 sm:p-6 lg:col-span-2">

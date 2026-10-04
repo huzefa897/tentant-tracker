@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatINR } from '@/utils/currency'
+import { formatAmount, formatINR, formatINRWithPaise } from '@/utils/currency'
 
 describe('formatINR', () => {
   it.each([
@@ -30,5 +30,24 @@ describe('formatINR', () => {
   it('never prints negative zero', () => {
     expect(formatINR(-0)).toBe('₹0')
     expect(formatINR(-0.001)).toBe('₹0')
+  })
+})
+
+describe('formatAmount', () => {
+  it.each([
+    [17000, '17,000.00'],
+    [100000, '1,00,000.00'],
+    [6, '6.00'],
+    [4712.5, '4,712.50'],
+    [-0.001, '0.00'],
+  ])('%d -> %s', (value, expected) => {
+    expect(formatAmount(value)).toBe(expected)
+  })
+})
+
+describe('formatINRWithPaise', () => {
+  it('always shows paise', () => {
+    expect(formatINRWithPaise(17654)).toBe('₹17,654.00')
+    expect(formatINRWithPaise(4712.5)).toBe('₹4,712.50')
   })
 })

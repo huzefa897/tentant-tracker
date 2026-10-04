@@ -130,3 +130,52 @@
     @apply font-sans;
   }
 }
+
+/* Printing (or saving as PDF) a page shows only its document, e.g. a payment receipt: the app's
+   backdrop, card, header and toolbars are removed. Unlayered, so these win over utilities. */
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+
+  body {
+    background: white;
+    color: black;
+  }
+
+  .app-navigation,
+  .app-backdrop,
+  .receipt-toolbar {
+    display: none !important;
+  }
+
+  .app-shell,
+  .app-card,
+  .app-content {
+    min-height: 0;
+    overflow: visible;
+    margin: 0;
+    padding: 0;
+    max-width: none;
+    background: white;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /* No fixed height: a long receipt flows onto a second page instead of being clipped. The
+     document keeps its own border, and its coloured figures print in colour. */
+  .receipt-document {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    box-shadow: none;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .receipt-document section {
+    break-inside: avoid;
+  }
+}

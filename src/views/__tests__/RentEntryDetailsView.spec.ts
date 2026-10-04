@@ -3,9 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { mockTenants } from '@/data/tenants.mock'
 import router from '@/router'
-import { LOAD_ERROR_MESSAGE, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
+import {
+  LOAD_ERROR_MESSAGE,
+  RECEIPT_SAVE_ERROR_MESSAGE,
+  SAVE_ERROR_MESSAGE,
+  useRentEntryStore,
+} from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
-import { makeEntry, makePayment, openPage, storeEntries, storeLedger } from '@/test/rentEntries'
+import {
+  makeEntry,
+  makePayment,
+  makeReceipt,
+  openPage,
+  storeEntries,
+  storeLedger,
+} from '@/test/rentEntries'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 
 vi.mock('@/services/auth.service', () => ({
@@ -56,10 +68,12 @@ function storeWithPayments() {
   storeLedger([entry], payments)
 }
 
+// Date, amount and notes; the receipt action is checked separately.
 function paymentRows() {
   return view!
     .findAll('[data-testid="payment-row"]')
     .map((row) => row.findAll('td').map((cell) => cell.text()))
+    .map((cells) => cells.slice(0, 3))
 }
 
 beforeEach(() => {
@@ -374,5 +388,97 @@ describe('RentEntryDetailsView recording a payment', () => {
 
     expect(body.find('[role="dialog"]').exists()).toBe(false)
     expect(paymentRows()).toHaveLength(3)
+  })
+})
+
+describe('RentEntryDetailsView receipts', () => {
+  // p1 already has a receipt; p2 doesn't.
+  const p1Receipt = makeReceipt({
+    id: 'r1',
+    reference: 'RCP-202-202609',
+    paymentId: 'p1',
+    entryId: 'sep',
+    charges: { rentAmount: 14000, electricityUnits: 75, electricityRate: 5.5, waterAmount: 300 },
+    totalDue: 14712.5,
+    totalPaid: 6000,
+    outstanding: 8712.5,
+    paymentAmount: 6000,
+    paidDate: '2026-10-01',
+  })
+
+  function receiptActions() {
+    return view!
+      .findAll('[data-testid="payment-row"]')
+      .map((row) => row.get('td:last-child').text())
+  }
+
+  function rowButton(paidDate: string) {
+    const row = view!
+      .findAll('[data-testid="payment-row"]')
+      .find((item) => item.get('td').text() === paidDate)
+    return row!.get('button')
+  }
+
+  it('offers Issue receipt or View receipt for each payment', async () => {
+    storeLedger([entry], payments, [p1Receipt])
+    await openDetails('tenant-001', 'sep')
+
+    // Newest first: p2, then p1.
+    expect(receiptActions()).toEqual(['Issue receipt', 'View receipt'])
+  })
+
+  it('issues a receipt for that payment’s amount and opens it', async () => {
+    storeWithPayments()
+    await openDetails('tenant-001', 'sep')
+
+    await rowButton('2 Oct 2026').trigger('click')
+
+    const [receipt] = useRentEntryStore().receipts
+    expect(receipt).toMatchObject({
+      paymentId: 'p2',
+      paymentAmount: 4000,
+      reference: 'RCP-202-202609-2',
+      totalPaid: 10000,
+      outstanding: 4712.5,
+    })
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.fullPath).toBe(
+        `/tenants/tenant-001/entries/sep/receipts/${receipt!.id}`,
+      ),
+    )
+    await flushPromises()
+    expect(view!.get('[data-testid="receipt-amount"]').text()).toBe('₹4,000.00')
+  })
+
+  it('opens the existing receipt with View receipt', async () => {
+    storeLedger([entry], payments, [p1Receipt])
+    await openDetails('tenant-001', 'sep')
+
+    await rowButton('1 Oct 2026').trigger('click')
+
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.fullPath).toBe(
+        '/tenants/tenant-001/entries/sep/receipts/r1',
+      ),
+    )
+    expect(useRentEntryStore().receipts).toHaveLength(1)
+  })
+
+  it('shows an inline error, and keeps the payment, when the receipt cannot be saved', async () => {
+    storeWithPayments()
+    await openDetails('tenant-001', 'sep')
+    const before = localStorage.getItem(RENT_LEDGER_STORAGE_KEY)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError')
+    })
+
+    await rowButton('2 Oct 2026').trigger('click')
+    await flushPromises()
+
+    expect(view!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_SAVE_ERROR_MESSAGE)
+    expect(router.currentRoute.value.name).toBe('rent-entry-details')
+    expect(paymentRows()).toHaveLength(2)
+    expect(receiptActions()).toEqual(['Issue receipt', 'Issue receipt'])
+    expect(localStorage.getItem(RENT_LEDGER_STORAGE_KEY)).toBe(before)
   })
 })

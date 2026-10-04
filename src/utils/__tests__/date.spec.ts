@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 
 import {
   formatDateValue,
+  formatDateValueNumeric,
   formatMonthValue,
   formatOrdinal,
   formatTimestamp,
+  formatTimestampDate,
   isValidDateValue,
   isValidIsoTimestamp,
   isValidMonthValue,
+  previousMonthValue,
   toDateValue,
   toMonthValue,
 } from '@/utils/date'
@@ -118,5 +121,35 @@ describe('formatTimestamp', () => {
 
   it('returns invalid input unchanged', () => {
     expect(formatTimestamp('nope')).toBe('nope')
+  })
+})
+
+describe('formatTimestampDate', () => {
+  it('shows the day in the viewer’s time zone', () => {
+    expect(formatTimestampDate(new Date(2026, 9, 3, 23, 59).toISOString())).toBe('3 Oct 2026')
+  })
+
+  it('returns invalid input unchanged', () => {
+    expect(formatTimestampDate('nope')).toBe('nope')
+  })
+})
+
+describe('previousMonthValue', () => {
+  it.each([
+    ['2026-09', '2026-08'],
+    ['2026-01', '2025-12'],
+    ['nope', 'nope'],
+  ])('%s -> %s', (value, expected) => {
+    expect(previousMonthValue(value)).toBe(expected)
+  })
+})
+
+describe('formatDateValueNumeric', () => {
+  it('puts the day first', () => {
+    expect(formatDateValueNumeric('2026-10-04')).toBe('04/10/2026')
+  })
+
+  it('returns invalid input unchanged', () => {
+    expect(formatDateValueNumeric('2026-02-30')).toBe('2026-02-30')
   })
 })

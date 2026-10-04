@@ -18,3 +18,18 @@ export function formatINR(value: number): string {
 
   return (Number.isInteger(rounded) ? wholeRupees : withPaise).format(rounded)
 }
+
+const twoDecimals = new Intl.NumberFormat('en-IN', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+// 17000 -> "17,000.00", for amount columns headed "(₹)".
+export function formatAmount(value: number): string {
+  return twoDecimals.format(Math.round(value * 100) / 100 + 0)
+}
+
+// 17654 -> "₹17,654.00": always with paise, as on receipts.
+export function formatINRWithPaise(value: number): string {
+  return withPaise.format(Math.round(value * 100) / 100 + 0)
+}

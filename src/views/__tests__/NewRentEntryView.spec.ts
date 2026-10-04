@@ -5,7 +5,12 @@ import { RouterView } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
-import { LOAD_ERROR_MESSAGE, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
+import {
+  LOAD_ERROR_MESSAGE,
+  RECEIPT_SAVE_ERROR_MESSAGE,
+  SAVE_ERROR_MESSAGE,
+  useRentEntryStore,
+} from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import { openPage } from '@/test/rentEntries'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
@@ -142,6 +147,55 @@ describe('NewRentEntryView', () => {
     await flushPromises()
 
     expect(router.currentRoute.value.name).toBe('dashboard')
+  })
+
+  describe('receipt from the confirmation', () => {
+    it('issues the initial payment’s receipt and opens it, where it can be saved as PDF', async () => {
+      await openEntryPage()
+      await fill(validEntry)
+      await save()
+
+      await button('Receipt (PDF)').trigger('click')
+
+      const store = useRentEntryStore()
+      const [receipt] = store.receipts
+      expect(receipt).toMatchObject({ paymentId: store.payments[0]!.id, paymentAmount: 10000 })
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('payment-receipt'))
+      expect(router.currentRoute.value.params).toEqual({
+        tenantId: 'tenant-001',
+        entryId: store.entries[0]!.id,
+        receiptId: receipt!.id,
+      })
+      await flushPromises()
+      expect(button('Print / Save as PDF').exists()).toBe(true)
+      expect(body.find('[role="alertdialog"]').exists()).toBe(false)
+    })
+
+    it('is not offered when nothing was paid', async () => {
+      await openEntryPage()
+      await fill({ ...validEntry, paymentAmount: '0', paidDate: '' })
+      await save()
+
+      expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+      expect(body.findAll('button').some((b) => b.text() === 'Receipt (PDF)')).toBe(false)
+    })
+
+    it('shows an inline error, and stays on the confirmation, when the receipt cannot be saved', async () => {
+      await openEntryPage()
+      await fill(validEntry)
+      await save()
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError')
+      })
+
+      await button('Receipt (PDF)').trigger('click')
+      await flushPromises()
+
+      expect(app!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_SAVE_ERROR_MESSAGE)
+      expect(router.currentRoute.value.name).toBe('rent-entry-new')
+      expect(useRentEntryStore().payments).toHaveLength(1)
+      expect(useRentEntryStore().receipts).toEqual([])
+    })
   })
 
   it('shows a duplicate-entry error and keeps the form', async () => {

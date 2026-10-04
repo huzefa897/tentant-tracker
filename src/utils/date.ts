@@ -89,3 +89,26 @@ export function formatTimestamp(value: string): string {
 
   return new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
 }
+
+// ISO timestamp -> "3 Oct 2026", the day it was in the viewer's time zone.
+export function formatTimestampDate(value: string): string {
+  if (!isValidIsoTimestamp(value)) return value
+
+  return formatDateValue(toDateValue(new Date(value)))
+}
+
+// "2026-01" -> "2025-12". Invalid input is returned unchanged.
+export function previousMonthValue(value: string): string {
+  const match = MONTH_VALUE.exec(value)
+  if (!match) return value
+
+  return toMonthValue(new Date(Number(match[1]), Number(match[2]) - 2, 1))
+}
+
+// "2026-10-04" -> "04/10/2026" (day first, as on Indian receipts).
+export function formatDateValueNumeric(value: string): string {
+  if (!isValidDateValue(value)) return value
+
+  const [year, month, day] = value.split('-')
+  return `${day}/${month}/${year}`
+}

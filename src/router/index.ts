@@ -60,6 +60,13 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/tenants/:tenantId/entries/:entryId/receipts/:receiptId',
+      name: 'payment-receipt',
+      component: () => import('@/views/PaymentReceiptView.vue'),
+      props: true,
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'login' },
     },
