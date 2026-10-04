@@ -59,12 +59,15 @@ export function renderReceiptPdf(content: ReceiptContent, fonts: ReceiptFonts): 
   const frames: { page: number; top: number; bottom: number }[] = []
   let frameTop = MARGIN
 
-  function ensureSpace(height: number) {
-    if (y + height <= BOTTOM) return
+  function newPage() {
     frames.push({ page: doc.getNumberOfPages(), top: frameTop, bottom: PAGE_H - MARGIN })
     doc.addPage()
     frameTop = MARGIN
     y = MARGIN + PAD
+  }
+
+  function ensureSpace(height: number) {
+    if (y + height > BOTTOM) newPage()
   }
 
   // Letter-spaced text; jsPDF's own centring ignores character spacing.
@@ -255,27 +258,41 @@ export function renderReceiptPdf(content: ReceiptContent, fonts: ReceiptFonts): 
   doc.text(content.summary.amount, amountCentre, y + 15, { align: 'center' })
   y += summaryH + 5
 
-  // Notes / remarks
+  // Notes / remarks. Laid out line by line: notes can run past the page (500 characters of short
+  // lines), so the box continues on the next page instead of cutting text off.
   use('regular', 8)
   const paragraphs = content.remarks.map((text) => doc.splitTextToSize(text, W - 10) as string[])
   const remarksLh = lineHeight(8)
-  const remarksH =
-    paragraphs.reduce((sum, lines) => sum + lines.length * remarksLh, 0) +
-    (paragraphs.length - 1) * 2 +
-    6
-  ensureSpace(remarksH + 6)
+  const boxPad = 3
+  let boxTop = 0
+
+  function closeRemarksBox() {
+    doc.setDrawColor(...RULE)
+    doc.setLineWidth(0.25)
+    doc.rect(X, boxTop, W, y + boxPad - boxTop)
+  }
+
+  ensureSpace(2.5 + 2 * boxPad + remarksLh + 6)
   heading('Notes / Remarks', X, null)
   y += 2.5
-  doc.setDrawColor(...RULE)
-  doc.setLineWidth(0.25)
-  doc.rect(X, y, W, remarksH)
-  let textTop = y + 3 + remarksLh * 0.75
-  use('regular', 8)
-  for (const lines of paragraphs) {
-    doc.text(lines, X + 5, textTop, { lineHeightFactor: 1.35 })
-    textTop += lines.length * remarksLh + 2
-  }
-  y += remarksH + 11
+  boxTop = y
+  y += boxPad
+  paragraphs.forEach((lines, index) => {
+    if (index > 0) y += 2
+    for (const line of lines) {
+      if (y + remarksLh + boxPad > BOTTOM) {
+        closeRemarksBox()
+        newPage()
+        boxTop = y
+        y += boxPad
+      }
+      use('regular', 8)
+      doc.text(line, X + 5, y + remarksLh * 0.75)
+      y += remarksLh
+    }
+  })
+  closeRemarksBox()
+  y += boxPad + 11
 
   // Signatures and footer
   ensureSpace(16)
