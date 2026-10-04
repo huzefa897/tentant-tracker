@@ -166,8 +166,10 @@ describe('NewRentEntryView', () => {
         entryId: store.entries[0]!.id,
         receiptId: receipt!.id,
       })
+      expect(router.currentRoute.value.query).toEqual({ from: 'new-entry' })
       await flushPromises()
       expect(button('Print / Save as PDF').exists()).toBe(true)
+      expect(button('Back to Dashboard').exists()).toBe(true)
       expect(body.find('[role="alertdialog"]').exists()).toBe(false)
     })
 

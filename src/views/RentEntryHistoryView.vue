@@ -106,6 +106,7 @@ function viewReceipt(entryId: string) {
     router.push({
       name: 'payment-receipt',
       params: { tenantId: props.tenantId, entryId, receiptId: receipt.id },
+      query: { from: 'history' },
     })
   } catch (error) {
     receiptError.value =

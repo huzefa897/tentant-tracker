@@ -228,6 +228,21 @@ describe('RentEntryHistoryView', () => {
       entryId: 'sep',
       receiptId: receipt!.id,
     })
+    expect(router.currentRoute.value.query).toEqual({ from: 'history' })
+  })
+
+  it('comes back to Previous Entries from the receipt', async () => {
+    storeEntries(september)
+    await openHistory()
+    await view!.get('[aria-label="View or print receipt for September 2026"]').trigger('click')
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('payment-receipt'))
+    await flushPromises()
+
+    await button('Back to Previous Entries').trigger('click')
+
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.fullPath).toBe('/tenants/tenant-001/entries'),
+    )
   })
 
   it('reopens the same receipt instead of issuing another', async () => {

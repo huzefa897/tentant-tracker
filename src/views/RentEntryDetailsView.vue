@@ -101,6 +101,7 @@ function goToReceipt(receipt: PaymentReceipt) {
   router.push({
     name: 'payment-receipt',
     params: { tenantId: props.tenantId, entryId: props.entryId, receiptId: receipt.id },
+    query: { from: 'entry' },
   })
 }
 

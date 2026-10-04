@@ -95,6 +95,7 @@ function openReceipt() {
     router.push({
       name: 'payment-receipt',
       params: { tenantId: entry.tenantId, entryId: entry.id, receiptId: receipt.id },
+      query: { from: 'new-entry' },
     })
   } catch (error) {
     receiptError.value =

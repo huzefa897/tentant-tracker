@@ -443,7 +443,7 @@ describe('RentEntryDetailsView receipts', () => {
     })
     await vi.waitFor(() =>
       expect(router.currentRoute.value.fullPath).toBe(
-        `/tenants/tenant-001/entries/sep/receipts/${receipt!.id}`,
+        `/tenants/tenant-001/entries/sep/receipts/${receipt!.id}?from=entry`,
       ),
     )
     await flushPromises()
@@ -458,7 +458,7 @@ describe('RentEntryDetailsView receipts', () => {
 
     await vi.waitFor(() =>
       expect(router.currentRoute.value.fullPath).toBe(
-        '/tenants/tenant-001/entries/sep/receipts/r1',
+        '/tenants/tenant-001/entries/sep/receipts/r1?from=entry',
       ),
     )
     expect(useRentEntryStore().receipts).toHaveLength(1)
