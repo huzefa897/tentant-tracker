@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronRight, Printer } from '@lucide/vue'
+import { ChevronRight, Download } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import { Button } from '@/components/ui/button'
@@ -12,12 +12,14 @@ import { type BilledEntry, getEntryAmounts } from '@/utils/rentCalculations'
 // Shown in the given order; the page sorts and filters, and sums each bill's payments.
 const props = defineProps<{
   bills: BilledEntry<RentEntry>[]
+  // The bill whose receipt is being prepared; every receipt button waits until it's done.
+  downloadingEntryId?: string | null
 }>()
 
 const emit = defineEmits<{
   view: [entryId: string]
   // Only offered for bills with a payment: a receipt confirms money received.
-  'view-receipt': [entryId: string]
+  'download-receipt': [entryId: string]
 }>()
 
 // Calculated once and shared by the table and the cards.
@@ -70,11 +72,12 @@ const rows = computed(() =>
                   v-if="row.totalPaid > 0"
                   variant="outline"
                   class="h-10"
-                  :aria-label="`View or print receipt for ${row.month}`"
-                  @click="emit('view-receipt', row.id)"
+                  :disabled="!!downloadingEntryId"
+                  :aria-label="`Download receipt for ${row.month}`"
+                  @click="emit('download-receipt', row.id)"
                 >
-                  <Printer aria-hidden="true" />
-                  Print Receipt
+                  <Download aria-hidden="true" />
+                  {{ downloadingEntryId === row.id ? 'Preparing…' : 'Download Receipt' }}
                 </Button>
               </div>
             </td>
@@ -123,11 +126,12 @@ const rows = computed(() =>
             v-if="row.totalPaid > 0"
             variant="outline"
             class="h-11 w-full"
-            :aria-label="`View or print receipt for ${row.month}`"
-            @click="emit('view-receipt', row.id)"
+            :disabled="!!downloadingEntryId"
+            :aria-label="`Download receipt for ${row.month}`"
+            @click="emit('download-receipt', row.id)"
           >
-            <Printer aria-hidden="true" />
-            Print Receipt
+            <Download aria-hidden="true" />
+            {{ downloadingEntryId === row.id ? 'Preparing…' : 'Download Receipt' }}
           </Button>
         </div>
       </li>

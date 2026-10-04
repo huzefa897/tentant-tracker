@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import PaymentHistory from '@/components/rent/PaymentHistory.vue'
-import { makePayment, makeReceipt } from '@/test/rentEntries'
+import { makePayment } from '@/test/rentEntries'
 
 function cells(wrapper: ReturnType<typeof mount>) {
   return wrapper
@@ -18,48 +18,40 @@ describe('PaymentHistory', () => {
           makePayment({ id: 'b', paidDate: '2026-10-10', amount: 3000, notes: 'Bank transfer' }),
           makePayment({ id: 'a', paidDate: '2026-10-03', amount: 10000, notes: '' }),
         ],
-        receipts: [makeReceipt({ paymentId: 'b' })],
       },
     })
 
     expect(cells(wrapper)).toEqual([
-      ['10 Oct 2026', '₹3,000', 'Bank transfer', 'View receipt'],
-      ['3 Oct 2026', '₹10,000', '—', 'Issue receipt'],
+      ['10 Oct 2026', '₹3,000', 'Bank transfer', 'Download receipt'],
+      ['3 Oct 2026', '₹10,000', '—', 'Download receipt'],
     ])
   })
 
-  it('emits issue-receipt with the payment id for a payment without a receipt', async () => {
+  it('emits download-receipt with the payment id', async () => {
     const wrapper = mount(PaymentHistory, {
-      props: { payments: [makePayment({ id: 'a' })], receipts: [] },
+      props: { payments: [makePayment({ id: 'b' }), makePayment({ id: 'a' })] },
     })
 
-    await wrapper.get('[data-testid="issue-receipt"]').trigger('click')
+    await wrapper.findAll('[data-testid="download-receipt"]')[1]!.trigger('click')
 
-    expect(wrapper.emitted('issue-receipt')).toEqual([['a']])
+    expect(wrapper.emitted('download-receipt')).toEqual([['a']])
   })
 
-  it('emits view-receipt with the payment’s receipt', async () => {
-    const receipt = makeReceipt({ paymentId: 'a' })
+  it('shows which receipt is being prepared and disables every button meanwhile', () => {
     const wrapper = mount(PaymentHistory, {
-      props: { payments: [makePayment({ id: 'a' })], receipts: [receipt] },
+      props: {
+        payments: [makePayment({ id: 'b' }), makePayment({ id: 'a' })],
+        downloadingPaymentId: 'a',
+      },
     })
+    const buttons = wrapper.findAll('[data-testid="download-receipt"]')
 
-    await wrapper.get('[data-testid="view-receipt"]').trigger('click')
-
-    expect(wrapper.emitted('view-receipt')).toEqual([[receipt]])
-    expect(wrapper.find('[data-testid="issue-receipt"]').exists()).toBe(false)
-  })
-
-  it('disables Issue receipt while a receipt is being issued', () => {
-    const wrapper = mount(PaymentHistory, {
-      props: { payments: [makePayment()], receipts: [], issuing: true },
-    })
-
-    expect(wrapper.get('[data-testid="issue-receipt"]').attributes('disabled')).toBeDefined()
+    expect(buttons.map((button) => button.text())).toEqual(['Download receipt', 'Preparing…'])
+    expect(buttons.every((button) => button.attributes('disabled') !== undefined)).toBe(true)
   })
 
   it('says when there are no payments', () => {
-    const wrapper = mount(PaymentHistory, { props: { payments: [], receipts: [] } })
+    const wrapper = mount(PaymentHistory, { props: { payments: [] } })
 
     expect(wrapper.text()).toBe('No payments recorded for this entry.')
     expect(wrapper.find('table').exists()).toBe(false)
@@ -67,7 +59,7 @@ describe('PaymentHistory', () => {
 
   it('shows notes as text, never HTML', () => {
     const wrapper = mount(PaymentHistory, {
-      props: { payments: [makePayment({ notes: '<b>bold</b>' })], receipts: [] },
+      props: { payments: [makePayment({ notes: '<b>bold</b>' })] },
     })
 
     expect(wrapper.find('b').exists()).toBe(false)

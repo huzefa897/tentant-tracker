@@ -10,15 +10,13 @@ import {
   useRentEntryStore,
 } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
-import {
-  makeEntry,
-  makePayment,
-  makeReceipt,
-  openPage,
-  storeEntries,
-  storeLedger,
-} from '@/test/rentEntries'
+import { RECEIPT_PDF_ERROR_MESSAGE } from '@/composables/useReceiptDownload'
+import { makeEntry, makePayment, openPage, storeEntries, storeLedger } from '@/test/rentEntries'
+import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
+
+// The PDF itself is covered by its own tests; here, which receipt gets downloaded.
+vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 vi.mock('@/services/auth.service', () => ({
   authService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), logout: vi.fn() },
@@ -392,46 +390,36 @@ describe('RentEntryDetailsView recording a payment', () => {
 })
 
 describe('RentEntryDetailsView receipts', () => {
-  // p1 already has a receipt; p2 doesn't.
-  const p1Receipt = makeReceipt({
-    id: 'r1',
-    reference: 'RCP-202-202609',
-    paymentId: 'p1',
-    entryId: 'sep',
-    charges: { rentAmount: 14000, electricityUnits: 75, electricityRate: 5.5, waterAmount: 300 },
-    totalDue: 14712.5,
-    totalPaid: 6000,
-    outstanding: 8712.5,
-    paymentAmount: 6000,
-    paidDate: '2026-10-01',
-  })
+  const download = vi.mocked(downloadReceiptPdf)
 
-  function receiptActions() {
-    return view!
-      .findAll('[data-testid="payment-row"]')
-      .map((row) => row.get('td:last-child').text())
-  }
+  beforeEach(() => {
+    download.mockReset()
+    download.mockResolvedValue()
+  })
 
   function rowButton(paidDate: string) {
     const row = view!
       .findAll('[data-testid="payment-row"]')
       .find((item) => item.get('td').text() === paidDate)
-    return row!.get('button')
+    return row!.get('[data-testid="download-receipt"]')
   }
 
-  it('offers Issue receipt or View receipt for each payment', async () => {
-    storeLedger([entry], payments, [p1Receipt])
+  it('offers a receipt download for every payment', async () => {
+    storeWithPayments()
     await openDetails('tenant-001', 'sep')
 
-    // Newest first: p2, then p1.
-    expect(receiptActions()).toEqual(['Issue receipt', 'View receipt'])
+    expect(view!.findAll('[data-testid="download-receipt"]').map((b) => b.text())).toEqual([
+      'Download receipt',
+      'Download receipt',
+    ])
   })
 
-  it('issues a receipt for that payment’s amount and opens it', async () => {
+  it('issues that payment’s receipt and downloads it, staying on the page', async () => {
     storeWithPayments()
     await openDetails('tenant-001', 'sep')
 
     await rowButton('2 Oct 2026').trigger('click')
+    await flushPromises()
 
     const [receipt] = useRentEntryStore().receipts
     expect(receipt).toMatchObject({
@@ -441,26 +429,19 @@ describe('RentEntryDetailsView receipts', () => {
       totalPaid: 10000,
       outstanding: 4712.5,
     })
-    await vi.waitFor(() =>
-      expect(router.currentRoute.value.fullPath).toBe(
-        `/tenants/tenant-001/entries/sep/receipts/${receipt!.id}?from=entry`,
-      ),
-    )
-    await flushPromises()
-    expect(view!.get('[data-testid="receipt-amount"]').text()).toBe('₹4,000.00')
+    expect(download).toHaveBeenCalledWith(receipt)
+    expect(router.currentRoute.value.name).toBe('rent-entry-details')
   })
 
-  it('opens the existing receipt with View receipt', async () => {
-    storeLedger([entry], payments, [p1Receipt])
+  it('downloads an already issued receipt without issuing another', async () => {
+    storeWithPayments()
     await openDetails('tenant-001', 'sep')
+    const issued = useRentEntryStore().issueReceipt('p1')
 
     await rowButton('1 Oct 2026').trigger('click')
+    await flushPromises()
 
-    await vi.waitFor(() =>
-      expect(router.currentRoute.value.fullPath).toBe(
-        '/tenants/tenant-001/entries/sep/receipts/r1?from=entry',
-      ),
-    )
+    expect(download).toHaveBeenCalledWith(issued)
     expect(useRentEntryStore().receipts).toHaveLength(1)
   })
 
@@ -476,9 +457,19 @@ describe('RentEntryDetailsView receipts', () => {
     await flushPromises()
 
     expect(view!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_SAVE_ERROR_MESSAGE)
-    expect(router.currentRoute.value.name).toBe('rent-entry-details')
+    expect(download).not.toHaveBeenCalled()
     expect(paymentRows()).toHaveLength(2)
-    expect(receiptActions()).toEqual(['Issue receipt', 'Issue receipt'])
     expect(localStorage.getItem(RENT_LEDGER_STORAGE_KEY)).toBe(before)
+  })
+
+  it('shows an inline error when the PDF cannot be created', async () => {
+    storeWithPayments()
+    await openDetails('tenant-001', 'sep')
+    download.mockRejectedValueOnce(new Error('offline'))
+
+    await rowButton('2 Oct 2026').trigger('click')
+    await flushPromises()
+
+    expect(view!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_PDF_ERROR_MESSAGE)
   })
 })

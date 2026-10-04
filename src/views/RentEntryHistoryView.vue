@@ -8,6 +8,7 @@ import RentEntryFilters from '@/components/rent/RentEntryFilters.vue'
 import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
 import RentEntryTotals from '@/components/rent/RentEntryTotals.vue'
 import { Button } from '@/components/ui/button'
+import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
@@ -74,7 +75,7 @@ watch(
   () => props.tenantId,
   () => {
     clearFilters()
-    receiptError.value = null
+    clearReceiptError()
   },
 )
 
@@ -90,28 +91,25 @@ function viewEntry(entryId: string) {
   router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
 }
 
-const receiptError = ref<string | null>(null)
+const {
+  downloadingPaymentId,
+  error: receiptError,
+  downloadReceipt,
+  clearError: clearReceiptError,
+} = useReceiptDownload()
 
-// The receipt for the bill's most recently recorded payment, issued first if needed (issuing
-// returns an existing receipt, so this never creates a second). It shows the bill's total paid
-// to date. Each payment's own receipt is on the summary page.
-function viewReceipt(entryId: string) {
+const downloadingEntryId = computed(() =>
+  downloadingPaymentId.value
+    ? (rentEntryStore.payments.find((payment) => payment.id === downloadingPaymentId.value)
+        ?.entryId ?? null)
+    : null,
+)
+
+// Downloads the receipt for the bill's most recently recorded payment, issued first if needed.
+// It shows the bill's total paid to date. Each payment's own receipt is on the summary page.
+function downloadBillReceipt(entryId: string) {
   const payment = rentEntryStore.getPaymentsForEntry(entryId).slice(-1)[0]
-  if (!payment) return
-
-  receiptError.value = null
-
-  try {
-    const receipt = rentEntryStore.issueReceipt(payment.id)
-    router.push({
-      name: 'payment-receipt',
-      params: { tenantId: props.tenantId, entryId, receiptId: receipt.id },
-      query: { from: 'history' },
-    })
-  } catch (error) {
-    receiptError.value =
-      error instanceof Error ? error.message : 'Unable to issue the receipt. Please try again.'
-  }
+  if (payment) downloadReceipt(payment.id)
 }
 </script>
 
@@ -209,7 +207,12 @@ function viewReceipt(entryId: string) {
           >
             {{ receiptError }}
           </p>
-          <RentEntryHistory :bills="filteredBills" @view="viewEntry" @view-receipt="viewReceipt" />
+          <RentEntryHistory
+            :bills="filteredBills"
+            :downloading-entry-id="downloadingEntryId"
+            @view="viewEntry"
+            @download-receipt="downloadBillReceipt"
+          />
         </template>
 
         <div
