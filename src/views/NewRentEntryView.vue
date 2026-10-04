@@ -20,10 +20,10 @@ import { Button } from '@/components/ui/button'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
-import type { RentEntry, RentEntryInput } from '@/types/rentEntry'
+import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
-import { calculateOutstanding, calculateTotalDue, getPaymentStatus } from '@/utils/rentCalculations'
+import { getEntryAmounts } from '@/utils/rentCalculations'
 
 // From the route (`props: true`), so the entry always belongs to the tenant in the URL.
 const props = defineProps<{
@@ -46,13 +46,13 @@ onMounted(() => rentEntryStore.initialize())
 const savedEntry = ref<RentEntry | null>(null)
 const saveError = ref<string | null>(null)
 
-// The store writes to storage first, so the confirmation only appears once the entry is saved.
-// On failure the form stays open with its values.
-function handleSave(input: RentEntryInput) {
+// The store writes the bill and any initial payment to storage together first, so the
+// confirmation only appears once both are saved. On failure the form stays open with its values.
+function handleSave(submission: NewRentEntrySubmission) {
   saveError.value = null
 
   try {
-    savedEntry.value = rentEntryStore.addEntry(input)
+    savedEntry.value = rentEntryStore.addEntry(submission)
   } catch (error) {
     saveError.value =
       error instanceof Error ? error.message : 'Unable to save the entry. Please try again.'
@@ -68,13 +68,9 @@ const savedSummary = computed(() => {
   const entry = savedEntry.value
   if (!entry) return null
 
-  const totalDue = calculateTotalDue(entry)
   return {
     month: formatMonthValue(entry.billingMonth),
-    totalDue,
-    totalPaid: entry.totalPaid,
-    outstanding: calculateOutstanding(totalDue, entry.totalPaid),
-    status: getPaymentStatus(totalDue, entry.totalPaid),
+    ...getEntryAmounts(entry, rentEntryStore.getTotalPaid(entry.id)),
   }
 })
 

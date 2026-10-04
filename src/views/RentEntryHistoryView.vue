@@ -46,18 +46,22 @@ const years = computed(() => [
 const selectedYear = ref('all')
 const selectedStatus = ref<PaymentStatus | 'all'>('all')
 
-const filteredEntries = computed(() =>
-  sortedEntries.value.filter((entry) => {
-    const matchesYear =
-      selectedYear.value === 'all' || entry.billingMonth.startsWith(`${selectedYear.value}-`)
-    const matchesStatus =
-      selectedStatus.value === 'all' || getEntryAmounts(entry).status === selectedStatus.value
+// Each bill with the sum of its payments, so filters, rows and totals agree.
+const filteredBills = computed(() =>
+  sortedEntries.value
+    .map((entry) => ({ entry, totalPaid: rentEntryStore.getTotalPaid(entry.id) }))
+    .filter(({ entry, totalPaid }) => {
+      const matchesYear =
+        selectedYear.value === 'all' || entry.billingMonth.startsWith(`${selectedYear.value}-`)
+      const matchesStatus =
+        selectedStatus.value === 'all' ||
+        getEntryAmounts(entry, totalPaid).status === selectedStatus.value
 
-    return matchesYear && matchesStatus
-  }),
+      return matchesYear && matchesStatus
+    }),
 )
 
-const totals = computed(() => sumEntryAmounts(filteredEntries.value))
+const totals = computed(() => sumEntryAmounts(filteredBills.value))
 
 function clearFilters() {
   selectedYear.value = 'all'
@@ -165,9 +169,9 @@ function viewEntry(entryId: string) {
           :years="years"
         />
 
-        <template v-if="filteredEntries.length > 0">
+        <template v-if="filteredBills.length > 0">
           <RentEntryTotals :totals="totals" />
-          <RentEntryHistory :entries="filteredEntries" @view="viewEntry" />
+          <RentEntryHistory :bills="filteredBills" @view="viewEntry" />
         </template>
 
         <div

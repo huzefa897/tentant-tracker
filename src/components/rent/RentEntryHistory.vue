@@ -7,11 +7,11 @@ import { Button } from '@/components/ui/button'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
-import { getEntryAmounts } from '@/utils/rentCalculations'
+import { type BilledEntry, getEntryAmounts } from '@/utils/rentCalculations'
 
-// Shown in the given order; the page sorts and filters.
+// Shown in the given order; the page sorts and filters, and sums each bill's payments.
 const props = defineProps<{
-  entries: RentEntry[]
+  bills: BilledEntry<RentEntry>[]
 }>()
 
 const emit = defineEmits<{
@@ -20,10 +20,10 @@ const emit = defineEmits<{
 
 // Calculated once and shared by the table and the cards.
 const rows = computed(() =>
-  props.entries.map((entry) => ({
+  props.bills.map(({ entry, totalPaid }) => ({
     id: entry.id,
     month: formatMonthValue(entry.billingMonth),
-    ...getEntryAmounts(entry),
+    ...getEntryAmounts(entry, totalPaid),
   })),
 )
 </script>

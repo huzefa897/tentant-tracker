@@ -6,7 +6,7 @@ import router from '@/router'
 import { authService } from '@/services/auth.service'
 import { LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
-import { RENT_ENTRIES_STORAGE_KEY } from '@/utils/rentEntryStorage'
+import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 import DashboardView from '@/views/DashboardView.vue'
 
 vi.mock('@/services/auth.service', () => ({
@@ -99,9 +99,10 @@ describe('DashboardView', () => {
 
     function storeEntries(...months: string[]) {
       localStorage.setItem(
-        RENT_ENTRIES_STORAGE_KEY,
+        RENT_LEDGER_STORAGE_KEY,
         JSON.stringify({
-          version: 1,
+          version: 2,
+          payments: [],
           entries: months.map((billingMonth, index) => ({
             id: `entry-${index}`,
             tenantId: 'tenant-001',
@@ -110,8 +111,6 @@ describe('DashboardView', () => {
             electricityUnits: 75,
             electricityRate: 6,
             waterAmount: 300,
-            totalPaid: 0,
-            paidDate: null,
             notes: '',
             createdAt: '2026-10-03T06:00:00.000Z',
           })),
@@ -133,14 +132,14 @@ describe('DashboardView', () => {
     })
 
     it('shows a load error with Retry instead of a count when entries are corrupt', async () => {
-      localStorage.setItem(RENT_ENTRIES_STORAGE_KEY, 'corrupt')
+      localStorage.setItem(RENT_LEDGER_STORAGE_KEY, 'corrupt')
       await mountView()
       useTenantStore().selectTenant('tenant-001')
       await flushPromises()
 
       expect(view!.text()).toContain(LOAD_ERROR_MESSAGE)
       expect(previousEntriesText()).toBe('Previous Entries')
-      expect(localStorage.getItem(RENT_ENTRIES_STORAGE_KEY)).toBe('corrupt')
+      expect(localStorage.getItem(RENT_LEDGER_STORAGE_KEY)).toBe('corrupt')
 
       storeEntries('2026-09')
       await view!

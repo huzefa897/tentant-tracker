@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest'
 
 import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
 import type { RentEntry } from '@/types/rentEntry'
+import type { BilledEntry } from '@/utils/rentCalculations'
 
-function entry(id: string, billingMonth: string, totalPaid: number): RentEntry {
-  return {
+// Each bill with the sum of its payments, as the page passes it.
+function bill(id: string, billingMonth: string, totalPaid: number): BilledEntry<RentEntry> {
+  const entry: RentEntry = {
     id,
     tenantId: 'tenant-001',
     billingMonth,
@@ -13,22 +15,17 @@ function entry(id: string, billingMonth: string, totalPaid: number): RentEntry {
     electricityUnits: 75,
     electricityRate: 6,
     waterAmount: 300,
-    totalPaid,
-    paidDate: totalPaid > 0 ? '2026-10-01' : null,
     notes: '',
     createdAt: '2026-10-03T06:00:00.000Z',
   }
+  return { entry, totalPaid }
 }
 
-const entries = [
-  entry('a', '2026-10', 10000),
-  entry('b', '2026-09', 15750),
-  entry('c', '2026-08', 0),
-]
+const bills = [bill('a', '2026-10', 10000), bill('b', '2026-09', 15750), bill('c', '2026-08', 0)]
 
 describe('RentEntryHistory', () => {
   it('shows each entry’s month, amounts and status in a table row, in the given order', () => {
-    const wrapper = mount(RentEntryHistory, { props: { entries } })
+    const wrapper = mount(RentEntryHistory, { props: { bills } })
 
     const rows = wrapper
       .findAll('[data-testid="history-row"]')
@@ -42,7 +39,7 @@ describe('RentEntryHistory', () => {
   })
 
   it('shows the same figures on mobile cards', () => {
-    const wrapper = mount(RentEntryHistory, { props: { entries } })
+    const wrapper = mount(RentEntryHistory, { props: { bills } })
     const card = wrapper.findAll('[data-testid="history-card"]')[0]!
 
     expect(card.get('h3').text()).toBe('October 2026')
@@ -53,7 +50,7 @@ describe('RentEntryHistory', () => {
   })
 
   it('emits view with the entry id from the table and the cards', async () => {
-    const wrapper = mount(RentEntryHistory, { props: { entries } })
+    const wrapper = mount(RentEntryHistory, { props: { bills } })
 
     await wrapper.get('[aria-label="View September 2026"]').trigger('click')
     await wrapper.get('[aria-label="View details for August 2026"]').trigger('click')

@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import type { RentEntryInput } from '@/types/rentEntry'
+import type { NewRentEntrySubmission } from '@/types/rentEntry'
 import type { Tenant } from '@/types/tenant'
 import { formatINR } from '@/utils/currency'
 import { toDateValue, toMonthValue } from '@/utils/date'
+import { toPaise } from '@/utils/money'
+import { type PaymentDraft, validatePaymentDraft } from '@/utils/paymentValidation'
 import {
   calculateElectricity,
   calculateOutstanding,
@@ -22,7 +24,6 @@ import {
   type NumberInputValue,
   parseRentEntryDraft,
   type RentEntryDraft,
-  type RentEntryErrors,
   toAmount,
   validateRentEntryDraft,
 } from '@/utils/rentEntryValidation'
@@ -34,7 +35,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  save: [input: RentEntryInput]
+  save: [submission: NewRentEntrySubmission]
   cancel: []
   dirtyChange: [dirty: boolean]
 }>()
@@ -51,9 +52,11 @@ const billingMonth = ref(initialMonth)
 const rentAmount = ref<NumberInputValue>(props.tenant.rentAmount)
 const electricityUnits = ref<NumberInputValue>('')
 const waterAmount = ref<NumberInputValue>(0)
-const totalPaid = ref<NumberInputValue>(0)
-const paidDate = ref('')
 const notes = ref('')
+// Optional payment received with the bill; 0 means nothing has been paid yet.
+const paymentAmount = ref<NumberInputValue>(0)
+const paidDate = ref('')
+const paymentNotes = ref('')
 
 const draft = computed<RentEntryDraft>(() => ({
   billingMonth: billingMonth.value,
@@ -61,9 +64,13 @@ const draft = computed<RentEntryDraft>(() => ({
   electricityUnits: electricityUnits.value,
   electricityRate: props.tenant.electricityRate,
   waterAmount: waterAmount.value,
-  totalPaid: totalPaid.value,
-  paidDate: paidDate.value,
   notes: notes.value,
+}))
+
+const paymentDraft = computed<PaymentDraft>(() => ({
+  amount: paymentAmount.value,
+  paidDate: paidDate.value,
+  notes: paymentNotes.value,
 }))
 
 const isDirty = computed(
@@ -72,9 +79,10 @@ const isDirty = computed(
     rentAmount.value !== props.tenant.rentAmount ||
     electricityUnits.value !== '' ||
     waterAmount.value !== 0 ||
-    totalPaid.value !== 0 ||
+    notes.value !== '' ||
+    paymentAmount.value !== 0 ||
     paidDate.value !== '' ||
-    notes.value !== '',
+    paymentNotes.value !== '',
 )
 
 // The parent owns navigation, so it needs to know whether leaving would lose changes.
@@ -82,7 +90,7 @@ watch(isDirty, (dirty) => emit('dirtyChange', dirty))
 
 // Live summary. Anything that can't be calculated yet shows "—" rather than a wrong amount.
 const paidAmount = computed(() => {
-  const amount = toAmount(totalPaid.value)
+  const amount = toAmount(paymentAmount.value)
   return amount !== null && amount >= 0 ? amount : null
 })
 const paymentRecorded = computed(() => paidAmount.value !== null && paidAmount.value > 0)
@@ -95,7 +103,9 @@ const electricityAmount = computed(() => {
 })
 const totalDue = computed(() => getDraftTotalDue(draft.value))
 const outstanding = computed(() =>
-  totalDue.value !== null && paidAmount.value !== null && paidAmount.value <= totalDue.value
+  totalDue.value !== null &&
+  paidAmount.value !== null &&
+  toPaise(paidAmount.value) <= toPaise(totalDue.value)
     ? calculateOutstanding(totalDue.value, paidAmount.value)
     : null,
 )
@@ -125,16 +135,38 @@ const summaryRows = computed(() => {
   ]
 })
 
+// Form fields by input id. The payment's own fields map to the payment rules.
+type Field = keyof RentEntryDraft | 'paymentAmount' | 'paidDate' | 'paymentNotes'
+
+// The initial payment may be up to the bill's total due; with no total yet it's unchecked here
+// and checked once the charges are valid.
+const entryErrors = computed(() => validateRentEntryDraft(draft.value))
+const paymentErrors = computed(() =>
+  validatePaymentDraft(paymentDraft.value, {
+    today,
+    outstanding: totalDue.value ?? undefined,
+    allowZero: true,
+  }),
+)
+
+const errors = computed<Partial<Record<Field, string>>>(() => ({
+  ...entryErrors.value,
+  paymentAmount: paymentErrors.value.amount,
+  paidDate: paymentErrors.value.paidDate,
+  paymentNotes: paymentErrors.value.notes,
+}))
+
+const hasErrors = computed(() => Object.values(errors.value).some(Boolean))
+
 // Errors appear once a field has been left, or for every field after Save is clicked.
-const errors = computed<RentEntryErrors>(() => validateRentEntryDraft(draft.value, today))
-const touched = reactive<Partial<Record<keyof RentEntryDraft, boolean>>>({})
+const touched = reactive<Partial<Record<Field, boolean>>>({})
 const submitted = ref(false)
 
-function errorFor(field: keyof RentEntryDraft): string | undefined {
+function errorFor(field: Field): string | undefined {
   return submitted.value || touched[field] ? errors.value[field] : undefined
 }
 
-function fieldAttrs(field: keyof RentEntryDraft) {
+function fieldAttrs(field: Field) {
   const error = errorFor(field)
   return {
     'aria-invalid': error ? true : undefined,
@@ -149,15 +181,22 @@ async function handleSubmit() {
   submitted.value = true
 
   // Validate again here: the inputs alone can't be trusted to hold valid values.
-  const result = parseRentEntryDraft(props.tenant.id, draft.value, today)
+  const entry = parseRentEntryDraft(props.tenant.id, draft.value)
 
-  if (!result.ok) {
+  if (!entry.ok || hasErrors.value) {
     await nextTick()
     formRef.value?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
     return
   }
 
-  emit('save', result.input)
+  // Validation guarantees a finite, non-negative amount; 0 means no payment.
+  const amount = paymentAmount.value as number
+
+  emit('save', {
+    entry: entry.input,
+    initialPayment:
+      amount > 0 ? { amount, paidDate: paidDate.value, notes: paymentNotes.value.trim() } : null,
+  })
 }
 
 const sectionClass = 'space-y-4 rounded-xl border bg-muted/40 p-4 sm:p-5'
@@ -334,37 +373,38 @@ const lockedClass =
         <div>
           <h2 id="payment-heading" class="font-semibold">Payment</h2>
           <p class="text-sm text-muted-foreground">
-            Record a payment, or leave it at 0 if nothing has been paid yet.
+            Record a payment received with this bill, or leave it at 0 if nothing has been paid yet.
+            Later payments can be added from the entry's details.
           </p>
         </div>
 
         <div class="grid gap-4 sm:grid-cols-2">
           <div class="space-y-2">
-            <Label for="totalPaid">Total paid (₹)</Label>
+            <Label for="paymentAmount">Amount paid (₹)</Label>
             <div class="relative">
               <IndianRupee
                 class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden="true"
               />
               <Input
-                id="totalPaid"
-                v-model.number="totalPaid"
+                id="paymentAmount"
+                v-model.number="paymentAmount"
                 type="number"
                 inputmode="decimal"
                 min="0"
-                step="any"
+                step="0.01"
                 required
                 :class="[inputClass, 'pl-9']"
-                v-bind="fieldAttrs('totalPaid')"
+                v-bind="fieldAttrs('paymentAmount')"
               />
             </div>
             <p
-              v-if="errorFor('totalPaid')"
-              id="totalPaid-error"
+              v-if="errorFor('paymentAmount')"
+              id="paymentAmount-error"
               class="text-sm text-destructive"
               role="alert"
             >
-              {{ errorFor('totalPaid') }}
+              {{ errorFor('paymentAmount') }}
             </p>
           </div>
 
@@ -396,30 +436,56 @@ const lockedClass =
           </div>
         </div>
 
-        <div class="space-y-2">
+        <div v-if="paymentRecorded" class="space-y-2">
           <div class="flex items-baseline justify-between gap-2">
-            <Label for="notes">Notes <span class="text-muted-foreground">(optional)</span></Label>
+            <Label for="paymentNotes">
+              Payment notes <span class="text-muted-foreground">(optional)</span>
+            </Label>
             <span class="text-xs text-muted-foreground">
-              {{ notes.length }}/{{ NOTES_MAX_LENGTH }}
+              {{ paymentNotes.length }}/{{ NOTES_MAX_LENGTH }}
             </span>
           </div>
-          <Textarea
-            id="notes"
-            v-model="notes"
+          <Input
+            id="paymentNotes"
+            v-model="paymentNotes"
             :maxlength="NOTES_MAX_LENGTH"
             placeholder="e.g. Paid via UPI"
-            class="bg-background"
-            v-bind="fieldAttrs('notes')"
+            :class="inputClass"
+            v-bind="fieldAttrs('paymentNotes')"
           />
           <p
-            v-if="errorFor('notes')"
-            id="notes-error"
+            v-if="errorFor('paymentNotes')"
+            id="paymentNotes-error"
             class="text-sm text-destructive"
             role="alert"
           >
-            {{ errorFor('notes') }}
+            {{ errorFor('paymentNotes') }}
           </p>
         </div>
+      </section>
+
+      <section :class="sectionClass" aria-labelledby="notes-heading">
+        <div class="flex items-baseline justify-between gap-2">
+          <h2 id="notes-heading" class="font-semibold">
+            <Label for="notes" class="text-base">
+              Notes <span class="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+          </h2>
+          <span class="text-xs text-muted-foreground">
+            {{ notes.length }}/{{ NOTES_MAX_LENGTH }}
+          </span>
+        </div>
+        <Textarea
+          id="notes"
+          v-model="notes"
+          :maxlength="NOTES_MAX_LENGTH"
+          placeholder="e.g. Meter read on the 1st"
+          class="bg-background"
+          v-bind="fieldAttrs('notes')"
+        />
+        <p v-if="errorFor('notes')" id="notes-error" class="text-sm text-destructive" role="alert">
+          {{ errorFor('notes') }}
+        </p>
       </section>
     </div>
 

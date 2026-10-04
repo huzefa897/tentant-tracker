@@ -8,7 +8,7 @@ import router from '@/router'
 import { LOAD_ERROR_MESSAGE, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import { openPage } from '@/test/rentEntries'
-import { RENT_ENTRIES_STORAGE_KEY } from '@/utils/rentEntryStorage'
+import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 
 vi.mock('@/services/auth.service', () => ({
   authService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), logout: vi.fn() },
@@ -56,7 +56,7 @@ const validEntry = {
   billingMonth: '2026-09',
   electricityUnits: '75',
   waterAmount: '300',
-  totalPaid: '10000',
+  paymentAmount: '10000',
   paidDate: '2026-10-01',
 }
 
@@ -101,7 +101,7 @@ describe('NewRentEntryView', () => {
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 
-  it('saves a valid entry and shows a confirmation', async () => {
+  it('saves the bill with its initial payment and shows a confirmation', async () => {
     await openEntryPage()
     await fill(validEntry)
     await save()
@@ -113,9 +113,14 @@ describe('NewRentEntryView', () => {
       billingMonth: '2026-09',
       rentAmount: 15000,
       electricityRate: 6,
-      totalPaid: 10000,
-      paidDate: '2026-10-01',
     })
+    expect(store.payments).toEqual([
+      expect.objectContaining({
+        entryId: store.entries[0]!.id,
+        amount: 10000,
+        paidDate: '2026-10-01',
+      }),
+    ])
 
     expect(app!.find('form').exists()).toBe(false)
     expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
@@ -142,15 +147,16 @@ describe('NewRentEntryView', () => {
   it('shows a duplicate-entry error and keeps the form', async () => {
     await openEntryPage()
     useRentEntryStore().addEntry({
-      tenantId: 'tenant-001',
-      billingMonth: '2026-09',
-      rentAmount: 15000,
-      electricityUnits: 10,
-      electricityRate: 6,
-      waterAmount: 0,
-      totalPaid: 0,
-      paidDate: null,
-      notes: '',
+      entry: {
+        tenantId: 'tenant-001',
+        billingMonth: '2026-09',
+        rentAmount: 15000,
+        electricityUnits: 10,
+        electricityRate: 6,
+        waterAmount: 0,
+        notes: '',
+      },
+      initialPayment: null,
     })
 
     await fill(validEntry)
@@ -174,15 +180,17 @@ describe('NewRentEntryView', () => {
   })
 
   describe('persistence', () => {
-    it('keeps a saved entry after a refresh', async () => {
+    it('keeps a saved entry and its payment after a refresh', async () => {
       await openEntryPage()
       await fill(validEntry)
       await save()
-      const [saved] = useRentEntryStore().entries
+      const { entries, payments } = useRentEntryStore()
 
       await refreshPage()
 
-      expect(useRentEntryStore().entries).toEqual([saved])
+      expect(useRentEntryStore().entries).toEqual(entries)
+      expect(useRentEntryStore().payments).toEqual(payments)
+      expect(payments).toHaveLength(1)
     })
 
     it('blocks a duplicate month after a refresh', async () => {
@@ -211,9 +219,10 @@ describe('NewRentEntryView', () => {
 
       expect(app!.find('#entry-saved-heading').exists()).toBe(false)
       expect(useRentEntryStore().entries).toEqual([])
+      expect(useRentEntryStore().payments).toEqual([])
       expect(app!.get('[role="alert"]').text()).toBe(SAVE_ERROR_MESSAGE)
       expect(app!.get<HTMLInputElement>('#electricityUnits').element.value).toBe('75')
-      expect(app!.get<HTMLInputElement>('#totalPaid').element.value).toBe('10000')
+      expect(app!.get<HTMLInputElement>('#paymentAmount').element.value).toBe('10000')
     })
 
     it('can save after a failed write once storage works again', async () => {
@@ -232,7 +241,7 @@ describe('NewRentEntryView', () => {
 
     describe('when saved entries are corrupt', () => {
       beforeEach(() => {
-        localStorage.setItem(RENT_ENTRIES_STORAGE_KEY, '{not json')
+        localStorage.setItem(RENT_LEDGER_STORAGE_KEY, '{not json')
       })
 
       it('shows a load error and blocks saving without touching the data', async () => {
@@ -247,12 +256,12 @@ describe('NewRentEntryView', () => {
         expect(app!.text()).toContain(
           'Saved entries must load successfully before adding an entry.',
         )
-        expect(localStorage.getItem(RENT_ENTRIES_STORAGE_KEY)).toBe('{not json')
+        expect(localStorage.getItem(RENT_LEDGER_STORAGE_KEY)).toBe('{not json')
       })
 
       it('recovers on Retry once the data can be read', async () => {
         await openEntryPage()
-        localStorage.removeItem(RENT_ENTRIES_STORAGE_KEY)
+        localStorage.removeItem(RENT_LEDGER_STORAGE_KEY)
 
         await button('Retry').trigger('click')
         await fill(validEntry)

@@ -4,8 +4,9 @@ import { h } from 'vue'
 import { RouterView } from 'vue-router'
 
 import router from '@/router'
+import type { Payment } from '@/types/payment'
 import type { RentEntry } from '@/types/rentEntry'
-import { RENT_ENTRIES_STORAGE_KEY } from '@/utils/rentEntryStorage'
+import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 
 // A valid saved entry; tests override what they care about.
 export function makeEntry(overrides: Partial<RentEntry> = {}): RentEntry {
@@ -17,16 +18,32 @@ export function makeEntry(overrides: Partial<RentEntry> = {}): RentEntry {
     electricityUnits: 75,
     electricityRate: 6,
     waterAmount: 300,
-    totalPaid: 0,
-    paidDate: null,
     notes: '',
     createdAt: '2026-10-03T06:00:00.000Z',
     ...overrides,
   }
 }
 
+// A valid saved payment against entry-1; tests override what they care about.
+export function makePayment(overrides: Partial<Payment> = {}): Payment {
+  return {
+    id: 'payment-1',
+    entryId: 'entry-1',
+    amount: 10000,
+    paidDate: '2026-10-03',
+    notes: '',
+    createdAt: '2026-10-03T06:00:00.000Z',
+    ...overrides,
+  }
+}
+
+// Writes a version 2 ledger, as the app saves it.
+export function storeLedger(entries: RentEntry[], payments: Payment[] = []) {
+  localStorage.setItem(RENT_LEDGER_STORAGE_KEY, JSON.stringify({ version: 2, entries, payments }))
+}
+
 export function storeEntries(...entries: RentEntry[]) {
-  localStorage.setItem(RENT_ENTRIES_STORAGE_KEY, JSON.stringify({ version: 1, entries }))
+  storeLedger(entries)
 }
 
 // Signs in and opens the URL directly, as after a refresh: fresh Pinia, nothing selected.
