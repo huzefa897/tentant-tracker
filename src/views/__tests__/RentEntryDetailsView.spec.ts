@@ -285,6 +285,20 @@ describe('RentEntryDetailsView recording a payment', () => {
     ])
   })
 
+  // Each payment needs its own id: reusing one would reject the second as already recorded.
+  it('records a second payment after reopening the dialog', async () => {
+    storeWithPayments()
+    await openDetails('tenant-001', 'sep')
+
+    await recordPayment('1000', 'First')
+    await recordPayment('2000', 'Second')
+
+    expect(body.find('[role="dialog"]').exists()).toBe(false)
+    expect(view!.get('[role="status"]').text()).toBe('Payment of ₹2,000 recorded.')
+    expect(paymentRows()).toHaveLength(4)
+    expect(section('payment')['Total paid']).toBe('₹13,000')
+  })
+
   it('keeps the payment after a refresh', async () => {
     storeWithPayments()
     await openDetails('tenant-001', 'sep')
