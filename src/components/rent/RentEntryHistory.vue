@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronRight } from '@lucide/vue'
+import { ChevronRight, Printer } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   view: [entryId: string]
+  // Only offered for bills with a payment: a receipt confirms money received.
+  'view-receipt': [entryId: string]
 }>()
 
 // Calculated once and shared by the table and the cards.
@@ -51,16 +53,21 @@ const rows = computed(() =>
             <td class="px-4 py-3 text-right font-semibold tabular-nums">
               {{ formatINR(row.outstanding) }}
             </td>
-            <td class="px-4 py-3"><PaymentStatusBadge :status="row.status" /></td>
-            <td class="px-4 py-2 text-right">
-              <Button
-                variant="ghost"
-                class="h-10"
-                :aria-label="`View ${row.month}`"
-                @click="emit('view', row.id)"
-              >
-                View
-              </Button>
+            <td class="px-4 py-3">
+              <PaymentStatusBadge :status="row.status" />
+            </td>
+            <td class="px-4 py-2">
+              <div class="flex justify-end gap-2">
+                <Button variant="ghost" class="h-10" :aria-label="`View summary for ${row.month}`"
+                  @click="emit('view', row.id)">
+                  View Summary
+                </Button>
+                <Button v-if="row.totalPaid > 0" variant="outline" class="h-10"
+                  :aria-label="`View or print receipt for ${row.month}`" @click="emit('view-receipt', row.id)">
+                  <Printer aria-hidden="true" />
+                  Print Receipt
+                </Button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -69,12 +76,7 @@ const rows = computed(() =>
 
     <!-- Mobile -->
     <ul class="space-y-3 md:hidden">
-      <li
-        v-for="row in rows"
-        :key="row.id"
-        class="rounded-xl border bg-card p-4"
-        data-testid="history-card"
-      >
+      <li v-for="row in rows" :key="row.id" class="rounded-xl border bg-card p-4" data-testid="history-card">
         <div class="flex items-center justify-between gap-3">
           <h3 class="font-semibold">{{ row.month }}</h3>
           <PaymentStatusBadge :status="row.status" />
@@ -93,15 +95,18 @@ const rows = computed(() =>
             <dd class="tabular-nums">{{ formatINR(row.outstanding) }}</dd>
           </div>
         </dl>
-        <Button
-          variant="outline"
-          class="mt-4 h-11 w-full"
-          :aria-label="`View details for ${row.month}`"
-          @click="emit('view', row.id)"
-        >
-          View details
-          <ChevronRight aria-hidden="true" />
-        </Button>
+        <div class="mt-4 grid gap-2">
+          <Button variant="outline" class="h-11 w-full" :aria-label="`View summary for ${row.month}`"
+            @click="emit('view', row.id)">
+            View Summary
+            <ChevronRight aria-hidden="true" />
+          </Button>
+          <Button v-if="row.totalPaid > 0" variant="outline" class="h-11 w-full"
+            :aria-label="`View or print receipt for ${row.month}`" @click="emit('view-receipt', row.id)">
+            <Printer aria-hidden="true" />
+            Print Receipt
+          </Button>
+        </div>
       </li>
     </ul>
   </div>

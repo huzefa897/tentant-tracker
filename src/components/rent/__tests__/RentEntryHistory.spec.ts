@@ -32,9 +32,17 @@ describe('RentEntryHistory', () => {
       .map((row) => row.findAll('th, td').map((cell) => cell.text()))
 
     expect(rows).toEqual([
-      ['October 2026', '₹15,750', '₹10,000', '₹5,750', 'Partially paid', 'View'],
-      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'View'],
-      ['August 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View'],
+      [
+        'October 2026',
+        '₹15,750',
+        '₹10,000',
+        '₹5,750',
+        'Partially paid',
+        'View Summary  View / Print Receipt',
+      ],
+      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'View Summary  View / Print Receipt'],
+      // Nothing paid, so nothing to receipt.
+      ['August 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
     ])
   })
 
@@ -51,10 +59,25 @@ describe('RentEntryHistory', () => {
 
   it('emits view with the entry id from the table and the cards', async () => {
     const wrapper = mount(RentEntryHistory, { props: { bills } })
+    const summaries = wrapper.findAll('[aria-label="View summary for September 2026"]')
 
-    await wrapper.get('[aria-label="View September 2026"]').trigger('click')
-    await wrapper.get('[aria-label="View details for August 2026"]').trigger('click')
+    await summaries[0]!.trigger('click')
+    await summaries[1]!.trigger('click')
 
-    expect(wrapper.emitted('view')).toEqual([['b'], ['c']])
+    expect(wrapper.emitted('view')).toEqual([['b'], ['b']])
+  })
+
+  it('emits view-receipt from the table and the cards, only for bills with a payment', async () => {
+    const wrapper = mount(RentEntryHistory, { props: { bills } })
+    const receipts = wrapper.findAll('[aria-label="View or print receipt for October 2026"]')
+
+    expect(receipts).toHaveLength(2)
+    await receipts[0]!.trigger('click')
+    await receipts[1]!.trigger('click')
+
+    expect(wrapper.emitted('view-receipt')).toEqual([['a'], ['a']])
+    expect(wrapper.find('[aria-label="View or print receipt for August 2026"]').exists()).toBe(
+      false,
+    )
   })
 })
