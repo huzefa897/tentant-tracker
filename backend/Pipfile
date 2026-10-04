@@ -1,0 +1,26 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+django = "*"
+djangorestframework = "*"
+django-cors-headers = "*"
+psycopg = {extras = ["binary"], version = "*"}
+python-dotenv = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.13"
+
+[scripts]
+start = "python manage.py runserver"
+makemigrate = "python manage.py makemigrations"
+makemigrations = "python manage.py makemigrations"
+migrate = "python manage.py migrate"
+createsuperuser = "python manage.py createsuperuser"
+check = "python manage.py check"
+test = "python manage.py test"
+dbcheck = "python manage.py shell -c 'from django.db import connection; connection.ensure_connection(); print(connection.vendor)'"
