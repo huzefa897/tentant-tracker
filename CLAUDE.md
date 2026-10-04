@@ -15,6 +15,22 @@ Stack: Vue Router, Pinia (setup stores), Tailwind v4, shadcn-vue (reka-ui), Axio
 
 Before calling work done: `npm run format && npm run lint:check && npm test && npm run build`. CI (`.github/workflows/ci.yml`) runs the same checks on every PR and push to `main`, plus the conflict check on PRs (fails only on conflicts with `main`; conflicts with other PRs are warnings).
 
+## Backend
+
+Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). The frontend doesn't call it yet. PostgreSQL runs in Docker (`docker compose up -d --wait db` from the root, host port 5434); Django runs on the host with pipenv, from `backend/`:
+
+- `pipenv run start` — dev server (`runserver`, port 8000)
+- `pipenv run makemigrate` — `makemigrations` (alias `makemigrations`); `pipenv run migrate` — apply them
+- `pipenv run test` — Django tests (needs the database up); `pipenv run check`; `pipenv run dbcheck` prints `postgresql`
+
+Before calling backend work done: `pipenv run check && pipenv run python manage.py makemigrations --check --dry-run && pipenv run test`. CI's `backend` job runs the same against a Postgres service.
+
+- Settings come from the gitignored `backend/.env`; every variable is listed in `backend/.env.example`. Add new ones to both.
+- `AUTH_USER_MODEL` is `accounts.User` (`AbstractUser` + nullable unique `firebase_uid`, `phone_number`). Roles belong on property membership, never on the user.
+- DRF requires authentication by default; a public endpoint opts out with `AllowAny` (only `/api/v1/health/` today). CORS is not authentication.
+- Apps: `accounts`, `properties`, `billing` (the last two have no models yet). Tests live in each app's `tests.py`.
+- Add packages with `pipenv install <name>` and commit `Pipfile.lock`.
+
 ## Architecture
 
 Layering, top to bottom — each layer only calls the one below it:
@@ -36,6 +52,18 @@ Layering, top to bottom — each layer only calls the one below it:
 - Stores: use `setActivePinia(createPinia())` in `beforeEach`; test through actions and getters.
 - Services/utils: plain input → output, including invalid input.
 - Skip `components/ui/` (generated). Test files are linted with `@vitest/eslint-plugin`.
+
+## Skills
+
+Skills are task guides in `.claude/skills/<name>/SKILL.md`. Claude Code loads them automatically; other agents should open the matching `SKILL.md` and follow it before starting that kind of task.
+
+- **Code review** — `.claude/skills/code-review-skill/SKILL.md`. Use it whenever you review code: a PR or diff someone asks about, and your own branch before opening a PR. Follow its four phases (context, high level, line by line, summary) and label findings by severity. In this repo focus on its Vue 3, TypeScript and CSS rows, and add these project checks:
+  - Layering (Architecture above): no router or service calls in components, no vendor types outside `services/`.
+  - Tests ship with the change (Testing above).
+  - Ledger writes validate, re-read storage, then write before updating state; bad stored data throws, never becomes an empty list.
+  - Money is summed and compared in paise; receipts are snapshots, never re-derived.
+  - Nothing private committed: tenant data, phone numbers, emails, sheet or script IDs.
+- **UI design** — `impeccable`, installed per user (`~/.claude/skills/impeccable/`), not in this repo: designing, critiquing or polishing screens, layout, typography, colour, accessibility. Use it for UI work when it's available.
 
 ## Conventions
 
