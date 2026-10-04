@@ -193,14 +193,17 @@ function viewReceipt(entryId: string) {
       </div>
 
       <div v-else class="space-y-6">
-        <RentEntryFilters
-          v-model:year="selectedYear"
-          v-model:status="selectedStatus"
-          :years="years"
-        />
+        <!-- Wide screens: filters and totals share a row, so the table starts higher. -->
+        <div class="grid gap-6 xl:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] xl:items-end">
+          <RentEntryFilters
+            v-model:year="selectedYear"
+            v-model:status="selectedStatus"
+            :years="years"
+          />
+          <RentEntryTotals v-if="filteredBills.length > 0" :totals="totals" />
+        </div>
 
         <template v-if="filteredBills.length > 0">
-          <RentEntryTotals :totals="totals" />
           <p
             v-if="receiptError"
             class="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive"
