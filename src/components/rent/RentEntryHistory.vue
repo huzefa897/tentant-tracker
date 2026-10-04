@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronRight } from '@lucide/vue'
+import { ChevronRight, Download } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import { Button } from '@/components/ui/button'
@@ -12,10 +12,14 @@ import { type BilledEntry, getEntryAmounts } from '@/utils/rentCalculations'
 // Shown in the given order; the page sorts and filters, and sums each bill's payments.
 const props = defineProps<{
   bills: BilledEntry<RentEntry>[]
+  // The bill whose receipt is being prepared; every receipt button waits until it's done.
+  downloadingEntryId?: string | null
 }>()
 
 const emit = defineEmits<{
   view: [entryId: string]
+  // Only offered for bills with a payment: a receipt confirms money received.
+  'download-receipt': [entryId: string]
 }>()
 
 // Calculated once and shared by the table and the cards.
@@ -51,16 +55,31 @@ const rows = computed(() =>
             <td class="px-4 py-3 text-right font-semibold tabular-nums">
               {{ formatINR(row.outstanding) }}
             </td>
-            <td class="px-4 py-3"><PaymentStatusBadge :status="row.status" /></td>
-            <td class="px-4 py-2 text-right">
-              <Button
-                variant="ghost"
-                class="h-10"
-                :aria-label="`View ${row.month}`"
-                @click="emit('view', row.id)"
-              >
-                View
-              </Button>
+            <td class="px-4 py-3">
+              <PaymentStatusBadge :status="row.status" />
+            </td>
+            <td class="px-4 py-2">
+              <div class="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  class="h-10"
+                  :aria-label="`View summary for ${row.month}`"
+                  @click="emit('view', row.id)"
+                >
+                  View Summary
+                </Button>
+                <Button
+                  v-if="row.totalPaid > 0"
+                  variant="outline"
+                  class="h-10"
+                  :disabled="!!downloadingEntryId"
+                  :aria-label="`Download receipt for ${row.month}`"
+                  @click="emit('download-receipt', row.id)"
+                >
+                  <Download aria-hidden="true" />
+                  {{ downloadingEntryId === row.id ? 'Preparing…' : 'Download Receipt' }}
+                </Button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -93,15 +112,28 @@ const rows = computed(() =>
             <dd class="tabular-nums">{{ formatINR(row.outstanding) }}</dd>
           </div>
         </dl>
-        <Button
-          variant="outline"
-          class="mt-4 h-11 w-full"
-          :aria-label="`View details for ${row.month}`"
-          @click="emit('view', row.id)"
-        >
-          View details
-          <ChevronRight aria-hidden="true" />
-        </Button>
+        <div class="mt-4 grid gap-2">
+          <Button
+            variant="outline"
+            class="h-11 w-full"
+            :aria-label="`View summary for ${row.month}`"
+            @click="emit('view', row.id)"
+          >
+            View Summary
+            <ChevronRight aria-hidden="true" />
+          </Button>
+          <Button
+            v-if="row.totalPaid > 0"
+            variant="outline"
+            class="h-11 w-full"
+            :disabled="!!downloadingEntryId"
+            :aria-label="`Download receipt for ${row.month}`"
+            @click="emit('download-receipt', row.id)"
+          >
+            <Download aria-hidden="true" />
+            {{ downloadingEntryId === row.id ? 'Preparing…' : 'Download Receipt' }}
+          </Button>
+        </div>
       </li>
     </ul>
   </div>

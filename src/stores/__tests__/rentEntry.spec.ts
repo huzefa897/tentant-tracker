@@ -1,15 +1,20 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as issuerConfig from '@/config/receiptIssuer'
 import {
   DUPLICATE_PAYMENT_MESSAGE,
   LOAD_ERROR_MESSAGE,
+  RECEIPT_SAVE_ERROR_MESSAGE,
+  receiptReferenceFor,
   SAVE_ERROR_MESSAGE,
   useRentEntryStore,
 } from '@/stores/rentEntry'
+import { useTenantStore } from '@/stores/tenant'
 import type { PaymentInput } from '@/types/payment'
 import type { NewRentEntrySubmission, RentEntryInput } from '@/types/rentEntry'
 import { RENT_LEDGER_STORAGE_KEY, saveRentLedger } from '@/utils/rentLedgerStorage'
+import { toDateValue } from '@/utils/date'
 
 // Total due: 15000 + 75 × 6 + 300 = 15750
 const input: RentEntryInput = {
@@ -159,7 +164,8 @@ describe('useRentEntryStore', () => {
         },
       ])
       expect(store.getTotalPaid('entry-1')).toBe(10000)
-      expect(JSON.parse(stored()!).version).toBe(2)
+      expect(store.receipts).toEqual([])
+      expect(JSON.parse(stored()!).version).toBe(3)
     })
 
     it('shows a load error and keeps the original data when the write fails', () => {
@@ -204,9 +210,10 @@ describe('useRentEntryStore', () => {
         },
       ])
       expect(JSON.parse(stored()!)).toEqual({
-        version: 2,
+        version: 3,
         entries: store.entries,
         payments: store.payments,
+        receipts: [],
       })
     })
 
@@ -385,6 +392,7 @@ describe('useRentEntryStore', () => {
             createdAt: '2026-10-03T06:00:00.000Z',
           },
         ],
+        receipts: [],
       })
 
       expect(() => store.addPayment(payment(entry.id, { amount: 3000 }))).toThrow(
@@ -458,6 +466,232 @@ describe('useRentEntryStore', () => {
     })
   })
 
+  describe('receiptReferenceFor', () => {
+    it.each([
+      ['202', '2026-09', 1, 'RCP-202-202609'],
+      ['202', '2026-09', 2, 'RCP-202-202609-2'],
+      [' G 1 ', '2026-12', 3, 'RCP-G-1-202612-3'],
+    ])('flat %s, %s, payment %i -> %s', (flat, month, number, reference) => {
+      expect(receiptReferenceFor(flat, month, number)).toBe(reference)
+    })
+  })
+
+  describe('issueReceipt', () => {
+    // A ₹15,750 bill with a ₹10,000 initial payment, and the tenants loaded as on the page.
+    async function storeWithPayment() {
+      await useTenantStore().loadTenants()
+      const store = useRentEntryStore()
+      store.initialize()
+      const entry = store.addEntry(submission())
+      const payment = store.payments[0]!
+      return { store, entry, payment }
+    }
+
+    it('snapshots the payment, its bill, the tenant and the issuer', async () => {
+      const { store, entry, payment } = await storeWithPayment()
+      const { receiptIssuer } = issuerConfig
+
+      const receipt = store.issueReceipt(payment.id)
+
+      expect(receipt).toEqual({
+        id: expect.any(String),
+        reference: 'RCP-202-202609',
+        paymentId: payment.id,
+        entryId: entry.id,
+        issuedAt: '2026-10-03T06:30:00.000Z',
+        issuedDate: toDateValue(new Date('2026-10-03T06:30:00.000Z')),
+        issuer: {
+          name: receiptIssuer.name,
+          managerName: receiptIssuer.managerName,
+          address: receiptIssuer.address,
+          contactNumber: receiptIssuer.contactNumber,
+          email: receiptIssuer.email,
+        },
+        tenant: {
+          name: 'Shaik Zahid Ali',
+          flatNumber: '202',
+          mobileNumber: '+918341413827',
+          depositAmount: 90000,
+        },
+        billingMonth: '2026-09',
+        rentDueDay: 11,
+        charges: { rentAmount: 15000, electricityUnits: 75, electricityRate: 6, waterAmount: 300 },
+        totalDue: 15750,
+        totalPaid: 10000,
+        outstanding: 5750,
+        previousMonthOutstanding: 0,
+        paymentAmount: 10000,
+        paidDate: '2026-10-01',
+        paymentNotes: 'Initial payment',
+      })
+      expect(store.receipts).toEqual([receipt])
+      expect(store.getReceiptForPayment(payment.id)).toEqual(receipt)
+      expect(store.getReceipt(receipt.id)).toEqual(receipt)
+    })
+
+    it('is for the payment’s amount, not the bill’s', async () => {
+      const { store, entry } = await storeWithPayment()
+      const payment = store.addPayment({
+        entryId: entry.id,
+        amount: 3000,
+        paidDate: '2026-10-03',
+        notes: '',
+      })
+
+      expect(store.issueReceipt(payment.id).paymentAmount).toBe(3000)
+    })
+
+    it('shows the bill as it stood right after the payment, whenever it is issued', async () => {
+      const { store, entry, payment: first } = await storeWithPayment()
+      const second = store.addPayment({
+        entryId: entry.id,
+        amount: 3000,
+        paidDate: '2026-10-03',
+        notes: '',
+      })
+      store.addPayment({ entryId: entry.id, amount: 2750, paidDate: '2026-10-03', notes: '' })
+
+      expect(store.issueReceipt(first.id)).toMatchObject({
+        reference: 'RCP-202-202609',
+        totalPaid: 10000,
+        outstanding: 5750,
+      })
+      expect(store.issueReceipt(second.id)).toMatchObject({
+        reference: 'RCP-202-202609-2',
+        totalPaid: 13000,
+        outstanding: 2750,
+      })
+    })
+
+    it('includes what last month’s bill still owes, without adding it to this bill', async () => {
+      const { store, payment } = await storeWithPayment()
+      // August: ₹15,750 due, ₹15,000 paid.
+      store.addEntry(submission({ billingMonth: '2026-08' }, { ...initialPayment, amount: 15000 }))
+
+      expect(store.issueReceipt(payment.id)).toMatchObject({
+        previousMonthOutstanding: 750,
+        totalDue: 15750,
+        outstanding: 5750,
+      })
+    })
+
+    it('falls back to a reference with the payment id if the readable one is taken', async () => {
+      const { store, payment } = await storeWithPayment()
+      const august = store.addEntry(submission({ billingMonth: '2026-08' }))
+      const augustReceipt = store.issueReceipt(store.getPaymentsForEntry(august.id)[0]!.id)
+      // Its reference clashes with September's, e.g. after a flat number was reused.
+      saveRentLedger({
+        entries: store.entries,
+        payments: store.payments,
+        receipts: [{ ...augustReceipt, reference: 'RCP-202-202609' }],
+      })
+
+      expect(store.issueReceipt(payment.id).reference).toBe(`RCP-202-202609-${payment.id}`)
+    })
+
+    it('returns the existing receipt instead of issuing a second', async () => {
+      const { store, payment } = await storeWithPayment()
+      const first = store.issueReceipt(payment.id)
+      vi.setSystemTime(new Date('2026-10-04T06:30:00.000Z'))
+
+      expect(store.issueReceipt(payment.id)).toEqual(first)
+      expect(store.receipts).toHaveLength(1)
+      expect(JSON.parse(stored()!).receipts).toHaveLength(1)
+    })
+
+    it('returns a receipt another tab already issued', async () => {
+      const { store, payment } = await storeWithPayment()
+      const otherTab = refresh()
+      await useTenantStore().loadTenants()
+      const issued = otherTab.issueReceipt(payment.id)
+
+      expect(store.issueReceipt(payment.id)).toEqual(issued)
+      expect(refresh().receipts).toHaveLength(1)
+    })
+
+    it('keeps the receipt, with the same reference, after a refresh', async () => {
+      const { store, payment } = await storeWithPayment()
+      const receipt = store.issueReceipt(payment.id)
+
+      const refreshed = refresh()
+      expect(refreshed.getReceipt(receipt.id)).toEqual(receipt)
+      expect(refreshed.getReceipt(receipt.id)!.reference).toBe('RCP-202-202609')
+    })
+
+    it('stays unchanged when another payment is recorded against the bill', async () => {
+      const { store, entry, payment } = await storeWithPayment()
+      const receipt = store.issueReceipt(payment.id)
+
+      store.addPayment({ entryId: entry.id, amount: 3000, paidDate: '2026-10-03', notes: '' })
+
+      expect(refresh().getReceipt(receipt.id)).toEqual(receipt)
+    })
+
+    it('stays unchanged when the tenant or issuer details change', async () => {
+      const { store, payment } = await storeWithPayment()
+      const receipt = store.issueReceipt(payment.id)
+
+      useTenantStore().tenants[0]!.name = 'Renamed Tenant'
+      vi.spyOn(issuerConfig, 'receiptIssuer', 'get').mockReturnValue({
+        name: 'New Name',
+        managerName: 'New Manager',
+        address: 'New address',
+        contactNumber: '',
+        email: '',
+      })
+
+      expect(store.issueReceipt(payment.id)).toEqual(receipt)
+      expect(refresh().getReceipt(receipt.id)).toEqual(receipt)
+    })
+
+    it('rejects a payment that does not exist', async () => {
+      const { store } = await storeWithPayment()
+
+      expect(() => store.issueReceipt('missing')).toThrow('This payment no longer exists.')
+      expect(store.receipts).toEqual([])
+    })
+
+    it('rejects issuing when the tenant is unknown', async () => {
+      const { store, payment } = await storeWithPayment()
+      useTenantStore().tenants = []
+
+      expect(() => store.issueReceipt(payment.id)).toThrow(/Tenant details are unavailable/)
+      expect(store.receipts).toEqual([])
+    })
+
+    it('rejects issuing with incomplete issuer details', async () => {
+      const { store, payment } = await storeWithPayment()
+      vi.spyOn(issuerConfig, 'receiptIssuer', 'get').mockReturnValue({
+        name: 'Saleem Towers',
+        managerName: '',
+        address: ' ',
+        contactNumber: '',
+        email: '',
+      })
+
+      expect(() => store.issueReceipt(payment.id)).toThrow('The receipt issuer has no address.')
+      expect(store.receipts).toEqual([])
+    })
+
+    it('refuses to issue before entries are loaded', () => {
+      expect(() => useRentEntryStore().issueReceipt('payment-1')).toThrow(
+        'Saved entries must load successfully before issuing a receipt.',
+      )
+    })
+
+    it('adds no receipt, and keeps the payment, when writing fails', async () => {
+      const { store, entry, payment } = await storeWithPayment()
+      const before = stored()
+      failWrites()
+
+      expect(() => store.issueReceipt(payment.id)).toThrow(RECEIPT_SAVE_ERROR_MESSAGE)
+      expect(store.receipts).toEqual([])
+      expect(store.getReceiptForPayment(payment.id)).toBeNull()
+      expect(store.getPaymentsForEntry(entry.id)).toEqual([payment])
+      expect(stored()).toBe(before)
+    })
+  })
+
   // Each tab has its own Pinia but shares localStorage.
   describe('with two tabs open', () => {
     function openTab() {
@@ -516,6 +750,7 @@ describe('useRentEntryStore', () => {
             createdAt: '2026-10-03T06:00:00.000Z',
           },
         ],
+        receipts: [],
       })
 
       window.dispatchEvent(new StorageEvent('storage', { key: RENT_LEDGER_STORAGE_KEY }))
@@ -529,6 +764,7 @@ describe('useRentEntryStore', () => {
       saveRentLedger({
         entries: [{ ...input, id: 'entry-1', createdAt: '2026-10-03T06:00:00.000Z' }],
         payments: [],
+        receipts: [],
       })
 
       window.dispatchEvent(new StorageEvent('storage', { key: 'rent-tracker-auth-user' }))

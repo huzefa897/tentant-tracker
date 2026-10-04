@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
@@ -93,6 +94,15 @@ function handleSavePayment({ id, input }: { id: string; input: PaymentInput }) {
   }
 }
 
+// Each payment's receipt downloads as a PDF. A failure shows here and leaves the payment as it
+// was: it's already recorded.
+const {
+  downloadingPaymentId,
+  error: receiptError,
+  downloadReceipt,
+  clearError: clearReceiptError,
+} = useReceiptDownload()
+
 // The router reuses this page when only the ids in the URL change: nothing from one entry
 // should show on another.
 watch(
@@ -101,6 +111,7 @@ watch(
     paymentDialogOpen.value = false
     paymentError.value = null
     confirmation.value = null
+    clearReceiptError()
   },
 )
 
@@ -258,7 +269,19 @@ function goToHistory() {
           class="rounded-xl border p-4 sm:p-6 lg:col-span-2"
         >
           <h2 id="payment-history-heading" class="mb-3 font-semibold">Payment history</h2>
-          <PaymentHistory :payments="payments" />
+          <p
+            v-if="receiptError"
+            class="mb-3 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            role="alert"
+            data-testid="receipt-error"
+          >
+            {{ receiptError }}
+          </p>
+          <PaymentHistory
+            :payments="payments"
+            :downloading-payment-id="downloadingPaymentId"
+            @download-receipt="downloadReceipt"
+          />
         </section>
 
         <section aria-labelledby="other-heading" class="rounded-xl border p-4 sm:p-6 lg:col-span-2">

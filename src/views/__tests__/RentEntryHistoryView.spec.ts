@@ -2,10 +2,18 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
-import { LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
+import {
+  LOAD_ERROR_MESSAGE,
+  RECEIPT_SAVE_ERROR_MESSAGE,
+  useRentEntryStore,
+} from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import { makeEntry, makePayment, openPage, storeLedger } from '@/test/rentEntries'
+import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
+
+// The PDF itself is covered by its own tests; here, which receipt gets downloaded.
+vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 vi.mock('@/services/auth.service', () => ({
   authService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), logout: vi.fn() },
@@ -93,7 +101,7 @@ describe('RentEntryHistoryView', () => {
       '₹10,000',
       '₹5,750',
       'Partially paid',
-      'View',
+      'View Summary  Download Receipt',
     ])
     expect(view!.text()).not.toContain('July 2026')
   })
@@ -195,14 +203,69 @@ describe('RentEntryHistoryView', () => {
     expect(view!.text()).not.toContain('September 2026')
   })
 
-  it('opens an entry’s details', async () => {
+  it('opens an entry’s summary', async () => {
     storeEntries(september)
     await openHistory()
 
-    await view!.get('[aria-label="View September 2026"]').trigger('click')
+    await view!.get('[aria-label="View summary for September 2026"]').trigger('click')
 
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
     expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
+  })
+
+  it('downloads the receipt for the bill’s latest payment, staying on the list', async () => {
+    const download = vi.mocked(downloadReceiptPdf)
+    download.mockReset()
+    download.mockResolvedValue()
+    storeEntries(september)
+    await openHistory()
+
+    await view!.get('[aria-label="Download receipt for September 2026"]').trigger('click')
+    await flushPromises()
+
+    const [receipt] = useRentEntryStore().receipts
+    expect(receipt).toMatchObject({
+      paymentId: 'sep-2',
+      reference: 'RCP-202-202609-2',
+      totalPaid: 15750,
+      outstanding: 0,
+    })
+    expect(download).toHaveBeenCalledWith(receipt)
+    expect(router.currentRoute.value.name).toBe('rent-entry-history')
+  })
+
+  it('downloads the same receipt again instead of issuing another', async () => {
+    storeEntries(september)
+    await openHistory()
+    const first = useRentEntryStore().issueReceipt('sep-2')
+
+    await view!.get('[aria-label="Download receipt for September 2026"]').trigger('click')
+    await flushPromises()
+
+    expect(vi.mocked(downloadReceiptPdf)).toHaveBeenLastCalledWith(first)
+    expect(useRentEntryStore().receipts).toHaveLength(1)
+  })
+
+  it('offers no receipt for an unpaid bill', async () => {
+    storeEntries(august)
+    await openHistory()
+
+    expect(view!.find('[aria-label="Download receipt for August 2026"]').exists()).toBe(false)
+  })
+
+  it('shows an inline error, and stays on the list, when the receipt cannot be saved', async () => {
+    storeEntries(september)
+    await openHistory()
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError')
+    })
+
+    await view!.get('[aria-label="Download receipt for September 2026"]').trigger('click')
+    await flushPromises()
+
+    expect(view!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_SAVE_ERROR_MESSAGE)
+    expect(router.currentRoute.value.name).toBe('rent-entry-history')
+    expect(useRentEntryStore().receipts).toEqual([])
   })
 
   it('goes back to the dashboard', async () => {

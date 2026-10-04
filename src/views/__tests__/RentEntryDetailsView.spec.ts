@@ -3,10 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { mockTenants } from '@/data/tenants.mock'
 import router from '@/router'
-import { LOAD_ERROR_MESSAGE, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
+import {
+  LOAD_ERROR_MESSAGE,
+  RECEIPT_SAVE_ERROR_MESSAGE,
+  SAVE_ERROR_MESSAGE,
+  useRentEntryStore,
+} from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
+import { RECEIPT_PDF_ERROR_MESSAGE } from '@/composables/useReceiptDownload'
 import { makeEntry, makePayment, openPage, storeEntries, storeLedger } from '@/test/rentEntries'
+import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
+
+// The PDF itself is covered by its own tests; here, which receipt gets downloaded.
+vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 vi.mock('@/services/auth.service', () => ({
   authService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), logout: vi.fn() },
@@ -56,10 +66,12 @@ function storeWithPayments() {
   storeLedger([entry], payments)
 }
 
+// Date, amount and notes; the receipt action is checked separately.
 function paymentRows() {
   return view!
     .findAll('[data-testid="payment-row"]')
     .map((row) => row.findAll('td').map((cell) => cell.text()))
+    .map((cells) => cells.slice(0, 3))
 }
 
 beforeEach(() => {
@@ -374,5 +386,90 @@ describe('RentEntryDetailsView recording a payment', () => {
 
     expect(body.find('[role="dialog"]').exists()).toBe(false)
     expect(paymentRows()).toHaveLength(3)
+  })
+})
+
+describe('RentEntryDetailsView receipts', () => {
+  const download = vi.mocked(downloadReceiptPdf)
+
+  beforeEach(() => {
+    download.mockReset()
+    download.mockResolvedValue()
+  })
+
+  function rowButton(paidDate: string) {
+    const row = view!
+      .findAll('[data-testid="payment-row"]')
+      .find((item) => item.get('td').text() === paidDate)
+    return row!.get('[data-testid="download-receipt"]')
+  }
+
+  it('offers a receipt download for every payment', async () => {
+    storeWithPayments()
+    await openDetails('tenant-001', 'sep')
+
+    expect(view!.findAll('[data-testid="download-receipt"]').map((b) => b.text())).toEqual([
+      'Download receipt',
+      'Download receipt',
+    ])
+  })
+
+  it('issues that payment’s receipt and downloads it, staying on the page', async () => {
+    storeWithPayments()
+    await openDetails('tenant-001', 'sep')
+
+    await rowButton('2 Oct 2026').trigger('click')
+    await flushPromises()
+
+    const [receipt] = useRentEntryStore().receipts
+    expect(receipt).toMatchObject({
+      paymentId: 'p2',
+      paymentAmount: 4000,
+      reference: 'RCP-202-202609-2',
+      totalPaid: 10000,
+      outstanding: 4712.5,
+    })
+    expect(download).toHaveBeenCalledWith(receipt)
+    expect(router.currentRoute.value.name).toBe('rent-entry-details')
+  })
+
+  it('downloads an already issued receipt without issuing another', async () => {
+    storeWithPayments()
+    await openDetails('tenant-001', 'sep')
+    const issued = useRentEntryStore().issueReceipt('p1')
+
+    await rowButton('1 Oct 2026').trigger('click')
+    await flushPromises()
+
+    expect(download).toHaveBeenCalledWith(issued)
+    expect(useRentEntryStore().receipts).toHaveLength(1)
+  })
+
+  it('shows an inline error, and keeps the payment, when the receipt cannot be saved', async () => {
+    storeWithPayments()
+    await openDetails('tenant-001', 'sep')
+    const before = localStorage.getItem(RENT_LEDGER_STORAGE_KEY)
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError')
+    })
+
+    await rowButton('2 Oct 2026').trigger('click')
+    await flushPromises()
+
+    expect(view!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_SAVE_ERROR_MESSAGE)
+    expect(download).not.toHaveBeenCalled()
+    expect(paymentRows()).toHaveLength(2)
+    expect(localStorage.getItem(RENT_LEDGER_STORAGE_KEY)).toBe(before)
+  })
+
+  it('shows an inline error when the PDF cannot be created', async () => {
+    storeWithPayments()
+    await openDetails('tenant-001', 'sep')
+    download.mockRejectedValueOnce(new Error('offline'))
+
+    await rowButton('2 Oct 2026').trigger('click')
+    await flushPromises()
+
+    expect(view!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_PDF_ERROR_MESSAGE)
   })
 })

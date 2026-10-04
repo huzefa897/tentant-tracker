@@ -5,10 +5,19 @@ import { RouterView } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
-import { LOAD_ERROR_MESSAGE, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
+import {
+  LOAD_ERROR_MESSAGE,
+  RECEIPT_SAVE_ERROR_MESSAGE,
+  SAVE_ERROR_MESSAGE,
+  useRentEntryStore,
+} from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import { openPage } from '@/test/rentEntries'
+import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
+
+// The PDF itself is covered by its own tests; here, which receipt gets downloaded.
+vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 vi.mock('@/services/auth.service', () => ({
   authService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), logout: vi.fn() },
@@ -142,6 +151,54 @@ describe('NewRentEntryView', () => {
     await flushPromises()
 
     expect(router.currentRoute.value.name).toBe('dashboard')
+  })
+
+  describe('receipt from the confirmation', () => {
+    it('issues the initial payment’s receipt and downloads it, staying on the confirmation', async () => {
+      const download = vi.mocked(downloadReceiptPdf)
+      download.mockReset()
+      download.mockResolvedValue()
+      await openEntryPage()
+      await fill(validEntry)
+      await save()
+
+      await button('Download Receipt').trigger('click')
+      await flushPromises()
+
+      const store = useRentEntryStore()
+      const [receipt] = store.receipts
+      expect(receipt).toMatchObject({ paymentId: store.payments[0]!.id, paymentAmount: 10000 })
+      expect(download).toHaveBeenCalledWith(receipt)
+      expect(router.currentRoute.value.name).toBe('rent-entry-new')
+      expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+      expect(body.find('[role="alertdialog"]').exists()).toBe(false)
+    })
+
+    it('is not offered when nothing was paid', async () => {
+      await openEntryPage()
+      await fill({ ...validEntry, paymentAmount: '0', paidDate: '' })
+      await save()
+
+      expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+      expect(body.findAll('button').some((b) => b.text() === 'Download Receipt')).toBe(false)
+    })
+
+    it('shows an inline error, and stays on the confirmation, when the receipt cannot be saved', async () => {
+      await openEntryPage()
+      await fill(validEntry)
+      await save()
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError')
+      })
+
+      await button('Download Receipt').trigger('click')
+      await flushPromises()
+
+      expect(app!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_SAVE_ERROR_MESSAGE)
+      expect(router.currentRoute.value.name).toBe('rent-entry-new')
+      expect(useRentEntryStore().payments).toHaveLength(1)
+      expect(useRentEntryStore().receipts).toEqual([])
+    })
   })
 
   it('shows a duplicate-entry error and keeps the form', async () => {

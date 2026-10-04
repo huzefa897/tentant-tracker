@@ -8,6 +8,7 @@ import RentEntryFilters from '@/components/rent/RentEntryFilters.vue'
 import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
 import RentEntryTotals from '@/components/rent/RentEntryTotals.vue'
 import { Button } from '@/components/ui/button'
+import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
@@ -70,7 +71,13 @@ function clearFilters() {
 
 // The router reuses this page when only the tenant in the URL changes; one tenant's filters
 // shouldn't hide another's entries.
-watch(() => props.tenantId, clearFilters)
+watch(
+  () => props.tenantId,
+  () => {
+    clearFilters()
+    clearReceiptError()
+  },
+)
 
 function goToDashboard() {
   router.push({ name: 'dashboard' })
@@ -82,6 +89,27 @@ function addEntry() {
 
 function viewEntry(entryId: string) {
   router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
+}
+
+const {
+  downloadingPaymentId,
+  error: receiptError,
+  downloadReceipt,
+  clearError: clearReceiptError,
+} = useReceiptDownload()
+
+const downloadingEntryId = computed(() =>
+  downloadingPaymentId.value
+    ? (rentEntryStore.payments.find((payment) => payment.id === downloadingPaymentId.value)
+        ?.entryId ?? null)
+    : null,
+)
+
+// Downloads the receipt for the bill's most recently recorded payment, issued first if needed.
+// It shows the bill's total paid to date. Each payment's own receipt is on the summary page.
+function downloadBillReceipt(entryId: string) {
+  const payment = rentEntryStore.getPaymentsForEntry(entryId).slice(-1)[0]
+  if (payment) downloadReceipt(payment.id)
 }
 </script>
 
@@ -171,7 +199,20 @@ function viewEntry(entryId: string) {
 
         <template v-if="filteredBills.length > 0">
           <RentEntryTotals :totals="totals" />
-          <RentEntryHistory :bills="filteredBills" @view="viewEntry" />
+          <p
+            v-if="receiptError"
+            class="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            role="alert"
+            data-testid="receipt-error"
+          >
+            {{ receiptError }}
+          </p>
+          <RentEntryHistory
+            :bills="filteredBills"
+            :downloading-entry-id="downloadingEntryId"
+            @view="viewEntry"
+            @download-receipt="downloadBillReceipt"
+          />
         </template>
 
         <div

@@ -4,8 +4,14 @@ import { describe, expect, it } from 'vitest'
 import PaymentHistory from '@/components/rent/PaymentHistory.vue'
 import { makePayment } from '@/test/rentEntries'
 
+function cells(wrapper: ReturnType<typeof mount>) {
+  return wrapper
+    .findAll('[data-testid="payment-row"]')
+    .map((row) => row.findAll('td').map((cell) => cell.text()))
+}
+
 describe('PaymentHistory', () => {
-  it('lists each payment’s date, amount and notes in the given order', () => {
+  it('lists each payment’s date, amount, notes and receipt action in the given order', () => {
     const wrapper = mount(PaymentHistory, {
       props: {
         payments: [
@@ -15,14 +21,33 @@ describe('PaymentHistory', () => {
       },
     })
 
-    const rows = wrapper
-      .findAll('[data-testid="payment-row"]')
-      .map((row) => row.findAll('td').map((cell) => cell.text()))
-
-    expect(rows).toEqual([
-      ['10 Oct 2026', '₹3,000', 'Bank transfer'],
-      ['3 Oct 2026', '₹10,000', '—'],
+    expect(cells(wrapper)).toEqual([
+      ['10 Oct 2026', '₹3,000', 'Bank transfer', 'Download receipt'],
+      ['3 Oct 2026', '₹10,000', '—', 'Download receipt'],
     ])
+  })
+
+  it('emits download-receipt with the payment id', async () => {
+    const wrapper = mount(PaymentHistory, {
+      props: { payments: [makePayment({ id: 'b' }), makePayment({ id: 'a' })] },
+    })
+
+    await wrapper.findAll('[data-testid="download-receipt"]')[1]!.trigger('click')
+
+    expect(wrapper.emitted('download-receipt')).toEqual([['a']])
+  })
+
+  it('shows which receipt is being prepared and disables every button meanwhile', () => {
+    const wrapper = mount(PaymentHistory, {
+      props: {
+        payments: [makePayment({ id: 'b' }), makePayment({ id: 'a' })],
+        downloadingPaymentId: 'a',
+      },
+    })
+    const buttons = wrapper.findAll('[data-testid="download-receipt"]')
+
+    expect(buttons.map((button) => button.text())).toEqual(['Download receipt', 'Preparing…'])
+    expect(buttons.every((button) => button.attributes('disabled') !== undefined)).toBe(true)
   })
 
   it('says when there are no payments', () => {

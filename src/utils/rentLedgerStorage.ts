@@ -1,13 +1,14 @@
 // Prototype persistence: one browser, can be cleared, doesn't sync. Replaced by a backend later.
 
 import type { Payment } from '@/types/payment'
+import type { PaymentReceipt } from '@/types/receipt'
 import type { RentEntry } from '@/types/rentEntry'
 import type { RentLedger, RentLedgerStorage } from '@/types/rentLedger'
-import { isValidDateValue, isValidIsoTimestamp } from '@/utils/date'
-import { fromPaise, toPaise } from '@/utils/money'
+import { isValidDateValue, isValidIsoTimestamp, isValidMonthValue } from '@/utils/date'
+import { fromPaise, hasAtMostTwoDecimals, toPaise } from '@/utils/money'
 import { validatePaymentInput } from '@/utils/paymentValidation'
 import { calculateTotalDue } from '@/utils/rentCalculations'
-import { validateRentEntryInput } from '@/utils/rentEntryValidation'
+import { NOTES_MAX_LENGTH, validateRentEntryInput } from '@/utils/rentEntryValidation'
 
 // Kept from version 1 despite its suffix, so data never splits across two keys. The wrapper's
 // `version` decides how it's read.
@@ -29,7 +30,7 @@ function isValidTimestamp(value: unknown): value is string {
 
 type Fail = (reason: string) => never
 
-// Shape checks shared by both versions: JSON.parse proves nothing about types.
+// Entry shape checks shared by every version: JSON.parse proves nothing about types.
 function readEntryFields(value: unknown, fail: Fail): RentEntry {
   if (!isRecord(value)) return fail('not an object')
   if (!isNonEmptyString(value.id)) return fail('id')
@@ -100,6 +101,116 @@ function toPayment(value: unknown, index: number): Payment {
   return payment
 }
 
+// A finite amount of money in whole paise, at least `min`.
+function isMoney(value: unknown, min = 0): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= min &&
+    hasAtMostTwoDecimals(value)
+  )
+}
+
+function toReceipt(value: unknown, index: number): PaymentReceipt {
+  const fail: Fail = (reason) => {
+    throw new Error(`Stored receipt ${index} is invalid: ${reason}`)
+  }
+
+  if (!isRecord(value)) return fail('not an object')
+  if (!isNonEmptyString(value.id)) return fail('id')
+  if (!isNonEmptyString(value.reference)) return fail('reference')
+  if (!isNonEmptyString(value.paymentId)) return fail('paymentId')
+  if (!isNonEmptyString(value.entryId)) return fail('entryId')
+  if (!isValidTimestamp(value.issuedAt)) return fail('issuedAt')
+  if (typeof value.issuedDate !== 'string' || !isValidDateValue(value.issuedDate)) {
+    return fail('issuedDate')
+  }
+
+  const { issuer, tenant, charges } = value
+  if (!isRecord(issuer)) return fail('issuer')
+  if (!isNonEmptyString(issuer.name)) return fail('issuer.name')
+  if (typeof issuer.managerName !== 'string') return fail('issuer.managerName')
+  if (!isNonEmptyString(issuer.address)) return fail('issuer.address')
+  if (typeof issuer.contactNumber !== 'string') return fail('issuer.contactNumber')
+  if (typeof issuer.email !== 'string') return fail('issuer.email')
+
+  if (!isRecord(tenant)) return fail('tenant')
+  if (!isNonEmptyString(tenant.name)) return fail('tenant.name')
+  if (!isNonEmptyString(tenant.flatNumber)) return fail('tenant.flatNumber')
+  if (typeof tenant.mobileNumber !== 'string') return fail('tenant.mobileNumber')
+  if (!isMoney(tenant.depositAmount)) return fail('tenant.depositAmount')
+
+  if (typeof value.billingMonth !== 'string' || !isValidMonthValue(value.billingMonth)) {
+    return fail('billingMonth')
+  }
+
+  const dueDay = value.rentDueDay
+  if (typeof dueDay !== 'number' || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
+    return fail('rentDueDay')
+  }
+
+  if (!isRecord(charges)) return fail('charges')
+  const chargeKeys = ['rentAmount', 'electricityUnits', 'electricityRate', 'waterAmount'] as const
+  for (const key of chargeKeys) {
+    const charge = charges[key]
+    if (typeof charge !== 'number' || !Number.isFinite(charge) || charge < 0) {
+      return fail(`charges.${key}`)
+    }
+  }
+
+  const figures = ['totalDue', 'totalPaid', 'outstanding', 'previousMonthOutstanding'] as const
+  for (const key of figures) {
+    if (!isMoney(value[key])) return fail(key)
+  }
+
+  if (!isMoney(value.paymentAmount) || value.paymentAmount === 0) return fail('paymentAmount')
+
+  if (typeof value.paidDate !== 'string' || !isValidDateValue(value.paidDate)) {
+    return fail('paidDate')
+  }
+  if (typeof value.paymentNotes !== 'string' || value.paymentNotes.length > NOTES_MAX_LENGTH) {
+    return fail('paymentNotes')
+  }
+
+  // The snapshot itself, so it's kept exactly as issued. Only known fields are copied.
+  return {
+    id: value.id,
+    reference: value.reference,
+    paymentId: value.paymentId,
+    entryId: value.entryId,
+    issuedAt: value.issuedAt,
+    issuedDate: value.issuedDate,
+    issuer: {
+      name: issuer.name,
+      managerName: issuer.managerName,
+      address: issuer.address,
+      contactNumber: issuer.contactNumber,
+      email: issuer.email,
+    },
+    tenant: {
+      name: tenant.name,
+      flatNumber: tenant.flatNumber,
+      mobileNumber: tenant.mobileNumber,
+      depositAmount: tenant.depositAmount,
+    },
+    billingMonth: value.billingMonth,
+    rentDueDay: dueDay,
+    charges: {
+      rentAmount: charges.rentAmount as number,
+      electricityUnits: charges.electricityUnits as number,
+      electricityRate: charges.electricityRate as number,
+      waterAmount: charges.waterAmount as number,
+    },
+    totalDue: value.totalDue as number,
+    totalPaid: value.totalPaid as number,
+    outstanding: value.outstanding as number,
+    previousMonthOutstanding: value.previousMonthOutstanding as number,
+    paymentAmount: value.paymentAmount,
+    paidDate: value.paidDate,
+    paymentNotes: value.paymentNotes,
+  }
+}
+
 // Rules across records, which no single entry or payment can check. Throws on the first problem.
 export function validateLedgerRelationships(ledger: RentLedger): void {
   const entryIds = new Set<string>()
@@ -137,16 +248,74 @@ export function validateLedgerRelationships(ledger: RentLedger): void {
     }
     outstandingPaise.set(payment.entryId, remaining)
   }
+
+  const paymentsById = new Map(ledger.payments.map((payment) => [payment.id, payment]))
+  const entriesById = new Map(ledger.entries.map((entry) => [entry.id, entry]))
+  const receiptIds = new Set<string>()
+  const references = new Set<string>()
+  const receiptedPayments = new Set<string>()
+
+  // The tenant and issuer snapshots are not compared with current details: they're historical.
+  for (const receipt of ledger.receipts) {
+    if (
+      receiptIds.has(receipt.id) ||
+      references.has(receipt.reference) ||
+      receiptedPayments.has(receipt.paymentId)
+    ) {
+      throw new Error('Stored receipts contain duplicates.')
+    }
+    receiptIds.add(receipt.id)
+    references.add(receipt.reference)
+    receiptedPayments.add(receipt.paymentId)
+
+    // Every payment belongs to an existing entry (checked above), so this covers the entry too.
+    const payment = paymentsById.get(receipt.paymentId)
+    if (!payment || payment.entryId !== receipt.entryId) {
+      throw new Error('A stored receipt belongs to no payment.')
+    }
+
+    if (
+      toPaise(receipt.paymentAmount) !== toPaise(payment.amount) ||
+      receipt.paidDate !== payment.paidDate
+    ) {
+      throw new Error('A stored receipt does not match its payment.')
+    }
+
+    // Bills can't be edited, so the copied charges must still match. The figures must add up;
+    // they're not compared with the bill's payments now, as later payments are expected.
+    const entry = entriesById.get(receipt.entryId)!
+    const { charges } = receipt
+    const totalDue = toPaise(calculateTotalDue(entry))
+    const paid = toPaise(receipt.totalPaid)
+    if (
+      charges.rentAmount !== entry.rentAmount ||
+      charges.electricityUnits !== entry.electricityUnits ||
+      charges.electricityRate !== entry.electricityRate ||
+      charges.waterAmount !== entry.waterAmount ||
+      receipt.billingMonth !== entry.billingMonth ||
+      toPaise(receipt.totalDue) !== totalDue ||
+      paid < toPaise(receipt.paymentAmount) ||
+      paid > totalDue ||
+      toPaise(receipt.outstanding) !== totalDue - paid
+    ) {
+      throw new Error('A stored receipt does not match its bill.')
+    }
+  }
 }
 
-function readVersion2(parsed: Record<string, unknown>): RentLedger {
-  if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.payments)) {
+function readVersion3(parsed: Record<string, unknown>): RentLedger {
+  if (
+    !Array.isArray(parsed.entries) ||
+    !Array.isArray(parsed.payments) ||
+    !Array.isArray(parsed.receipts)
+  ) {
     throw new Error(UNKNOWN_FORMAT_MESSAGE)
   }
 
   const ledger: RentLedger = {
     entries: parsed.entries.map(toRentEntry),
     payments: parsed.payments.map(toPayment),
+    receipts: parsed.receipts.map(toReceipt),
   }
 
   validateLedgerRelationships(ledger)
@@ -154,12 +323,22 @@ function readVersion2(parsed: Record<string, unknown>): RentLedger {
   return ledger
 }
 
+// Version 2 had no receipts. None are issued during migration: the owners issue them
+// deliberately, after checking the issuer details.
+function migrateVersion2(parsed: Record<string, unknown>): RentLedger {
+  if (!Array.isArray(parsed.entries) || !Array.isArray(parsed.payments)) {
+    throw new Error(UNKNOWN_FORMAT_MESSAGE)
+  }
+
+  return readVersion3({ entries: parsed.entries, payments: parsed.payments, receipts: [] })
+}
+
 // Version 1 kept one payment on the entry itself (`totalPaid`, `paidDate`). Each becomes a
 // payment record; the bill and its balance are unchanged.
 function migrateVersion1(parsed: Record<string, unknown>): RentLedger {
   if (!Array.isArray(parsed.entries)) throw new Error(UNKNOWN_FORMAT_MESSAGE)
 
-  const ledger: RentLedger = { entries: [], payments: [] }
+  const ledger: Omit<RentLedger, 'receipts'> = { entries: [], payments: [] }
 
   parsed.entries.forEach((value, index) => {
     const fail: Fail = (reason) => {
@@ -201,16 +380,17 @@ function migrateVersion1(parsed: Record<string, unknown>): RentLedger {
     ledger.entries.push(entry)
   })
 
-  // The migrated ledger must pass the same checks as one saved by this version.
-  return readVersion2({ entries: ledger.entries, payments: ledger.payments })
+  // Then on as version 2 data: the migrated ledger must pass the same checks as one saved by
+  // this version.
+  return migrateVersion2({ entries: ledger.entries, payments: ledger.payments })
 }
 
-const emptyLedger = (): RentLedger => ({ entries: [], payments: [] })
+const emptyLedger = (): RentLedger => ({ entries: [], payments: [], receipts: [] })
 
 // Throws if stored data is unreadable or invalid. Callers must not treat that as "no
 // entries": saving over it would destroy the user's data.
-// Version 1 data is migrated and written back before it's returned; if migration or that write
-// fails, this throws and the original data stays as it was.
+// Older versions are migrated, validated and written back before they're returned; if migration
+// or that write fails, this throws and the original data stays as it was.
 export function loadRentLedger(): RentLedger {
   const raw = localStorage.getItem(RENT_LEDGER_STORAGE_KEY)
   if (raw === null) return emptyLedger()
@@ -218,24 +398,26 @@ export function loadRentLedger(): RentLedger {
   const parsed: unknown = JSON.parse(raw)
   if (!isRecord(parsed)) throw new Error(UNKNOWN_FORMAT_MESSAGE)
 
-  if (parsed.version === 2) return readVersion2(parsed)
+  if (parsed.version === 3) return readVersion3(parsed)
 
-  if (parsed.version === 1) {
-    const ledger = migrateVersion1(parsed)
-    saveRentLedger(ledger)
-    return ledger
-  }
+  let ledger: RentLedger
+  if (parsed.version === 2) ledger = migrateVersion2(parsed)
+  else if (parsed.version === 1) ledger = migrateVersion1(parsed)
+  else throw new Error(UNKNOWN_FORMAT_MESSAGE)
 
-  throw new Error(UNKNOWN_FORMAT_MESSAGE)
+  saveRentLedger(ledger)
+  return ledger
 }
 
-// One setItem for the whole ledger, so a bill and its payment are saved together or not at all.
+// One setItem for the whole ledger, so a bill and its payment (or a payment and its receipt)
+// are saved together or not at all.
 // Can throw (quota exceeded, storage disabled); the store turns that into user feedback.
 export function saveRentLedger(ledger: RentLedger): void {
   const payload: RentLedgerStorage = {
-    version: 2,
+    version: 3,
     entries: ledger.entries,
     payments: ledger.payments,
+    receipts: ledger.receipts,
   }
 
   localStorage.setItem(RENT_LEDGER_STORAGE_KEY, JSON.stringify(payload))

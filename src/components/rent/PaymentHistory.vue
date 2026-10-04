@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { Download } from '@lucide/vue'
+
+import { Button } from '@/components/ui/button'
 import type { Payment } from '@/types/payment'
 import { formatINR } from '@/utils/currency'
 import { formatDateValue } from '@/utils/date'
@@ -6,6 +9,13 @@ import { formatDateValue } from '@/utils/date'
 // Shown in the given order; the page sorts them.
 defineProps<{
   payments: Payment[]
+  // The payment whose receipt is being prepared; every button waits until it's done.
+  downloadingPaymentId?: string | null
+}>()
+
+const emit = defineEmits<{
+  // Issues the receipt if needed, then downloads it as a PDF.
+  'download-receipt': [paymentId: string]
 }>()
 </script>
 
@@ -20,7 +30,8 @@ defineProps<{
         <tr>
           <th scope="col" class="py-2 pr-4 font-medium">Paid date</th>
           <th scope="col" class="py-2 pr-4 text-right font-medium">Amount</th>
-          <th scope="col" class="w-full py-2 font-medium">Notes</th>
+          <th scope="col" class="w-full py-2 pr-4 font-medium">Notes</th>
+          <th scope="col" class="py-2 text-right font-medium">Receipt</th>
         </tr>
       </thead>
       <tbody>
@@ -35,8 +46,21 @@ defineProps<{
             {{ formatINR(payment.amount) }}
           </td>
           <!-- Text interpolation, never v-html: notes are user input. -->
-          <td class="py-2.5 break-words whitespace-pre-wrap text-muted-foreground">
+          <td class="py-2.5 pr-4 break-words whitespace-pre-wrap text-muted-foreground">
             {{ payment.notes.trim() ? payment.notes : '—' }}
+          </td>
+          <td class="py-1.5 text-right whitespace-nowrap">
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-9"
+              :disabled="!!downloadingPaymentId"
+              data-testid="download-receipt"
+              @click="emit('download-receipt', payment.id)"
+            >
+              <Download aria-hidden="true" />
+              {{ downloadingPaymentId === payment.id ? 'Preparing…' : 'Download receipt' }}
+            </Button>
           </td>
         </tr>
       </tbody>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRouter, type RouteLocationRaw } from 'vue-router'
-import { ArrowLeft, CircleCheck, User } from '@lucide/vue'
+import { ArrowLeft, CircleCheck, Download, User } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
@@ -73,6 +74,19 @@ const savedSummary = computed(() => {
     ...getEntryAmounts(entry, rentEntryStore.getTotalPaid(entry.id)),
   }
 })
+
+// The payment saved with the bill, if any: the one a receipt can be issued for.
+const initialPayment = computed(() =>
+  savedEntry.value ? (rentEntryStore.getPaymentsForEntry(savedEntry.value.id)[0] ?? null) : null,
+)
+
+// Issues (or reuses) the receipt and downloads it as a PDF. A failure shows here; the entry and
+// payment are already saved.
+const { downloadingPaymentId, error: receiptError, downloadReceipt } = useReceiptDownload()
+
+function downloadInitialReceipt() {
+  if (initialPayment.value) downloadReceipt(initialPayment.value.id)
+}
 
 // Leaving with unsaved changes (Cancel, or any in-app navigation) asks first.
 const isDirty = ref(false)
@@ -176,7 +190,31 @@ function handleDialogOpenChange(open: boolean) {
           </div>
         </dl>
 
-        <Button class="mt-6 h-12 w-full text-base" @click="goToDashboard">
+        <p
+          v-if="receiptError"
+          class="mt-6 w-full rounded-lg bg-destructive/10 px-4 py-3 text-left text-sm text-destructive"
+          role="alert"
+          data-testid="receipt-error"
+        >
+          {{ receiptError }}
+        </p>
+
+        <Button
+          v-if="initialPayment"
+          variant="outline"
+          class="mt-6 h-12 w-full text-base"
+          :disabled="!!downloadingPaymentId"
+          @click="downloadInitialReceipt"
+        >
+          <Download aria-hidden="true" />
+          {{ downloadingPaymentId ? 'Preparing…' : 'Download Receipt' }}
+        </Button>
+
+        <Button
+          class="h-12 w-full text-base"
+          :class="initialPayment ? 'mt-3' : 'mt-6'"
+          @click="goToDashboard"
+        >
           Back to Dashboard
         </Button>
       </section>

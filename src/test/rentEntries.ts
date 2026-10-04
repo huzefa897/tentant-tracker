@@ -5,6 +5,7 @@ import { RouterView } from 'vue-router'
 
 import router from '@/router'
 import type { Payment } from '@/types/payment'
+import type { PaymentReceipt } from '@/types/receipt'
 import type { RentEntry } from '@/types/rentEntry'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 
@@ -37,9 +38,53 @@ export function makePayment(overrides: Partial<Payment> = {}): Payment {
   }
 }
 
-// Writes a version 2 ledger, as the app saves it.
-export function storeLedger(entries: RentEntry[], payments: Payment[] = []) {
-  localStorage.setItem(RENT_LEDGER_STORAGE_KEY, JSON.stringify({ version: 2, entries, payments }))
+// A valid saved receipt for payment-1 against entry-1 (the make* defaults: ₹10,000 of a
+// ₹15,750 bill); tests override what they care about.
+export function makeReceipt(overrides: Partial<PaymentReceipt> = {}): PaymentReceipt {
+  return {
+    id: 'receipt-1',
+    reference: 'RCP-202-202609',
+    paymentId: 'payment-1',
+    entryId: 'entry-1',
+    issuedAt: '2026-10-03T07:00:00.000Z',
+    issuedDate: '2026-10-03',
+    issuer: {
+      name: 'Saleem Towers',
+      managerName: 'Test Manager',
+      address: '1 Example Road\nHyderabad',
+      contactNumber: '',
+      email: '',
+    },
+    tenant: {
+      name: 'Shaik Zahid Ali',
+      flatNumber: '202',
+      mobileNumber: '+918341413827',
+      depositAmount: 90000,
+    },
+    billingMonth: '2026-09',
+    rentDueDay: 11,
+    charges: { rentAmount: 15000, electricityUnits: 75, electricityRate: 6, waterAmount: 300 },
+    totalDue: 15750,
+    totalPaid: 10000,
+    outstanding: 5750,
+    previousMonthOutstanding: 0,
+    paymentAmount: 10000,
+    paidDate: '2026-10-03',
+    paymentNotes: '',
+    ...overrides,
+  }
+}
+
+// Writes a version 3 ledger, as the app saves it.
+export function storeLedger(
+  entries: RentEntry[],
+  payments: Payment[] = [],
+  receipts: PaymentReceipt[] = [],
+) {
+  localStorage.setItem(
+    RENT_LEDGER_STORAGE_KEY,
+    JSON.stringify({ version: 3, entries, payments, receipts }),
+  )
 }
 
 export function storeEntries(...entries: RentEntry[]) {
