@@ -4,7 +4,7 @@ import type { Payment } from '@/types/payment'
 import type { RentEntry } from '@/types/rentEntry'
 import type { RentLedger, RentLedgerStorage } from '@/types/rentLedger'
 import { isValidDateValue, isValidIsoTimestamp } from '@/utils/date'
-import { toPaise } from '@/utils/money'
+import { fromPaise, toPaise } from '@/utils/money'
 import { validatePaymentInput } from '@/utils/paymentValidation'
 import { calculateTotalDue } from '@/utils/rentCalculations'
 import { validateRentEntryInput } from '@/utils/rentEntryValidation'
@@ -178,16 +178,24 @@ function migrateVersion1(parsed: Record<string, unknown>): RentLedger {
     } else {
       if (typeof paidDate !== 'string' || !isValidDateValue(paidDate)) fail('paidDate')
 
-      ledger.payments.push({
-        // Deterministic, so migrating the same data twice gives the same ids.
-        id: `legacy-payment:${entry.id}`,
-        entryId: entry.id,
-        amount: totalPaid,
-        paidDate: paidDate as string,
-        notes: '',
-        // When it was recorded; when it was received stays `paidDate`.
-        createdAt: entry.createdAt,
-      })
+      // Version 1 allowed any number of decimals; payments are whole paise. Rounding can't
+      // push a payment over its bill: version 1 kept it within the total due, which is
+      // itself whole paise.
+      const amount = fromPaise(toPaise(totalPaid))
+
+      // Under half a paisa rounds to nothing, which leaves no payment to keep.
+      if (amount > 0) {
+        ledger.payments.push({
+          // Deterministic, so migrating the same data twice gives the same ids.
+          id: `legacy-payment:${entry.id}`,
+          entryId: entry.id,
+          amount,
+          paidDate: paidDate as string,
+          notes: '',
+          // When it was recorded; when it was received stays `paidDate`.
+          createdAt: entry.createdAt,
+        })
+      }
     }
 
     ledger.entries.push(entry)

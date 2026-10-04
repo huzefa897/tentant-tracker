@@ -171,6 +171,25 @@ describe('loadRentLedger', () => {
       expect(loadRentLedger()).toEqual(first)
     })
 
+    // Version 1's form had no decimal limit (step="any"), so this is valid stored data.
+    it('rounds a paid amount with more than two decimals to whole paise', () => {
+      storeVersion1({ ...legacyPaid, totalPaid: 5000.333 })
+
+      expect(loadRentLedger().payments[0]!.amount).toBe(5000.33)
+    })
+
+    it('keeps a bill paid in full when its amount rounds up to the total due', () => {
+      storeVersion1({ ...legacyPaid, totalPaid: 15749.996 })
+
+      expect(loadRentLedger().payments[0]!.amount).toBe(15750)
+    })
+
+    it('records no payment for an amount under half a paisa', () => {
+      storeVersion1({ ...legacyPaid, totalPaid: 0.004 })
+
+      expect(loadRentLedger()).toEqual({ entries: [entry], payments: [] })
+    })
+
     it('throws, and keeps the original data, when the write fails', () => {
       storeVersion1(legacyPaid)
       const original = localStorage.getItem(RENT_LEDGER_STORAGE_KEY)
