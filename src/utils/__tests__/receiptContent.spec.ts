@@ -7,7 +7,8 @@ import { getReceiptContent } from '@/utils/receiptContent'
 // A September bill: ₹17,000 rent, 109 units at ₹6, paid in full on 4 Oct.
 const paidInFull: Partial<PaymentReceipt> = {
   reference: 'RCP-102-202609',
-  issuedAt: new Date(2026, 9, 4, 12).toISOString(),
+  issuedAt: '2026-10-04T06:30:00.000Z',
+  issuedDate: '2026-10-04',
   issuer: {
     name: 'Saleem Towers',
     managerName: 'Test Manager',
@@ -57,6 +58,15 @@ describe('getReceiptContent', () => {
       paidInFull: true,
       status: 'PAID',
     })
+  })
+
+  // 15:30 UTC on 3 Oct is already 4 Oct in Sydney: the saved date wins, wherever it's downloaded.
+  it('prints the saved issue date, not one worked out from the issue time', () => {
+    const content = getReceiptContent(
+      makeReceipt({ issuedAt: '2026-10-03T15:30:00.000Z', issuedDate: '2026-10-03' }),
+    )
+
+    expect(content.receiptDate).toBe('03/10/2026')
   })
 
   it('lists the issuer and tenant details', () => {

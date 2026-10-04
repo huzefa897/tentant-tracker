@@ -122,6 +122,9 @@ function toReceipt(value: unknown, index: number): PaymentReceipt {
   if (!isNonEmptyString(value.paymentId)) return fail('paymentId')
   if (!isNonEmptyString(value.entryId)) return fail('entryId')
   if (!isValidTimestamp(value.issuedAt)) return fail('issuedAt')
+  if (typeof value.issuedDate !== 'string' || !isValidDateValue(value.issuedDate)) {
+    return fail('issuedDate')
+  }
 
   const { issuer, tenant, charges } = value
   if (!isRecord(issuer)) return fail('issuer')
@@ -176,6 +179,7 @@ function toReceipt(value: unknown, index: number): PaymentReceipt {
     paymentId: value.paymentId,
     entryId: value.entryId,
     issuedAt: value.issuedAt,
+    issuedDate: value.issuedDate,
     issuer: {
       name: issuer.name,
       managerName: issuer.managerName,

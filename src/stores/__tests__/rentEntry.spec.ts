@@ -14,6 +14,7 @@ import { useTenantStore } from '@/stores/tenant'
 import type { PaymentInput } from '@/types/payment'
 import type { NewRentEntrySubmission, RentEntryInput } from '@/types/rentEntry'
 import { RENT_LEDGER_STORAGE_KEY, saveRentLedger } from '@/utils/rentLedgerStorage'
+import { toDateValue } from '@/utils/date'
 
 // Total due: 15000 + 75 × 6 + 300 = 15750
 const input: RentEntryInput = {
@@ -498,6 +499,7 @@ describe('useRentEntryStore', () => {
         paymentId: payment.id,
         entryId: entry.id,
         issuedAt: '2026-10-03T06:30:00.000Z',
+        issuedDate: toDateValue(new Date('2026-10-03T06:30:00.000Z')),
         issuer: {
           name: receiptIssuer.name,
           managerName: receiptIssuer.managerName,

@@ -47,6 +47,7 @@ export function makeReceipt(overrides: Partial<PaymentReceipt> = {}): PaymentRec
     paymentId: 'payment-1',
     entryId: 'entry-1',
     issuedAt: '2026-10-03T07:00:00.000Z',
+    issuedDate: '2026-10-03',
     issuer: {
       name: 'Saleem Towers',
       managerName: 'Test Manager',

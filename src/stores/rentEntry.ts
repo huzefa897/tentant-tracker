@@ -267,12 +267,14 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       reference = `${reference}-${payment.id}`
     }
 
+    const now = new Date()
     const receipt: PaymentReceipt = {
       id: crypto.randomUUID(),
       reference,
       paymentId: payment.id,
       entryId: entry.id,
-      issuedAt: new Date().toISOString(),
+      issuedAt: now.toISOString(),
+      issuedDate: toDateValue(now),
       // Copies, so the snapshot never shares objects with the config or the tenant list.
       issuer: {
         name: receiptIssuer.name.trim(),
