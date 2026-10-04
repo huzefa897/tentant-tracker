@@ -70,7 +70,13 @@ function clearFilters() {
 
 // The router reuses this page when only the tenant in the URL changes; one tenant's filters
 // shouldn't hide another's entries.
-watch(() => props.tenantId, clearFilters)
+watch(
+  () => props.tenantId,
+  () => {
+    clearFilters()
+    receiptError.value = null
+  },
+)
 
 function goToDashboard() {
   router.push({ name: 'dashboard' })
@@ -82,6 +88,29 @@ function addEntry() {
 
 function viewEntry(entryId: string) {
   router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
+}
+
+const receiptError = ref<string | null>(null)
+
+// The receipt for the bill's most recently recorded payment, issued first if needed (issuing
+// returns an existing receipt, so this never creates a second). It shows the bill's total paid
+// to date. Each payment's own receipt is on the summary page.
+function viewReceipt(entryId: string) {
+  const payment = rentEntryStore.getPaymentsForEntry(entryId).slice(-1)[0]
+  if (!payment) return
+
+  receiptError.value = null
+
+  try {
+    const receipt = rentEntryStore.issueReceipt(payment.id)
+    router.push({
+      name: 'payment-receipt',
+      params: { tenantId: props.tenantId, entryId, receiptId: receipt.id },
+    })
+  } catch (error) {
+    receiptError.value =
+      error instanceof Error ? error.message : 'Unable to issue the receipt. Please try again.'
+  }
 }
 </script>
 
@@ -171,7 +200,15 @@ function viewEntry(entryId: string) {
 
         <template v-if="filteredBills.length > 0">
           <RentEntryTotals :totals="totals" />
-          <RentEntryHistory :bills="filteredBills" @view="viewEntry" />
+          <p
+            v-if="receiptError"
+            class="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            role="alert"
+            data-testid="receipt-error"
+          >
+            {{ receiptError }}
+          </p>
+          <RentEntryHistory :bills="filteredBills" @view="viewEntry" @view-receipt="viewReceipt" />
         </template>
 
         <div
