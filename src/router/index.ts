@@ -63,7 +63,8 @@ const router = createRouter({
       path: '/tenants/:tenantId/entries/:entryId/receipts/:receiptId',
       name: 'payment-receipt',
       component: () => import('@/views/PaymentReceiptView.vue'),
-      props: true,
+      // `?from=` says which page opened the receipt, so Back returns there (after a refresh too).
+      props: (route) => ({ ...route.params, from: route.query.from }),
       meta: { requiresAuth: true },
     },
     {

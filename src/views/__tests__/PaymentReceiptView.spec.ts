@@ -124,14 +124,44 @@ describe('PaymentReceiptView', () => {
     expect(view!.get('.receipt-document').find('button').exists()).toBe(false)
   })
 
-  it('goes back to the entry by route', async () => {
-    storeLedger([entry], payments, [receipt])
-    await openReceipt()
+  // Back returns to the page that opened the receipt, by route rather than browser history.
+  describe('Back', () => {
+    const receiptPath = '/tenants/tenant-001/entries/entry-1/receipts/receipt-1'
 
-    await button('Back to Entry').trigger('click')
+    it.each([
+      ['the entry', 'from=entry', 'Back to Entry', '/tenants/tenant-001/entries/entry-1'],
+      [
+        'Previous Entries',
+        'from=history',
+        'Back to Previous Entries',
+        '/tenants/tenant-001/entries',
+      ],
+      ['the dashboard after a new entry', 'from=new-entry', 'Back to Dashboard', '/dashboard'],
+      ['the entry without a from', '', 'Back to Entry', '/tenants/tenant-001/entries/entry-1'],
+      [
+        'the entry for an unknown from',
+        'from=elsewhere',
+        'Back to Entry',
+        '/tenants/tenant-001/entries/entry-1',
+      ],
+    ])('goes to %s', async (_, query, label, destination) => {
+      storeLedger([entry], payments, [receipt])
+      await openReceipt(query ? `${receiptPath}?${query}` : receiptPath)
+      const browserBack = vi.spyOn(router, 'back')
 
-    await vi.waitFor(() =>
-      expect(router.currentRoute.value.fullPath).toBe('/tenants/tenant-001/entries/entry-1'),
-    )
+      await button(label).trigger('click')
+
+      await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe(destination))
+      expect(browserBack).not.toHaveBeenCalled()
+    })
+
+    it('still goes to Previous Entries after a refresh', async () => {
+      storeLedger([entry], payments, [receipt])
+      await openReceipt(`${receiptPath}?from=history`)
+      view!.unmount()
+      await openReceipt(`${receiptPath}?from=history`)
+
+      expect(button('Back to Previous Entries').exists()).toBe(true)
+    })
   })
 })

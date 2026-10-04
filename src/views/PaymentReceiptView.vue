@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { type RouteLocationRaw, useRouter } from 'vue-router'
 import { ArrowLeft, Printer } from '@lucide/vue'
 
 import PaymentReceiptDocument from '@/components/receipt/PaymentReceiptDocument.vue'
@@ -13,6 +13,8 @@ const props = defineProps<{
   tenantId: string
   entryId: string
   receiptId: string
+  // The page that opened the receipt (`?from=`); anything else goes back to the entry.
+  from?: unknown
 }>()
 
 const rentEntryStore = useRentEntryStore()
@@ -40,7 +42,34 @@ function printReceipt() {
   window.print()
 }
 
-// Explicit route, not router.back(): a direct link has no in-app page to go back to.
+// Back goes to the page the receipt was opened from. Explicit routes, not router.back(): a
+// direct link has no in-app page to go back to. The new-entry confirmation can't be reopened,
+// so receipts opened from it go back to the dashboard.
+const back = computed<{ label: string; to: RouteLocationRaw }>(() => {
+  if (props.from === 'history') {
+    return {
+      label: 'Back to Previous Entries',
+      to: { name: 'rent-entry-history', params: { tenantId: props.tenantId } },
+    }
+  }
+
+  if (props.from === 'new-entry') {
+    return { label: 'Back to Dashboard', to: { name: 'dashboard' } }
+  }
+
+  return {
+    label: 'Back to Entry',
+    to: {
+      name: 'rent-entry-details',
+      params: { tenantId: props.tenantId, entryId: props.entryId },
+    },
+  }
+})
+
+function goBack() {
+  router.push(back.value.to)
+}
+
 function goToEntry() {
   router.push({
     name: 'rent-entry-details',
@@ -52,9 +81,9 @@ function goToEntry() {
 <template>
   <AppLayout>
     <template #header-actions>
-      <Button variant="ghost" class="h-11 text-muted-foreground" @click="goToEntry">
+      <Button variant="ghost" class="h-11 text-muted-foreground" @click="goBack">
         <ArrowLeft aria-hidden="true" />
-        Back to Entry
+        {{ back.label }}
       </Button>
     </template>
 
