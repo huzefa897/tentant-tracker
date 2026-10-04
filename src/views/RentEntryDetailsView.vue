@@ -242,7 +242,8 @@ function goToHistory() {
         </p>
       </header>
 
-      <div class="grid gap-6 lg:grid-cols-2">
+      <!-- Wide screens: charges, payment and other in one row, payment history below it. -->
+      <div class="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
         <section aria-labelledby="charges-heading" class="rounded-xl border p-4 sm:p-6">
           <h2 id="charges-heading" class="mb-3 font-semibold">Charges</h2>
           <dl class="space-y-2 text-sm" data-testid="charges">
@@ -286,7 +287,7 @@ function goToHistory() {
 
         <section
           aria-labelledby="payment-history-heading"
-          class="rounded-xl border p-4 sm:p-6 lg:col-span-2"
+          class="rounded-xl border p-4 sm:p-6 lg:col-span-2 xl:order-last xl:col-span-3"
         >
           <h2 id="payment-history-heading" class="mb-3 font-semibold">Payment history</h2>
           <p
@@ -306,7 +307,10 @@ function goToHistory() {
           />
         </section>
 
-        <section aria-labelledby="other-heading" class="rounded-xl border p-4 sm:p-6 lg:col-span-2">
+        <section
+          aria-labelledby="other-heading"
+          class="rounded-xl border p-4 sm:p-6 lg:col-span-2 xl:col-span-1"
+        >
           <h2 id="other-heading" class="mb-3 font-semibold">Other</h2>
           <dl class="space-y-3 text-sm" data-testid="other">
             <div>
