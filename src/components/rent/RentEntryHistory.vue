@@ -58,12 +58,21 @@ const rows = computed(() =>
             </td>
             <td class="px-4 py-2">
               <div class="flex justify-end gap-2">
-                <Button variant="ghost" class="h-10" :aria-label="`View summary for ${row.month}`"
-                  @click="emit('view', row.id)">
+                <Button
+                  variant="ghost"
+                  class="h-10"
+                  :aria-label="`View summary for ${row.month}`"
+                  @click="emit('view', row.id)"
+                >
                   View Summary
                 </Button>
-                <Button v-if="row.totalPaid > 0" variant="outline" class="h-10"
-                  :aria-label="`View or print receipt for ${row.month}`" @click="emit('view-receipt', row.id)">
+                <Button
+                  v-if="row.totalPaid > 0"
+                  variant="outline"
+                  class="h-10"
+                  :aria-label="`View or print receipt for ${row.month}`"
+                  @click="emit('view-receipt', row.id)"
+                >
                   <Printer aria-hidden="true" />
                   Print Receipt
                 </Button>
@@ -76,7 +85,12 @@ const rows = computed(() =>
 
     <!-- Mobile -->
     <ul class="space-y-3 md:hidden">
-      <li v-for="row in rows" :key="row.id" class="rounded-xl border bg-card p-4" data-testid="history-card">
+      <li
+        v-for="row in rows"
+        :key="row.id"
+        class="rounded-xl border bg-card p-4"
+        data-testid="history-card"
+      >
         <div class="flex items-center justify-between gap-3">
           <h3 class="font-semibold">{{ row.month }}</h3>
           <PaymentStatusBadge :status="row.status" />
@@ -96,13 +110,22 @@ const rows = computed(() =>
           </div>
         </dl>
         <div class="mt-4 grid gap-2">
-          <Button variant="outline" class="h-11 w-full" :aria-label="`View summary for ${row.month}`"
-            @click="emit('view', row.id)">
+          <Button
+            variant="outline"
+            class="h-11 w-full"
+            :aria-label="`View summary for ${row.month}`"
+            @click="emit('view', row.id)"
+          >
             View Summary
             <ChevronRight aria-hidden="true" />
           </Button>
-          <Button v-if="row.totalPaid > 0" variant="outline" class="h-11 w-full"
-            :aria-label="`View or print receipt for ${row.month}`" @click="emit('view-receipt', row.id)">
+          <Button
+            v-if="row.totalPaid > 0"
+            variant="outline"
+            class="h-11 w-full"
+            :aria-label="`View or print receipt for ${row.month}`"
+            @click="emit('view-receipt', row.id)"
+          >
             <Printer aria-hidden="true" />
             Print Receipt
           </Button>

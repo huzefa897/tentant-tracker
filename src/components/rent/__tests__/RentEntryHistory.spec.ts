@@ -38,9 +38,9 @@ describe('RentEntryHistory', () => {
         '₹10,000',
         '₹5,750',
         'Partially paid',
-        'View Summary  View / Print Receipt',
+        'View Summary  Print Receipt',
       ],
-      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'View Summary  View / Print Receipt'],
+      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'View Summary  Print Receipt'],
       // Nothing paid, so nothing to receipt.
       ['August 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
     ])

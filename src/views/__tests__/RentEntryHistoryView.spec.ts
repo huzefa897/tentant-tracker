@@ -97,7 +97,7 @@ describe('RentEntryHistoryView', () => {
       '₹10,000',
       '₹5,750',
       'Partially paid',
-      'View Summary  View / Print Receipt',
+      'View Summary  Print Receipt',
     ])
     expect(view!.text()).not.toContain('July 2026')
   })
