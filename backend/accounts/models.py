@@ -1,23 +1,59 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Q
+
+from .phone import format_phone_number, normalize_phone_number, validate_phone_number
 
 
 class User(AbstractUser):
-    """App user. Roles belong on property membership, not here.
+    """A person. Admin portal access (is_staff/is_superuser, password login) and app
+    sign-in (firebase_uid, phone login) are separate permissions on the same person;
+    property access comes only from PropertyMembership.
 
-    firebase_uid is null for local Django admins (username/password login);
-    Firebase-backed users get one in BE Phase 2. Null, not blank, so several
-    admins can exist without breaking the unique constraint.
+    App sign-in is invite-only: adding a person with a mobile number in admin links a
+    Firebase identity to them (accounts/services.py). A Firebase login with any other
+    number is refused and creates nothing.
     """
 
+    # Null, not blank, so several admins can exist without breaking uniqueness.
     firebase_uid = models.CharField(
         max_length=128,
         unique=True,
         null=True,
         blank=True,
+        editable=False,
+        verbose_name="Firebase UID",
     )
 
     phone_number = models.CharField(
         max_length=20,
         blank=True,
+        validators=[validate_phone_number],
+        verbose_name="mobile number",
+        help_text="With country code, e.g. +91 83414 13827. This number can sign in to the app.",
     )
+
+    class Meta(AbstractUser.Meta):
+        verbose_name = "person"
+        verbose_name_plural = "people"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["phone_number"],
+                condition=~Q(phone_number=""),
+                name="unique_user_phone_number",
+                violation_error_message="Another person already has this mobile number.",
+            ),
+        ]
+
+    def clean_fields(self, exclude=None):
+        # Before field validation, so "+91 89778 67546" validates as "+918977867546".
+        self.phone_number = normalize_phone_number(self.phone_number)
+        super().clean_fields(exclude=exclude)
+
+    @property
+    def display_name(self) -> str:
+        # Names come later; until then a person is shown by their mobile number.
+        return format_phone_number(self.phone_number) if self.phone_number else self.username
+
+    def __str__(self):
+        return self.display_name

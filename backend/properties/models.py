@@ -30,7 +30,8 @@ class Property(models.Model):
 
 
 class PropertyMembership(models.Model):
-    """What a user may access. Owners and managers can both read their property for now."""
+    """A person's role at a property: the only thing that grants property access.
+    What each role may do is in properties/roles.py."""
 
     class Role(models.TextChoices):
         OWNER = "owner", "Owner"
@@ -50,7 +51,19 @@ class PropertyMembership(models.Model):
         max_length=20,
         choices=Role.choices,
     )
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Inactive memberships keep their history but grant no access.",
+    )
+    # Who gave this access, for auditing. Kept if that person is later removed.
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name="+",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -62,4 +75,4 @@ class PropertyMembership(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.user} – {self.property} ({self.role})"
+        return f"{self.user} | {self.property} | {self.get_role_display()}"
