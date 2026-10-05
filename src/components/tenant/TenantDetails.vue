@@ -96,6 +96,11 @@ const details = computed<DetailItem[]>(() => [
         </div>
       </div>
 
+      <!-- Below the name: the page fills it (the dashboard shows the latest entry). -->
+      <div v-if="$slots['latest-entry']" class="mb-6">
+        <slot name="latest-entry" />
+      </div>
+
       <dl class="grid gap-3 sm:grid-cols-2 lg:grid-cols-12">
         <div
           v-for="item in details"

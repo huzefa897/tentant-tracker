@@ -21,7 +21,11 @@ import WaveBackground from '@/components/brand/WaveBackground.vue'
         <slot name="header-actions" />
       </header>
 
-      <div class="flex-1 px-6 py-8 sm:px-10 lg:px-12 lg:py-10" data-testid="app-content">
+      <!-- Each screen mounts its own layout, so the content eases in on every screen change. -->
+      <div
+        class="flex-1 animate-page-in px-6 py-8 sm:px-10 lg:px-12 lg:py-10"
+        data-testid="app-content"
+      >
         <slot />
       </div>
     </div>

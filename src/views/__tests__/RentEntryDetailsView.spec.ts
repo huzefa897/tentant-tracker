@@ -24,8 +24,8 @@ vi.mock('@/services/auth.service', () => ({
 
 let view: VueWrapper | undefined
 
-async function openDetails(tenantId: string, entryId: string) {
-  view = await openPage(`/tenants/${tenantId}/entries/${entryId}`)
+async function openDetails(tenantId: string, entryId: string, query = '') {
+  view = await openPage(`/tenants/${tenantId}/entries/${entryId}${query}`)
   return view
 }
 
@@ -199,6 +199,26 @@ describe('RentEntryDetailsView', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
     expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
     expect(back).not.toHaveBeenCalled()
+  })
+
+  it('goes back to the dashboard, with the tenant selected, when opened from there', async () => {
+    storeEntries(entry)
+    await openDetails('tenant-001', 'sep', '?from=dashboard')
+
+    expect(view!.text()).not.toContain('Back to Previous Entries')
+    await button('Back to Dashboard').trigger('click')
+
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('dashboard'))
+    expect(useTenantStore().selectedTenantId).toBe('tenant-001')
+  })
+
+  it('ignores an unknown entry point and goes back to the history', async () => {
+    storeEntries(entry)
+    await openDetails('tenant-001', 'sep', '?from=elsewhere')
+
+    await button('Back to Previous Entries').trigger('click')
+
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
   })
 })
 

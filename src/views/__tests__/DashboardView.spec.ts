@@ -6,6 +6,7 @@ import router from '@/router'
 import { authService } from '@/services/auth.service'
 import { LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
+import { makeEntry, makePayment, storeLedger } from '@/test/rentEntries'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 import DashboardView from '@/views/DashboardView.vue'
 
@@ -150,6 +151,53 @@ describe('DashboardView', () => {
 
       expect(view!.text()).not.toContain(LOAD_ERROR_MESSAGE)
       expect(previousEntriesText()).toBe('Previous Entries (1)')
+    })
+
+    it('shows the selected tenant’s latest entry below the name', async () => {
+      storeLedger(
+        [
+          makeEntry({ id: 'entry-aug', billingMonth: '2026-08' }),
+          makeEntry({ id: 'entry-oct', billingMonth: '2026-10', waterAmount: 0 }),
+          makeEntry({ id: 'entry-sep', billingMonth: '2026-09' }),
+        ],
+        [
+          makePayment({ id: 'p1', entryId: 'entry-oct', amount: 5000, paidDate: '2026-10-05' }),
+          makePayment({ id: 'p2', entryId: 'entry-oct', amount: 2000, paidDate: '2026-10-08' }),
+        ],
+      )
+      await mountView()
+      useTenantStore().selectTenant('tenant-001')
+      await flushPromises()
+
+      const card = view!.get('[aria-labelledby="latest-entry-heading"]')
+      expect(card.get('h3').text()).toBe('October 2026')
+      expect(card.text()).toContain('Total paid (last 8 Oct 2026)')
+      expect(card.text()).toContain('₹7,000')
+      expect(card.text()).toContain('₹8,450')
+
+      await card.get('button').trigger('click')
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
+      expect(router.currentRoute.value.params).toEqual({
+        tenantId: 'tenant-001',
+        entryId: 'entry-oct',
+      })
+      // So the summary's back button returns to the dashboard.
+      expect(router.currentRoute.value.query).toEqual({ from: 'dashboard' })
+    })
+
+    it('shows no latest entry for a tenant without entries, or when entries fail to load', async () => {
+      storeEntries('2026-09')
+      await mountView()
+      useTenantStore().selectTenant('tenant-002')
+      await flushPromises()
+      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
+
+      view!.unmount()
+      localStorage.setItem(RENT_LEDGER_STORAGE_KEY, 'corrupt')
+      await mountView()
+      useTenantStore().selectTenant('tenant-001')
+      await flushPromises()
+      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
     })
 
     it('keeps saved entries across logout and login', async () => {
