@@ -10,7 +10,7 @@ import WaveBackground from '@/components/brand/WaveBackground.vue'
     <WaveBackground />
 
     <section
-      class="relative w-full max-w-[520px] rounded-2xl bg-card px-6 py-10 text-card-foreground shadow-2xl shadow-black/30 sm:px-10"
+      class="relative w-full max-w-[520px] animate-page-in rounded-2xl bg-card px-6 py-10 text-card-foreground shadow-2xl shadow-black/30 sm:px-10"
     >
       <slot name="corner" />
 

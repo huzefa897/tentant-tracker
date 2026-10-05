@@ -72,6 +72,7 @@ Skills are task guides in `.claude/skills/<name>/SKILL.md`. Claude Code loads th
 - Phone numbers are stored as E.164 (`+918341413827`); format for display only (`utils/phone.ts`).
 - Login accepts India, Australia and US mobiles. Countries live in one table (`utils/phoneCountries.ts`) that drives validation, input grouping, display and the login country picker; add a country there (and its flag in `components/brand/CountryFlag.vue`).
 - Errors are shown inline (`role="alert"`), never `alert()`.
+- Motion lives in `style.css`: `animate-page-in` (layout content, so every screen eases in), `animate-rise-in` (content that appears or changes in place; key the element to replay it) and a press-in on every `[data-slot=button]`. All of it is off under `prefers-reduced-motion`; don't hand-edit `components/ui/` for motion.
 - `VITE_*` env vars are public — never put secrets in them.
 
 ## Current state

@@ -230,7 +230,7 @@ function goToHistory() {
         </p>
         <p
           v-if="confirmation"
-          class="mt-4 flex items-center gap-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
+          class="mt-4 flex animate-rise-in items-center gap-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
           role="status"
         >
           <CircleCheck class="size-5 shrink-0" aria-hidden="true" />

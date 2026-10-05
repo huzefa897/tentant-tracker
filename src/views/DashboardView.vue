@@ -135,8 +135,11 @@ function openHistory() {
       @retry="rentEntryStore.initialize"
     />
 
+    <!-- Keyed, so switching tenants plays the rise-in again. -->
     <TenantDetails
       v-if="tenantStore.selectedTenant"
+      :key="tenantStore.selectedTenant.id"
+      class="animate-rise-in"
       :tenant="tenantStore.selectedTenant"
       :entry-count="selectedTenantEntryCount"
       @add-entry="openNewEntry"

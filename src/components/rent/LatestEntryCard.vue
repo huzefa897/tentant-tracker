@@ -40,7 +40,10 @@ const charges = computed(() => [
 </script>
 
 <template>
-  <section aria-labelledby="latest-entry-heading" class="rounded-xl border bg-card p-4 sm:p-5">
+  <section
+    aria-labelledby="latest-entry-heading"
+    class="animate-rise-in rounded-xl border bg-card p-4 sm:p-5"
+  >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <p class="text-xs text-muted-foreground">Latest entry</p>

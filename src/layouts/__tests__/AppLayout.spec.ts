@@ -27,4 +27,9 @@ describe('AppLayout', () => {
     expect(card.classes()).toContain('w-full')
     expect(card.classes()).toContain('max-w-[1800px]')
   })
+
+  // Each screen mounts its own layout, so this plays on every screen change.
+  it('eases the page content in', () => {
+    expect(mountLayout().get('[data-testid="app-content"]').classes()).toContain('animate-page-in')
+  })
 })
