@@ -1,33 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, CircleCheck, Plus, User } from '@lucide/vue'
+import { ArrowLeft, CircleCheck, User } from '@lucide/vue'
 
-import PaymentHistory from '@/components/rent/PaymentHistory.vue'
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
-import RecordPaymentForm from '@/components/rent/RecordPaymentForm.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { useReceiptDownload } from '@/composables/useReceiptDownload'
+import { useRouteEntry } from '@/composables/useRouteEntry'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
-import { useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import { formatINR } from '@/utils/currency'
-import type { PaymentInput } from '@/types/payment'
 import { formatMonthValue, formatTimestamp } from '@/utils/date'
-import {
-  calculateElectricity,
-  getEntryAmounts,
-  sortPaymentsNewestFirst,
-} from '@/utils/rentCalculations'
 
 const props = defineProps<{
   tenantId: string
@@ -36,7 +20,6 @@ const props = defineProps<{
   from?: 'dashboard' | 'history'
 }>()
 
-const rentEntryStore = useRentEntryStore()
 const tenantStore = useTenantStore()
 const router = useRouter()
 
@@ -47,79 +30,20 @@ const {
   retry: retryTenants,
 } = useRouteTenant(() => props.tenantId)
 
-onMounted(() => rentEntryStore.initialize())
-
-// Match both ids, so an entry never shows under another tenant's URL.
-const entry = computed(
-  () =>
-    rentEntryStore.entries.find(
-      (item) => item.id === props.entryId && item.tenantId === props.tenantId,
-    ) ?? null,
-)
-
-// Paid and outstanding come from the entry's payment records.
-const amounts = computed(() =>
-  entry.value ? getEntryAmounts(entry.value, rentEntryStore.getTotalPaid(entry.value.id)) : null,
-)
-
-const payments = computed(() =>
-  entry.value ? sortPaymentsNewestFirst(rentEntryStore.getPaymentsForEntry(entry.value.id)) : [],
-)
-
-const paymentDialogOpen = ref(false)
-const savingPayment = ref(false)
-const paymentError = ref<string | null>(null)
-const confirmation = ref<string | null>(null)
-
-function openPaymentDialog() {
-  paymentError.value = null
-  confirmation.value = null
-  paymentDialogOpen.value = true
-}
-
-// The store re-checks the outstanding balance and writes before updating state, so the
-// confirmation only appears once the payment is saved. On failure the dialog stays open with
-// the entered values.
-function handleSavePayment({ id, input }: { id: string; input: PaymentInput }) {
-  if (savingPayment.value) return
-
-  savingPayment.value = true
-  paymentError.value = null
-
-  try {
-    const payment = rentEntryStore.addPayment(input, id)
-    paymentDialogOpen.value = false
-    confirmation.value = `Payment of ${formatINR(payment.amount)} recorded.`
-  } catch (error) {
-    paymentError.value =
-      error instanceof Error ? error.message : 'Unable to save the payment. Please try again.'
-  } finally {
-    savingPayment.value = false
-  }
-}
-
-// Each payment's receipt downloads as a PDF. A failure shows here and leaves the payment as it
-// was: it's already recorded.
+// Loaded from the backend by its URL, matched on both ids, so it survives a refresh and never
+// shows under another tenant.
 const {
-  downloadingPaymentId,
-  error: receiptError,
-  downloadReceipt,
-  clearError: clearReceiptError,
-} = useReceiptDownload()
-
-// The router reuses this page when only the ids in the URL change: nothing from one entry
-// should show on another.
-watch(
-  () => [props.tenantId, props.entryId],
-  () => {
-    paymentDialogOpen.value = false
-    paymentError.value = null
-    confirmation.value = null
-    clearReceiptError()
-  },
+  entry,
+  status: entryStatus,
+  error: entryError,
+  retry: retryEntry,
+} = useRouteEntry(
+  () => props.tenantId,
+  () => props.entryId,
 )
 
-// Rent and rate come from the entry, not the tenant: the tenant's current rates may have changed.
+// Rent and rate come from the entry, not the tenant: the tenant's current rates may have
+// changed. The amounts are the backend's.
 const charges = computed(() => {
   const value = entry.value
   if (!value) return []
@@ -128,10 +52,7 @@ const charges = computed(() => {
     { label: 'Rent', value: formatINR(value.rentAmount) },
     { label: 'Electricity units', value: String(value.electricityUnits) },
     { label: 'Electricity rate', value: `${formatINR(value.electricityRate)} / unit` },
-    {
-      label: 'Electricity amount',
-      value: formatINR(calculateElectricity(value.electricityUnits, value.electricityRate)),
-    },
+    { label: 'Electricity amount', value: formatINR(value.electricityAmount) },
     { label: 'Water', value: formatINR(value.waterAmount) },
   ]
 })
@@ -192,17 +113,17 @@ function goToHistory() {
     </div>
 
     <RentEntriesLoadError
-      v-else-if="rentEntryStore.loadError"
-      :message="rentEntryStore.loadError"
-      @retry="rentEntryStore.initialize"
+      v-else-if="entryStatus === 'error'"
+      :message="entryError ?? ''"
+      @retry="retryEntry"
     />
 
-    <p v-else-if="!rentEntryStore.initialized" class="text-muted-foreground" role="status">
+    <p v-else-if="entryStatus === 'loading'" class="text-muted-foreground" role="status">
       Loading entry…
     </p>
 
     <div
-      v-else-if="!entry || !amounts"
+      v-else-if="!entry"
       class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
       role="alert"
     >
@@ -219,7 +140,7 @@ function goToHistory() {
           <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">
             {{ formatMonthValue(entry.billingMonth) }}
           </h1>
-          <PaymentStatusBadge :status="amounts.status" />
+          <PaymentStatusBadge :status="entry.status" />
         </div>
         <p
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
@@ -228,17 +149,9 @@ function goToHistory() {
           <User class="size-4" aria-hidden="true" />
           {{ tenant.name }} · Flat {{ tenant.flatNumber }}
         </p>
-        <p
-          v-if="confirmation"
-          class="mt-4 flex animate-rise-in items-center gap-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
-          role="status"
-        >
-          <CircleCheck class="size-5 shrink-0" aria-hidden="true" />
-          {{ confirmation }}
-        </p>
       </header>
 
-      <!-- Wide screens: charges, payment and other in one row, payment history below it. -->
+      <!-- Wide screens: charges, payment and other in one row. -->
       <div class="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
         <section aria-labelledby="charges-heading" class="rounded-xl border p-4 sm:p-6">
           <h2 id="charges-heading" class="mb-3 font-semibold">Charges</h2>
@@ -255,50 +168,34 @@ function goToHistory() {
           <dl class="space-y-2 text-sm" data-testid="payment">
             <div class="flex justify-between gap-4">
               <dt class="text-muted-foreground">Total due</dt>
-              <dd class="tabular-nums">{{ formatINR(amounts.totalDue) }}</dd>
+              <dd class="tabular-nums">{{ formatINR(entry.totalDue) }}</dd>
             </div>
             <div class="flex justify-between gap-4">
               <dt class="text-muted-foreground">Total paid</dt>
-              <dd class="tabular-nums">{{ formatINR(amounts.totalPaid) }}</dd>
+              <dd class="tabular-nums">{{ formatINR(entry.totalPaid) }}</dd>
             </div>
             <div class="flex justify-between gap-4 border-t pt-2 text-base font-semibold">
               <dt>Outstanding</dt>
-              <dd class="tabular-nums">{{ formatINR(amounts.outstanding) }}</dd>
+              <dd class="tabular-nums">{{ formatINR(entry.outstanding) }}</dd>
             </div>
           </dl>
 
           <p
-            v-if="amounts.status === 'paid'"
+            v-if="entry.status === 'paid'"
             class="mt-4 flex h-11 items-center justify-center gap-2 rounded-lg bg-success/10 font-medium text-success"
             data-testid="fully-paid"
           >
             <CircleCheck class="size-5" aria-hidden="true" />
             Fully paid
           </p>
-          <Button v-else class="mt-4 h-11 w-full" @click="openPaymentDialog">
-            <Plus aria-hidden="true" />
-            Record Payment
-          </Button>
-        </section>
-
-        <section
-          aria-labelledby="payment-history-heading"
-          class="rounded-xl border p-4 sm:p-6 lg:col-span-2 xl:order-last xl:col-span-3"
-        >
-          <h2 id="payment-history-heading" class="mb-3 font-semibold">Payment history</h2>
+          <!-- Payments move to the backend in BE Phase 5. -->
           <p
-            v-if="receiptError"
-            class="mb-3 rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive"
-            role="alert"
-            data-testid="receipt-error"
+            v-else
+            class="mt-4 rounded-lg bg-muted px-4 py-3 text-sm text-muted-foreground"
+            data-testid="payments-unavailable"
           >
-            {{ receiptError }}
+            Payments can't be recorded yet. They're coming in the next update.
           </p>
-          <PaymentHistory
-            :payments="payments"
-            :downloading-payment-id="downloadingPaymentId"
-            @download-receipt="downloadReceipt"
-          />
         </section>
 
         <section
@@ -321,25 +218,6 @@ function goToHistory() {
           </dl>
         </section>
       </div>
-
-      <Dialog v-model:open="paymentDialogOpen">
-        <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Record Payment</DialogTitle>
-            <DialogDescription>Money received against this bill.</DialogDescription>
-          </DialogHeader>
-          <RecordPaymentForm
-            :tenant="tenant"
-            :entry-id="entry.id"
-            :billing-month="entry.billingMonth"
-            :outstanding="amounts.outstanding"
-            :saving="savingPayment"
-            :save-error="paymentError"
-            @save="handleSavePayment"
-            @cancel="paymentDialogOpen = false"
-          />
-        </DialogContent>
-      </Dialog>
     </template>
   </AppLayout>
 </template>

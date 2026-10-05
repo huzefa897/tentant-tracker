@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fromPaise, hasAtMostTwoDecimals, toPaise } from '@/utils/money'
+import { fromPaise, hasAtMostDecimals, hasAtMostTwoDecimals, toPaise } from '@/utils/money'
 
 describe('toPaise', () => {
   it.each([
@@ -32,5 +32,15 @@ describe('hasAtMostTwoDecimals', () => {
 
   it.each([10.255, 0.001, 1.005, NaN, Infinity])('rejects %s', (value) => {
     expect(hasAtMostTwoDecimals(value)).toBe(false)
+  })
+})
+
+describe('hasAtMostDecimals', () => {
+  it('checks the given number of places', () => {
+    expect(hasAtMostDecimals(1.125, 3)).toBe(true)
+    expect(hasAtMostDecimals(0.007, 3)).toBe(true)
+    expect(hasAtMostDecimals(1.1255, 3)).toBe(false)
+    expect(hasAtMostDecimals(1.125, 2)).toBe(false)
+    expect(hasAtMostDecimals(Infinity, 3)).toBe(false)
   })
 })

@@ -5,26 +5,22 @@ import { RouterView } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
+import { ApiError } from '@/services/apiError'
+import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
-import {
-  LOAD_ERROR_MESSAGE,
-  RECEIPT_SAVE_ERROR_MESSAGE,
-  SAVE_ERROR_MESSAGE,
-  useRentEntryStore,
-} from '@/stores/rentEntry'
-import { openPage } from '@/test/rentEntries'
-import { downloadReceiptPdf } from '@/utils/receiptDownload'
-import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
+import { SAVE_ERROR_MESSAGE } from '@/stores/rentEntry'
+import { makeEntry, openPage } from '@/test/rentEntries'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
+import { fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { resetTenantService } from '@/test/mocks/tenantService'
-
-// The PDF itself is covered by its own tests; here, which receipt gets downloaded.
-vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
+vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
+
+const createEntry = vi.mocked(rentEntryService.createEntry)
 
 let app: VueWrapper | undefined
 const body = new DOMWrapper(document.body)
@@ -61,18 +57,27 @@ function button(label: string) {
   return match
 }
 
+function savedSummary() {
+  return Object.fromEntries(
+    app!
+      .get('[data-testid="saved-summary"]')
+      .findAll('div')
+      .map((row) => [row.get('dt').text(), row.get('dd').text()]),
+  )
+}
+
 const validEntry = {
   billingMonth: '2026-09',
   electricityUnits: '75',
   waterAmount: '300',
-  paymentAmount: '10000',
-  paidDate: '2026-10-01',
+  notes: 'September charges',
 }
 
 beforeEach(() => {
   resetTenantService()
   resetAuthService()
   resetAccessService()
+  resetRentEntryService()
   localStorage.clear()
   sessionStorage.clear()
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -86,19 +91,22 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-// Unmount and remount with a fresh Pinia over the same localStorage.
-async function refreshPage(tenantId?: string) {
-  app?.unmount()
-  return openEntryPage(tenantId)
-}
-
 describe('NewRentEntryView', () => {
-  it('loads tenants and shows the form for the tenant in the URL', async () => {
+  it('loads the tenant and shows the form for the tenant in the URL', async () => {
     await openEntryPage('tenant-002')
 
     expect(app!.get('h1').text()).toBe('Add Rent Entry')
     expect(app!.get('[data-testid="tenant-chip"]').text()).toBe('Mohammed Yusuf · Flat 301')
     expect(app!.get<HTMLInputElement>('#rentAmount').element.value).toBe('18000')
+  })
+
+  it('disables the payment inputs while payments aren’t on the backend', async () => {
+    await openEntryPage()
+
+    expect(app!.get('#paymentAmount').attributes('disabled')).toBeDefined()
+    expect(app!.get('[data-testid="payments-unavailable"]').text()).toContain(
+      "Payments can't be recorded yet.",
+    )
   })
 
   it('shows a message for an unknown tenant', async () => {
@@ -113,36 +121,58 @@ describe('NewRentEntryView', () => {
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 
-  it('saves the bill with its initial payment and shows a confirmation', async () => {
+  it('saves the bill through the API and confirms with the saved charges', async () => {
     await openEntryPage()
     await fill(validEntry)
     await save()
 
-    const store = useRentEntryStore()
-    expect(store.entries).toHaveLength(1)
-    expect(store.entries[0]).toMatchObject({
+    expect(createEntry).toHaveBeenCalledWith(expect.any(String), 'tenant-001', {
       tenantId: 'tenant-001',
       billingMonth: '2026-09',
       rentAmount: 15000,
+      electricityUnits: 75,
       electricityRate: 6,
+      waterAmount: 300,
+      notes: 'September charges',
     })
-    expect(store.payments).toEqual([
-      expect.objectContaining({
-        entryId: store.entries[0]!.id,
-        amount: 10000,
-        paidDate: '2026-10-01',
-      }),
-    ])
-
-    expect(app!.find('form').exists()).toBe(false)
     expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
-    const text = app!.text()
-    expect(text).toContain('Shaik Zahid Ali, Flat 202')
-    expect(text).toContain('September 2026')
-    expect(text).toContain('₹15,750')
-    expect(text).toContain('₹10,000')
-    expect(text).toContain('₹5,750')
-    expect(text).toContain('Partially paid')
+    expect(app!.text()).toContain('September 2026 for Shaik Zahid Ali, Flat 202')
+    expect(savedSummary()).toEqual({
+      'Billing month': 'September 2026',
+      Rent: '₹15,000',
+      'Electricity (75 units × ₹6)': '₹450',
+      Water: '₹300',
+      'Total due': '₹15,750',
+      'Total paid': '₹0',
+      Outstanding: '₹15,750',
+      Status: 'Unpaid',
+    })
+    expect(app!.find('[data-testid="rate-changed"]').exists()).toBe(false)
+  })
+
+  it('shows the backend’s charges when the rate changed during editing', async () => {
+    fakeEntries.rate = 7
+    await openEntryPage()
+    await fill(validEntry)
+    await save()
+
+    expect(savedSummary()).toMatchObject({
+      'Electricity (75 units × ₹7)': '₹525',
+      'Total due': '₹15,825',
+    })
+    expect(app!.get('[data-testid="rate-changed"]').text()).toContain('₹7 per unit')
+  })
+
+  it('opens the saved entry from the confirmation', async () => {
+    await openEntryPage()
+    await fill(validEntry)
+    await save()
+
+    await button('View Entry').trigger('click')
+    // The details page is lazy-loaded.
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
+
+    expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'saved-1' })
   })
 
   it('returns to the dashboard from the confirmation without asking', async () => {
@@ -156,77 +186,99 @@ describe('NewRentEntryView', () => {
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 
-  describe('receipt from the confirmation', () => {
-    it('issues the initial payment’s receipt and downloads it, staying on the confirmation', async () => {
-      const download = vi.mocked(downloadReceiptPdf)
-      download.mockReset()
-      download.mockResolvedValue()
-      await openEntryPage()
-      await fill(validEntry)
-      await save()
+  it('shows Saving… and sends one request while the save is in flight', async () => {
+    let finish!: () => void
+    createEntry.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(makeEntry({ id: 'slow' }))
+        }),
+    )
+    await openEntryPage()
+    await fill(validEntry)
 
-      await button('Download Receipt').trigger('click')
-      await flushPromises()
+    await app!.get('form').trigger('submit')
+    await app!.get('form').trigger('submit')
 
-      const store = useRentEntryStore()
-      const [receipt] = store.receipts
-      expect(receipt).toMatchObject({ paymentId: store.payments[0]!.id, paymentAmount: 10000 })
-      expect(download).toHaveBeenCalledWith(receipt)
-      expect(router.currentRoute.value.name).toBe('rent-entry-new')
-      expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
-      expect(body.find('[role="alertdialog"]').exists()).toBe(false)
-    })
+    expect(button('Saving…').attributes('disabled')).toBeDefined()
+    expect(createEntry).toHaveBeenCalledTimes(1)
 
-    it('is not offered when nothing was paid', async () => {
-      await openEntryPage()
-      await fill({ ...validEntry, paymentAmount: '0', paidDate: '' })
-      await save()
-
-      expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
-      expect(body.findAll('button').some((b) => b.text() === 'Download Receipt')).toBe(false)
-    })
-
-    it('shows an inline error, and stays on the confirmation, when the receipt cannot be saved', async () => {
-      await openEntryPage()
-      await fill(validEntry)
-      await save()
-      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-        throw new DOMException('Quota exceeded', 'QuotaExceededError')
-      })
-
-      await button('Download Receipt').trigger('click')
-      await flushPromises()
-
-      expect(app!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_SAVE_ERROR_MESSAGE)
-      expect(router.currentRoute.value.name).toBe('rent-entry-new')
-      expect(useRentEntryStore().payments).toHaveLength(1)
-      expect(useRentEntryStore().receipts).toEqual([])
-    })
+    finish()
+    await flushPromises()
+    expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
   })
 
-  it('shows a duplicate-entry error and keeps the form', async () => {
+  it('keeps the form and its values when the save fails, with no confirmation', async () => {
+    createEntry.mockRejectedValueOnce(new ApiError('unknown'))
     await openEntryPage()
-    useRentEntryStore().addEntry({
-      entry: {
-        tenantId: 'tenant-001',
-        billingMonth: '2026-09',
-        rentAmount: 15000,
-        electricityUnits: 10,
-        electricityRate: 6,
-        waterAmount: 0,
-        notes: '',
-      },
-      initialPayment: null,
-    })
-
     await fill(validEntry)
     await save()
 
-    expect(useRentEntryStore().entries).toHaveLength(1)
+    expect(app!.get('[role="alert"]').text()).toBe(SAVE_ERROR_MESSAGE)
+    expect(app!.find('#entry-saved-heading').exists()).toBe(false)
+    expect(app!.get<HTMLInputElement>('#electricityUnits').element.value).toBe('75')
+    expect(app!.get<HTMLTextAreaElement>('#notes').element.value).toBe('September charges')
+
+    // Trying again works.
+    await save()
+    expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+  })
+
+  it('shows a duplicate-month error with a link to the saved entry, and keeps the form', async () => {
+    fakeEntries.entries = [makeEntry({ id: 'sep', billingMonth: '2026-09' })]
+    await openEntryPage()
+    await fill(validEntry)
+    await save()
+
     expect(app!.get('[role="alert"]').text()).toBe(
       'An entry already exists for this tenant and billing month.',
     )
+    expect(app!.get('[data-testid="existing-entry"]').text()).toContain(
+      'September 2026 already has a saved entry',
+    )
+    expect(fakeEntries.entries).toHaveLength(1)
     expect(app!.find('form').exists()).toBe(true)
+
+    await button('Open saved entry').trigger('click')
+    await flushPromises()
+    // The form has changes, so leaving asks first.
+    await button('Discard changes').trigger('click')
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
+
+    expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
+  })
+
+  it('checks for the bill after a timeout instead of inviting a second save', async () => {
+    createEntry.mockImplementationOnce(async (_property: string, tenancyId: string) => {
+      fakeEntries.entries = [
+        makeEntry({ id: 'saved-anyway', tenantId: tenancyId, billingMonth: '2026-09' }),
+      ]
+      throw new ApiError('network')
+    })
+    await openEntryPage()
+    await fill(validEntry)
+    await save()
+
+    expect(app!.get('[role="alert"]').text()).toBe(
+      'September 2026 now has a saved entry. Open it to check it before adding another.',
+    )
+    expect(app!.find('[data-testid="existing-entry"]').exists()).toBe(true)
+    expect(app!.find('#entry-saved-heading').exists()).toBe(false)
+  })
+
+  it('shows the backend’s reason for a rejected month', async () => {
+    createEntry.mockRejectedValueOnce(
+      new ApiError('invalid-request', 'Bad request', null, {
+        billingMonth: "This month is outside the tenancy's occupancy period.",
+      }),
+    )
+    await openEntryPage()
+    await fill(validEntry)
+    await save()
+
+    expect(app!.get('[role="alert"]').text()).toBe(
+      "This month is outside the tenancy's occupancy period.",
+    )
   })
 
   it('cancels straight back to the dashboard when nothing changed', async () => {
@@ -237,100 +289,6 @@ describe('NewRentEntryView', () => {
 
     expect(router.currentRoute.value.name).toBe('dashboard')
     expect(body.find('[role="alertdialog"]').exists()).toBe(false)
-  })
-
-  describe('persistence', () => {
-    it('keeps a saved entry and its payment after a refresh', async () => {
-      await openEntryPage()
-      await fill(validEntry)
-      await save()
-      const { entries, payments } = useRentEntryStore()
-
-      await refreshPage()
-
-      expect(useRentEntryStore().entries).toEqual(entries)
-      expect(useRentEntryStore().payments).toEqual(payments)
-      expect(payments).toHaveLength(1)
-    })
-
-    it('blocks a duplicate month after a refresh', async () => {
-      await openEntryPage()
-      await fill(validEntry)
-      await save()
-
-      await refreshPage()
-      await fill(validEntry)
-      await save()
-
-      expect(app!.get('[role="alert"]').text()).toBe(
-        'An entry already exists for this tenant and billing month.',
-      )
-      expect(useRentEntryStore().entries).toHaveLength(1)
-    })
-
-    it('shows no confirmation and keeps the form when writing fails', async () => {
-      await openEntryPage()
-      await fill(validEntry)
-      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-        throw new DOMException('Quota exceeded', 'QuotaExceededError')
-      })
-
-      await save()
-
-      expect(app!.find('#entry-saved-heading').exists()).toBe(false)
-      expect(useRentEntryStore().entries).toEqual([])
-      expect(useRentEntryStore().payments).toEqual([])
-      expect(app!.get('[role="alert"]').text()).toBe(SAVE_ERROR_MESSAGE)
-      expect(app!.get<HTMLInputElement>('#electricityUnits').element.value).toBe('75')
-      expect(app!.get<HTMLInputElement>('#paymentAmount').element.value).toBe('10000')
-    })
-
-    it('can save after a failed write once storage works again', async () => {
-      await openEntryPage()
-      await fill(validEntry)
-      const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
-        throw new DOMException('Quota exceeded', 'QuotaExceededError')
-      })
-      await save()
-
-      await save()
-
-      expect(setItem).toHaveBeenCalledTimes(2)
-      expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
-    })
-
-    describe('when saved entries are corrupt', () => {
-      beforeEach(() => {
-        localStorage.setItem(RENT_LEDGER_STORAGE_KEY, '{not json')
-      })
-
-      it('shows a load error and blocks saving without touching the data', async () => {
-        await openEntryPage()
-
-        expect(app!.text()).toContain(LOAD_ERROR_MESSAGE)
-
-        await fill(validEntry)
-        await save()
-
-        expect(app!.find('#entry-saved-heading').exists()).toBe(false)
-        expect(app!.text()).toContain(
-          'Saved entries must load successfully before adding an entry.',
-        )
-        expect(localStorage.getItem(RENT_LEDGER_STORAGE_KEY)).toBe('{not json')
-      })
-
-      it('recovers on Retry once the data can be read', async () => {
-        await openEntryPage()
-        localStorage.removeItem(RENT_LEDGER_STORAGE_KEY)
-
-        await button('Retry').trigger('click')
-        await fill(validEntry)
-        await save()
-
-        expect(app!.text()).not.toContain(LOAD_ERROR_MESSAGE)
-        expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
-      })
-    })
   })
 
   describe('with unsaved changes', () => {
@@ -362,7 +320,7 @@ describe('NewRentEntryView', () => {
       await flushPromises()
 
       expect(router.currentRoute.value.name).toBe('dashboard')
-      expect(useRentEntryStore().entries).toEqual([])
+      expect(createEntry).not.toHaveBeenCalled()
     })
 
     it('also asks when navigating away another way', async () => {

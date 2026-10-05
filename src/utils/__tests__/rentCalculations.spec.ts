@@ -6,7 +6,6 @@ import {
   calculateOutstanding,
   calculateTotalDue,
   formatPaymentStatus,
-  getEntryAmounts,
   getPaymentStatus,
   sortPaymentsNewestFirst,
   sumEntryAmounts,
@@ -27,7 +26,15 @@ describe('calculateElectricity', () => {
   it('rounds to paise', () => {
     expect(calculateElectricity(75, 6.01)).toBe(450.75)
     expect(calculateElectricity(3, 0.1)).toBe(0.3)
-    expect(calculateElectricity(1, 1.005)).toBe(1.01)
+    expect(calculateElectricity(1.125, 6)).toBe(6.75)
+    expect(calculateElectricity(0.001, 4.99)).toBe(0)
+  })
+
+  // The backend's rule (billing/calculations.py): half a paisa rounds up, never to even.
+  it('rounds half a paisa up, as the backend does', () => {
+    expect(calculateElectricity(0.125, 0.2)).toBe(0.03)
+    expect(calculateElectricity(1.125, 0.2)).toBe(0.23)
+    expect(calculateElectricity(0.124, 0.2)).toBe(0.02)
   })
 })
 
@@ -38,6 +45,17 @@ describe('calculateTotalDue', () => {
 
   it('handles no electricity or water', () => {
     expect(calculateTotalDue({ ...charges, electricityUnits: 0, waterAmount: 0 })).toBe(15000)
+  })
+
+  it('rounds electricity to paise before adding it, as the backend does', () => {
+    expect(
+      calculateTotalDue({
+        rentAmount: 100,
+        electricityUnits: 0.125,
+        electricityRate: 0.2,
+        waterAmount: 0.5,
+      }),
+    ).toBe(100.53)
   })
 
   it('avoids floating point drift', () => {
@@ -132,31 +150,13 @@ describe('sortPaymentsNewestFirst', () => {
   })
 })
 
-describe('getEntryAmounts', () => {
-  it('derives totals and status from the charges and the amount paid', () => {
-    expect(getEntryAmounts(charges, 10000)).toEqual({
-      totalDue: 15750,
-      totalPaid: 10000,
-      outstanding: 5750,
-      status: 'partially_paid',
-    })
-  })
-
-  it('marks a fully paid bill as paid with nothing outstanding', () => {
-    expect(getEntryAmounts(charges, 15750)).toMatchObject({
-      outstanding: 0,
-      status: 'paid',
-    })
-  })
-})
-
 describe('sumEntryAmounts', () => {
-  it('adds up every given bill', () => {
+  it('adds up the figures of every given bill', () => {
     expect(
       sumEntryAmounts([
-        { entry: charges, totalPaid: 10000 },
-        { entry: charges, totalPaid: 15750 },
-        { entry: { ...charges, waterAmount: 0 }, totalPaid: 0 },
+        { totalDue: 15750, totalPaid: 10000, outstanding: 5750 },
+        { totalDue: 15750, totalPaid: 15750, outstanding: 0 },
+        { totalDue: 15450, totalPaid: 0, outstanding: 15450 },
       ]),
     ).toEqual({ totalBilled: 46950, totalPaid: 25750, outstanding: 21200 })
   })
@@ -165,12 +165,11 @@ describe('sumEntryAmounts', () => {
     expect(sumEntryAmounts([])).toEqual({ totalBilled: 0, totalPaid: 0, outstanding: 0 })
   })
 
-  it('rounds away floating-point noise', () => {
-    const cents = { rentAmount: 0.1, electricityUnits: 0, electricityRate: 0, waterAmount: 0 }
+  it('adds in paise, without floating point drift', () => {
     expect(
       sumEntryAmounts([
-        { entry: cents, totalPaid: 0 },
-        { entry: { ...cents, rentAmount: 0.2 }, totalPaid: 0 },
+        { totalDue: 0.1, totalPaid: 0, outstanding: 0.1 },
+        { totalDue: 0.2, totalPaid: 0, outstanding: 0.2 },
       ]),
     ).toEqual({ totalBilled: 0.3, totalPaid: 0, outstanding: 0.3 })
   })

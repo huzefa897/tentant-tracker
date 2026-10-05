@@ -3,9 +3,14 @@
 
 import type { RentEntryInput } from '@/types/rentEntry'
 import { isValidMonthValue } from '@/utils/date'
+import { hasAtMostDecimals } from '@/utils/money'
 import { calculateTotalDue } from '@/utils/rentCalculations'
 
 export const NOTES_MAX_LENGTH = 500
+
+// The backend stores money with 2 decimal places and units with 3, in at most 10 digits.
+export const MAX_AMOUNT = 99_999_999.99
+export const MAX_UNITS = 9_999_999.999
 
 // '' is an empty input ("not entered"), which is different from 0.
 export type NumberInputValue = number | ''
@@ -54,10 +59,22 @@ export function getDraftTotalDue(draft: RentEntryDraft): number | null {
   return calculateTotalDue({ rentAmount, electricityUnits, electricityRate, waterAmount })
 }
 
-function nonNegativeError(value: NumberInputValue, emptyMessage: string, label: string) {
+function nonNegativeError(
+  value: NumberInputValue,
+  emptyMessage: string,
+  label: string,
+  places: number,
+  max: number,
+) {
   const amount = toAmount(value)
   if (amount === null) return emptyMessage
   if (amount < 0) return `${label} cannot be negative.`
+  return precisionError(amount, label, places, max)
+}
+
+function precisionError(amount: number, label: string, places: number, max: number) {
+  if (!hasAtMostDecimals(amount, places)) return `${label} can have at most ${places} decimals.`
+  if (amount > max) return `${label} must be at most ${max.toLocaleString('en-IN')}.`
   return undefined
 }
 
@@ -79,12 +96,16 @@ export function validateRentEntryDraft(draft: RentEntryDraft): RentEntryErrors {
   const rentAmount = toAmount(draft.rentAmount)
   if (rentAmount === null || rentAmount <= 0) {
     errors.rentAmount = 'Enter a rent amount greater than zero.'
+  } else {
+    errors.rentAmount = precisionError(rentAmount, 'Rent amount', 2, MAX_AMOUNT)
   }
 
   errors.electricityUnits = nonNegativeError(
     draft.electricityUnits,
     'Enter electricity units, or use 0 if there was no consumption.',
     'Electricity units',
+    3,
+    MAX_UNITS,
   )
 
   const electricityRate = toAmount(draft.electricityRate)
@@ -96,6 +117,8 @@ export function validateRentEntryDraft(draft: RentEntryDraft): RentEntryErrors {
     draft.waterAmount,
     'Enter the water amount, or use 0 if there is none.',
     'Water amount',
+    2,
+    MAX_AMOUNT,
   )
 
   if (draft.notes.length > NOTES_MAX_LENGTH) {

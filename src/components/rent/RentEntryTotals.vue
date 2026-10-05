@@ -8,10 +8,10 @@ defineProps<{
 </script>
 
 <template>
-  <!-- Scoped to what's on screen, so filtered totals aren't mistaken for the tenant's balance. -->
+  <!-- Bills are paged: these add up the page on screen, never the tenant's whole balance. -->
   <section aria-labelledby="entry-totals-heading">
     <h2 id="entry-totals-heading" class="mb-3 text-sm font-medium text-muted-foreground">
-      Totals for displayed entries
+      Totals for this page
     </h2>
     <dl class="grid gap-3 sm:grid-cols-3">
       <div class="rounded-xl border bg-muted/40 p-4">

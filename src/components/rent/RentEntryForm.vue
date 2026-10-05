@@ -28,11 +28,19 @@ import {
   validateRentEntryDraft,
 } from '@/utils/rentEntryValidation'
 
-const props = defineProps<{
-  tenant: Tenant
-  // Shown above the actions, e.g. a duplicate-entry error from the store.
-  saveError?: string | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    tenant: Tenant
+    // Shown above the actions, e.g. a duplicate-entry error from the store.
+    saveError?: string | null
+    // While the page saves: Save is disabled, so one click sends one request.
+    saving?: boolean
+    // Whether a payment can be saved with the bill. Off while bills are saved on the backend
+    // and payments aren't (BE Phase 5): the inputs are disabled so nothing typed is lost.
+    paymentsEnabled?: boolean
+  }>(),
+  { saveError: null, saving: false, paymentsEnabled: false },
+)
 
 const emit = defineEmits<{
   save: [submission: NewRentEntrySubmission]
@@ -90,6 +98,7 @@ watch(isDirty, (dirty) => emit('dirtyChange', dirty))
 
 // Live summary. Anything that can't be calculated yet shows "—" rather than a wrong amount.
 const paidAmount = computed(() => {
+  if (!props.paymentsEnabled) return 0
   const amount = toAmount(paymentAmount.value)
   return amount !== null && amount >= 0 ? amount : null
 })
@@ -142,11 +151,13 @@ type Field = keyof RentEntryDraft | 'paymentAmount' | 'paidDate' | 'paymentNotes
 // and checked once the charges are valid.
 const entryErrors = computed(() => validateRentEntryDraft(draft.value))
 const paymentErrors = computed(() =>
-  validatePaymentDraft(paymentDraft.value, {
-    today,
-    outstanding: totalDue.value ?? undefined,
-    allowZero: true,
-  }),
+  props.paymentsEnabled
+    ? validatePaymentDraft(paymentDraft.value, {
+        today,
+        outstanding: totalDue.value ?? undefined,
+        allowZero: true,
+      })
+    : {},
 )
 
 const errors = computed<Partial<Record<Field, string>>>(() => ({
@@ -178,6 +189,7 @@ function fieldAttrs(field: Field) {
 const formRef = useTemplateRef<HTMLFormElement>('form')
 
 async function handleSubmit() {
+  if (props.saving) return
   submitted.value = true
 
   // Validate again here: the inputs alone can't be trusted to hold valid values.
@@ -190,7 +202,7 @@ async function handleSubmit() {
   }
 
   // Validation guarantees a finite, non-negative amount; 0 means no payment.
-  const amount = paymentAmount.value as number
+  const amount = props.paymentsEnabled ? (paymentAmount.value as number) : 0
 
   emit('save', {
     entry: entry.input,
@@ -372,9 +384,13 @@ const lockedClass =
       <section :class="sectionClass" aria-labelledby="payment-heading">
         <div>
           <h2 id="payment-heading" class="font-semibold">Payment</h2>
-          <p class="text-sm text-muted-foreground">
+          <p v-if="paymentsEnabled" class="text-sm text-muted-foreground">
             Record a payment received with this bill, or leave it at 0 if nothing has been paid yet.
             Later payments can be added from the entry's details.
+          </p>
+          <p v-else class="text-sm text-muted-foreground" data-testid="payments-unavailable">
+            Payments can't be recorded yet. Save the bill now; payments are coming in the next
+            update.
           </p>
         </div>
 
@@ -393,7 +409,8 @@ const lockedClass =
                 inputmode="decimal"
                 min="0"
                 step="0.01"
-                required
+                :required="paymentsEnabled"
+                :disabled="!paymentsEnabled"
                 :class="[inputClass, 'pl-9']"
                 v-bind="fieldAttrs('paymentAmount')"
               />
@@ -430,7 +447,10 @@ const lockedClass =
             >
               {{ errorFor('paidDate') }}
             </p>
-            <p v-else-if="!paymentRecorded" class="text-xs text-muted-foreground">
+            <p
+              v-else-if="paymentsEnabled && !paymentRecorded"
+              class="text-xs text-muted-foreground"
+            >
               Enter an amount paid to set the date.
             </p>
           </div>
@@ -533,8 +553,8 @@ const lockedClass =
 
       <!-- Save first when stacked; Cancel on the left when side by side. -->
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-        <Button type="submit" class="h-12 text-base sm:order-last lg:order-none">
-          Save Entry
+        <Button type="submit" class="h-12 text-base sm:order-last lg:order-none" :disabled="saving">
+          {{ saving ? 'Saving…' : 'Save Entry' }}
         </Button>
         <Button type="button" variant="secondary" class="h-12 text-base" @click="emit('cancel')">
           Cancel

@@ -1,5 +1,5 @@
 import type { Payment } from '@/types/payment'
-import type { PaymentStatus, RentEntryInput } from '@/types/rentEntry'
+import type { PaymentStatus, RentEntry, RentEntryInput } from '@/types/rentEntry'
 import { fromPaise, toPaise } from '@/utils/money'
 
 type Charges = Pick<
@@ -7,23 +7,23 @@ type Charges = Pick<
   'rentAmount' | 'electricityUnits' | 'electricityRate' | 'waterAmount'
 >
 
-// Good enough for this frontend prototype. Real money should be decimal arithmetic or
-// integer paise, recalculated on the backend.
-function roundMoney(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100
-}
+// The backend's rule (billing/calculations.py): electricity is rounded to paise, half up, then
+// added to rent and water. Worked in integers (milli-units × paise) so it's exact, not floating
+// point. These are previews: saved bills show the figures Django calculated.
 
-// Units consumed × rate per unit
+// Units consumed × rate per unit. Units beyond three decimals (invalid) are rounded first.
 export function calculateElectricity(units: number, rate: number): number {
-  return roundMoney(units * rate)
+  const milliUnits = Math.round(units * 1000)
+  // Math.round rounds halves up, as Django does for non-negative amounts.
+  return fromPaise(Math.round((milliUnits * toPaise(rate)) / 1000))
 }
 
 // Rent + electricity + water
 export function calculateTotalDue(entry: Charges): number {
-  return roundMoney(
-    entry.rentAmount +
-      calculateElectricity(entry.electricityUnits, entry.electricityRate) +
-      entry.waterAmount,
+  return fromPaise(
+    toPaise(entry.rentAmount) +
+      toPaise(calculateElectricity(entry.electricityUnits, entry.electricityRate)) +
+      toPaise(entry.waterAmount),
   )
 }
 
@@ -64,49 +64,24 @@ export function sortPaymentsNewestFirst(payments: Payment[]): Payment[] {
   )
 }
 
-export interface EntryAmounts {
-  totalDue: number
-  totalPaid: number
-  outstanding: number
-  status: PaymentStatus
-}
-
-// Everything derived for one bill, so every screen calculates it the same way.
-// `totalPaid` comes from the bill's payments (sumPayments / the store's getTotalPaid).
-export function getEntryAmounts(entry: Charges, totalPaid: number): EntryAmounts {
-  const totalDue = calculateTotalDue(entry)
-
-  return {
-    totalDue,
-    totalPaid,
-    outstanding: calculateOutstanding(totalDue, totalPaid),
-    status: getPaymentStatus(totalDue, totalPaid),
-  }
-}
-
-// A bill with what has been paid against it, as the history screens list it.
-export interface BilledEntry<T extends Charges = Charges> {
-  entry: T
-  totalPaid: number
-}
-
 export interface EntryTotals {
   totalBilled: number
   totalPaid: number
   outstanding: number
 }
 
-// Sums the given bills only. The deposit is deliberately not applied: that needs a business rule.
-export function sumEntryAmounts(bills: BilledEntry[]): EntryTotals {
-  const paise = bills.reduce(
-    (sum, bill) => {
-      const amounts = getEntryAmounts(bill.entry, bill.totalPaid)
-      return {
-        totalBilled: sum.totalBilled + toPaise(amounts.totalDue),
-        totalPaid: sum.totalPaid + toPaise(amounts.totalPaid),
-        outstanding: sum.outstanding + toPaise(amounts.outstanding),
-      }
-    },
+// Sums the given bills' figures (as the backend calculated them) in paise. Only what's passed
+// in: the history page sums the page on screen. The deposit is deliberately not applied: that
+// needs a business rule.
+export function sumEntryAmounts(
+  entries: Pick<RentEntry, 'totalDue' | 'totalPaid' | 'outstanding'>[],
+): EntryTotals {
+  const paise = entries.reduce(
+    (sum, entry) => ({
+      totalBilled: sum.totalBilled + toPaise(entry.totalDue),
+      totalPaid: sum.totalPaid + toPaise(entry.totalPaid),
+      outstanding: sum.outstanding + toPaise(entry.outstanding),
+    }),
     { totalBilled: 0, totalPaid: 0, outstanding: 0 },
   )
 

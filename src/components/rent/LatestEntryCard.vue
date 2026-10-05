@@ -6,16 +6,12 @@ import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
-import { formatDateValue, formatMonthValue } from '@/utils/date'
-import { calculateElectricity, getEntryAmounts } from '@/utils/rentCalculations'
+import { formatMonthValue } from '@/utils/date'
 
-// A tenant's most recent bill in full, for the dashboard. The page picks the bill and sums its
-// payments, so the figures match Previous Entries and the summary page.
+// A tenant's most recent bill in full, for the dashboard, with the figures the backend
+// calculated, so they match Previous Entries and the summary page.
 const props = defineProps<{
   entry: RentEntry
-  totalPaid: number
-  // The bill's most recent payment date; null when nothing has been paid.
-  lastPaidDate: string | null
 }>()
 
 const emit = defineEmits<{
@@ -23,16 +19,13 @@ const emit = defineEmits<{
 }>()
 
 const month = computed(() => formatMonthValue(props.entry.billingMonth))
-const amounts = computed(() => getEntryAmounts(props.entry, props.totalPaid))
 
 // Rent and rate come from the entry: the tenant's current rates may have changed since.
 const charges = computed(() => [
   { label: 'Rent', value: formatINR(props.entry.rentAmount) },
   {
     label: 'Electricity',
-    value: formatINR(
-      calculateElectricity(props.entry.electricityUnits, props.entry.electricityRate),
-    ),
+    value: formatINR(props.entry.electricityAmount),
     details: `${props.entry.electricityUnits} units × ${formatINR(props.entry.electricityRate)}`,
   },
   { label: 'Water', value: formatINR(props.entry.waterAmount) },
@@ -49,7 +42,7 @@ const charges = computed(() => [
         <p class="text-xs text-muted-foreground">Latest entry</p>
         <div class="mt-0.5 flex flex-wrap items-center gap-2">
           <h3 id="latest-entry-heading" class="text-lg font-semibold">{{ month }}</h3>
-          <PaymentStatusBadge :status="amounts.status" />
+          <PaymentStatusBadge :status="entry.status" />
         </div>
       </div>
       <Button
@@ -80,20 +73,15 @@ const charges = computed(() => [
       >
         <div class="flex justify-between gap-4">
           <dt class="text-muted-foreground">Total due</dt>
-          <dd class="tabular-nums">{{ formatINR(amounts.totalDue) }}</dd>
+          <dd class="tabular-nums">{{ formatINR(entry.totalDue) }}</dd>
         </div>
         <div class="flex justify-between gap-4">
-          <dt class="text-muted-foreground">
-            Total paid
-            <span v-if="lastPaidDate" class="text-xs"
-              >(last {{ formatDateValue(lastPaidDate) }})</span
-            >
-          </dt>
-          <dd class="tabular-nums">{{ formatINR(amounts.totalPaid) }}</dd>
+          <dt class="text-muted-foreground">Total paid</dt>
+          <dd class="tabular-nums">{{ formatINR(entry.totalPaid) }}</dd>
         </div>
         <div class="flex justify-between gap-4 font-semibold">
           <dt>Outstanding</dt>
-          <dd class="tabular-nums">{{ formatINR(amounts.outstanding) }}</dd>
+          <dd class="tabular-nums">{{ formatINR(entry.outstanding) }}</dd>
         </div>
       </dl>
     </div>
