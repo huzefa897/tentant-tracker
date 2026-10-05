@@ -55,6 +55,8 @@ jobs:
       POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: '5432'
       CORS_ALLOWED_ORIGINS: http://localhost:5173
+      # Tests mock Firebase; no credentials in CI.
+      FIREBASE_PROJECT_ID: ci-test-project
     steps:
       - uses: actions/checkout@v5
 

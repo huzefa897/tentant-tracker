@@ -22,6 +22,12 @@ class HealthCheckTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
+    def test_ignores_tokens_so_firebase_outages_do_not_fail_it(self):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION="Bearer not-checked")
+
+        self.assertEqual(client.get("/api/v1/health/").status_code, 200)
+
     def test_rejects_other_methods(self):
         response = APIClient().post("/api/v1/health/")
 
@@ -33,7 +39,8 @@ class DefaultPermissionTests(TestCase):
     def test_endpoints_require_authentication_by_default(self):
         response = APIClient().get("/protected/")
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers["WWW-Authenticate"], "Bearer")
 
 
 class CorsTests(TestCase):

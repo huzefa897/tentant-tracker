@@ -9,6 +9,7 @@ djangorestframework = "*"
 django-cors-headers = "*"
 psycopg = {extras = ["binary"], version = "*"}
 python-dotenv = "*"
+firebase-admin = "*"
 
 [dev-packages]
 

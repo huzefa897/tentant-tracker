@@ -27,8 +27,11 @@ Before calling backend work done: `pipenv run check && pipenv run python manage.
 
 - Settings come from the gitignored `backend/.env`; every variable is listed in `backend/.env.example`. Add new ones to both.
 - `AUTH_USER_MODEL` is `accounts.User` (`AbstractUser` + nullable unique `firebase_uid`, `phone_number`). Roles belong on property membership, never on the user.
-- DRF requires authentication by default; a public endpoint opts out with `AllowAny` (only `/api/v1/health/` today). CORS is not authentication.
-- Apps: `accounts`, `properties`, `billing` (the last two have no models yet). Tests live in each app's `tests.py`.
+- Auth is Firebase ID tokens (`Authorization: Bearer`) verified in `accounts/firebase.py`, the only module that imports `firebase_admin`; it raises its own `InvalidFirebaseTokenError` (→ 401) or `FirebaseUnavailableError` (→ 503, never reported as a bad login). Never trust a UID or phone number from the request body. Admin keeps Django's session login.
+- DRF requires authentication by default; a public endpoint opts out with `AllowAny` and `authentication_classes([])` (only `/api/v1/health/` today). CORS is not authentication.
+- **Access comes only from an active `PropertyMembership` of an active `Property`**, granted in admin. Signing in creates a user with no memberships; admins get no API access without one. Scope every property query through `properties/queries.py` `properties_for_user` (filter the queryset, so others' records 404 and never appear in lists), not object permissions alone.
+- API JSON is camelCase with explicit serializer fields; never expose whole models.
+- Apps: `accounts`, `properties`, `billing` (no models yet). Tests in `tests.py` or a `tests/` package per app; mock `verify_firebase_token`, never call live Firebase.
 - Add packages with `pipenv install <name>` and commit `Pipfile.lock`.
 
 ## Architecture
