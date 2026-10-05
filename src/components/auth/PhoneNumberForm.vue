@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ArrowRight, ChevronDown } from '@lucide/vue'
+import { ArrowRight, ChevronDown, LoaderCircle } from '@lucide/vue'
 
 import CountryFlag from '@/components/brand/CountryFlag.vue'
 import { Button } from '@/components/ui/button'
@@ -102,9 +102,16 @@ function handleSubmit() {
       type="submit"
       class="relative h-12 w-full text-base hover:bg-primary/90"
       :disabled="!isPhoneValid || loading"
+      :aria-busy="loading"
     >
-      {{ loading ? 'Sending code...' : 'Continue' }}
+      <LoaderCircle v-if="loading" class="size-5! animate-spin" aria-hidden="true" />
+      {{ loading ? 'Sending code…' : 'Continue' }}
       <ArrowRight v-if="!loading" class="absolute right-5 size-5!" aria-hidden="true" />
     </Button>
+
+    <!-- The invisible reCAPTCHA check runs first and can take a few seconds (or show a puzzle). -->
+    <p class="min-h-5 text-center text-sm text-muted-foreground" role="status">
+      <template v-if="loading">Running a quick security check…</template>
+    </p>
   </form>
 </template>

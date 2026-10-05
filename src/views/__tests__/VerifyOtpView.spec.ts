@@ -118,6 +118,26 @@ describe('VerifyOtpView', () => {
     expect(view!.text()).toContain('Resend code in 01:00')
   })
 
+  it('shows that a new code is being sent while resending', async () => {
+    await mountView()
+    await vi.advanceTimersByTimeAsync(60_000)
+    let finish: () => void = () => {}
+    vi.mocked(authService.sendOtp).mockReturnValue(
+      new Promise<void>((resolve) => (finish = resolve)),
+    )
+
+    await resendButton()!.trigger('click')
+
+    const status = view!.get('[role="status"]')
+    expect(status.text()).toContain('Sending a new code…')
+    expect(status.find('svg.animate-spin').exists()).toBe(true)
+    expect(resendButton()).toBeUndefined()
+
+    finish()
+    await flushPromises()
+    expect(status.text()).not.toContain('Sending a new code…')
+  })
+
   it('goes back to login and forgets the number when changing it', async () => {
     await mountView()
 

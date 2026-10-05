@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft } from '@lucide/vue'
+import { ArrowLeft, LoaderCircle } from '@lucide/vue'
 
 import OtpForm from '@/components/auth/OtpForm.vue'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,7 @@ const router = useRouter()
 const recaptchaHost = useTemplateRef<HTMLElement>('recaptcha-host')
 
 const resent = ref(false)
+const resending = ref(false)
 const secondsLeft = ref(0)
 let countdown: ReturnType<typeof setInterval> | undefined
 
@@ -60,6 +61,7 @@ async function handleResend() {
   if (!phoneNumber || !recaptchaHost.value || secondsLeft.value > 0) return
 
   resent.value = false
+  resending.value = true
 
   try {
     await authStore.sendOtp(phoneNumber, recaptchaHost.value)
@@ -67,6 +69,8 @@ async function handleResend() {
     startCooldown()
   } catch {
     // authStore.error is shown by the form
+  } finally {
+    resending.value = false
   }
 }
 
@@ -104,7 +108,11 @@ async function handleChangeNumber() {
     <div class="mt-6 text-center text-sm text-muted-foreground" role="status">
       <p v-if="resent" class="mb-1">A new code has been sent.</p>
 
-      <p v-if="secondsLeft > 0">
+      <p v-if="resending" class="inline-flex items-center gap-2">
+        <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+        Sending a new code…
+      </p>
+      <p v-else-if="secondsLeft > 0">
         Resend code in <span class="font-semibold text-foreground">{{ countdownLabel }}</span>
       </p>
       <p v-else>

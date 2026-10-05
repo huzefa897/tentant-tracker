@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ArrowRight } from '@lucide/vue'
+import { ArrowRight, LoaderCircle } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import { PinInput, PinInputGroup, PinInputSlot } from '@/components/ui/pin-input'
@@ -60,8 +60,10 @@ function handleSubmit() {
       type="submit"
       class="relative h-12 w-full text-base hover:bg-primary/90"
       :disabled="!isCodeComplete || loading"
+      :aria-busy="loading"
     >
-      {{ loading ? 'Verifying...' : 'Verify' }}
+      <LoaderCircle v-if="loading" class="size-5! animate-spin" aria-hidden="true" />
+      {{ loading ? 'Verifying…' : 'Verify' }}
       <ArrowRight v-if="!loading" class="absolute right-5 size-5!" aria-hidden="true" />
     </Button>
   </form>

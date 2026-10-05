@@ -114,7 +114,11 @@ describe('PhoneNumberForm', () => {
     await wrapper.get('form').trigger('submit')
 
     expect(wrapper.emitted('submit')).toBeUndefined()
-    expect(wrapper.get('button[type="submit"]').text()).toBe('Sending code...')
+    const button = wrapper.get('button[type="submit"]')
+    expect(button.text()).toBe('Sending code…')
+    expect(button.attributes('aria-busy')).toBe('true')
+    expect(button.find('svg.animate-spin').exists()).toBe(true)
+    expect(wrapper.get('[role="status"]').text()).toBe('Running a quick security check…')
   })
 
   it('shows the error inline and links it to the input', () => {
@@ -124,5 +128,13 @@ describe('PhoneNumberForm', () => {
     expect(alert.text()).toBe('Unable to send verification code. Please try again.')
     expect(wrapper.get('#phone').attributes('aria-invalid')).toBe('true')
     expect(wrapper.get('#phone').attributes('aria-describedby')).toBe(alert.attributes('id'))
+  })
+
+  it('shows no spinner or status text when idle', () => {
+    const wrapper = mountForm()
+
+    expect(wrapper.find('svg.animate-spin').exists()).toBe(false)
+    expect(wrapper.get('button[type="submit"]').attributes('aria-busy')).toBe('false')
+    expect(wrapper.get('[role="status"]').text()).toBe('')
   })
 })

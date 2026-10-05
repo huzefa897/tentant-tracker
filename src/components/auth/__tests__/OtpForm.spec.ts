@@ -61,7 +61,8 @@ describe('OtpForm', () => {
     await form.get('form').trigger('submit')
 
     expect(form.emitted('submit')).toBeUndefined()
-    expect(form.get('button[type="submit"]').text()).toBe('Verifying...')
+    expect(form.get('button[type="submit"]').text()).toBe('Verifying…')
+    expect(form.get('button[type="submit"]').find('svg.animate-spin').exists()).toBe(true)
   })
 
   it('shows the error inline and marks the slots invalid', () => {
