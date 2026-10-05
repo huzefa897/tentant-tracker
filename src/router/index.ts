@@ -66,7 +66,11 @@ const router = createRouter({
       path: '/tenants/:tenantId/entries/:entryId',
       name: 'rent-entry-details',
       component: () => import('@/views/RentEntryDetailsView.vue'),
-      props: true,
+      // ?from=dashboard sends the back button to the dashboard; anything else, to the history.
+      props: (route) => ({
+        ...route.params,
+        from: route.query.from === 'dashboard' ? 'dashboard' : 'history',
+      }),
       meta: { requiresAuth: true, requiresProperty: true },
     },
     {

@@ -82,4 +82,16 @@ describe('TenantDetails', () => {
     expect(wrapper.text()).toContain('Previous Entries')
     expect(wrapper.text()).not.toContain('Previous Entries (')
   })
+
+  it('shows the latest-entry slot between the name and the details', () => {
+    const wrapper = mount(TenantDetails, {
+      props: { tenant },
+      slots: { 'latest-entry': '<p data-testid="latest">Latest</p>' },
+    })
+    const html = wrapper.html()
+
+    expect(wrapper.find('[data-testid="latest"]').exists()).toBe(true)
+    expect(html.indexOf('tenant-name')).toBeLessThan(html.indexOf('data-testid="latest"'))
+    expect(html.indexOf('data-testid="latest"')).toBeLessThan(html.indexOf('<dl'))
+  })
 })

@@ -81,6 +81,27 @@ class FirebaseAuthenticationTests(TestCase):
         self.assertEqual(first["id"], second["id"])
         self.assertEqual(get_user_model().objects.count(), 1)
 
+    def test_later_requests_follow_a_changed_phone_number(self, verify):
+        verify.return_value = CLAIMS
+        first = self.get_me("Bearer token").json()
+
+        verify.return_value = {**CLAIMS, "phone_number": "+910000000002"}
+        second = self.get_me("Bearer token").json()
+
+        self.assertEqual(second["id"], first["id"])
+        self.assertEqual(second["phoneNumber"], "+910000000002")
+        self.assertEqual(
+            get_user_model().objects.get().phone_number, "+910000000002"
+        )
+
+    def test_later_requests_clear_a_removed_phone_number(self, verify):
+        verify.return_value = CLAIMS
+        self.get_me("Bearer token")
+
+        verify.return_value = {"uid": CLAIMS["uid"]}
+
+        self.assertEqual(self.get_me("Bearer token").json()["phoneNumber"], "")
+
     def test_identity_without_a_phone_number(self, verify):
         verify.return_value = {"uid": "no-phone"}
 

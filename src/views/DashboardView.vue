@@ -3,6 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeftRight, LogOut, Users } from '@lucide/vue'
 
+import LatestEntryCard from '@/components/rent/LatestEntryCard.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import TenantDetails from '@/components/tenant/TenantDetails.vue'
 import TenantSelector from '@/components/tenant/TenantSelector.vue'
@@ -12,6 +13,8 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
 import { useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
+import type { RentEntry } from '@/types/rentEntry'
+import { sortPaymentsNewestFirst } from '@/utils/rentCalculations'
 
 const accessStore = useAccessStore()
 const tenantStore = useTenantStore()
@@ -33,6 +36,31 @@ const selectedTenantEntryCount = computed(() => {
   return rentEntryStore.getEntriesForTenant(tenantId).length
 })
 
+// The selected tenant's most recent bill (by billing month), with what's been paid against it.
+// null until entries load, and when the tenant has none.
+const latestBill = computed(() => {
+  const tenantId = tenantStore.selectedTenantId
+
+  if (!tenantId || !rentEntryStore.initialized) return null
+
+  const entry = rentEntryStore
+    .getEntriesForTenant(tenantId)
+    .reduce<RentEntry | null>(
+      (latest, item) => (!latest || item.billingMonth > latest.billingMonth ? item : latest),
+      null,
+    )
+
+  if (!entry) return null
+
+  const payments = sortPaymentsNewestFirst(rentEntryStore.getPaymentsForEntry(entry.id))
+
+  return {
+    entry,
+    totalPaid: rentEntryStore.getTotalPaid(entry.id),
+    lastPaidDate: payments[0]?.paidDate ?? null,
+  }
+})
+
 function switchProperty() {
   router.push({ name: 'property-select' })
 }
@@ -42,6 +70,18 @@ function openNewEntry() {
   if (!tenant) return
 
   router.push({ name: 'rent-entry-new', params: { tenantId: tenant.id } })
+}
+
+function openEntry(entryId: string) {
+  const tenant = tenantStore.selectedTenant
+  if (!tenant) return
+
+  // The summary's back button then returns here rather than to Previous Entries.
+  router.push({
+    name: 'rent-entry-details',
+    params: { tenantId: tenant.id, entryId },
+    query: { from: 'dashboard' },
+  })
 }
 
 function openHistory() {
@@ -113,13 +153,25 @@ function openHistory() {
       @retry="rentEntryStore.initialize"
     />
 
+    <!-- Keyed, so switching tenants plays the rise-in again. -->
     <TenantDetails
       v-if="tenantStore.selectedTenant"
+      :key="tenantStore.selectedTenant.id"
+      class="animate-rise-in"
       :tenant="tenantStore.selectedTenant"
       :entry-count="selectedTenantEntryCount"
       @add-entry="openNewEntry"
       @view-entries="openHistory"
-    />
+    >
+      <template v-if="latestBill" #latest-entry>
+        <LatestEntryCard
+          :entry="latestBill.entry"
+          :total-paid="latestBill.totalPaid"
+          :last-paid-date="latestBill.lastPaidDate"
+          @view="openEntry"
+        />
+      </template>
+    </TenantDetails>
 
     <div
       v-else
