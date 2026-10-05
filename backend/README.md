@@ -43,7 +43,7 @@ Dependency versions are pinned in `Pipfile.lock`. Add packages with `pipenv inst
 - `docker compose down -v` deletes the `postgres_data` volume, which is the whole database.
 - `AUTH_USER_MODEL` is `accounts.User` (an `AbstractUser` with `firebase_uid` and `phone_number`). Roles go on property membership (BE Phase 2), not on the user.
 - CORS only allows the Vue dev origin and is not authentication.
-- `billing` has no models yet.
+- `billing` has no models yet; bills will belong to a tenancy (BE Phase 4).
 
 ## Authentication and property access
 
@@ -57,6 +57,7 @@ Dependency versions are pinned in `Pipfile.lock`. Add packages with `pipenv inst
 | **Person** (`accounts.User`) | A real person: optional name, mobile number, email, and a link to their Firebase identity (`firebase_uid`, a read-only reference). Shown as "Name — +91 …". | Admin → **People** |
 | **Property** | A building, independent of people. | Admin → **Properties** |
 | **Property membership** | A person's role (owner/manager) at a property, active or ended. The only thing that grants property access. | Admin → **Property memberships**, or inline on a person or property |
+| **Tenancy** | One occupant of one flat over a period: name, flat, mobile, rent, due day, electricity rate, deposit, start and (inclusive) end date. Tenants don't sign in. A flat has a new tenancy, with its own id, for each occupant; bills will belong to the tenancy. | Admin → **Tenancies** |
 
 Admin portal access (`is_staff`/`is_superuser`, username + password) and app sign-in (phone) are separate permissions on the same person. Phone sign-in never opens the admin portal. Django's Groups are hidden: they grant admin permissions across every property, so property roles live on the membership. What each role may do is in `properties/roles.py` (owners: everything; managers: tenants, payments, receipts).
 
@@ -87,5 +88,14 @@ End access by making a membership inactive (memberships aren't deleted, so histo
 | `GET /api/v1/me/` | `{id, phoneNumber, properties: [{id, name, role}]}`; an empty list means access isn't configured; an unregistered number is 403 `not_registered` |
 | `GET /api/v1/properties/` | The user's properties (`id, name, address, contactNumber, role`) |
 | `GET /api/v1/properties/{id}/` | One of them; unassigned or missing is **404** |
+| `GET /api/v1/properties/{id}/tenancies/` | The property's tenancies, paginated: `{count, next, previous, results}` (20 per page, `?page=`). `?status=current` (default), `upcoming`, `ended` or `all`; `?search=` matches name or flat, case-insensitively. Ordered by flat, name, id |
+| `GET /api/v1/properties/{id}/tenancies/{tenancyId}/` | One tenancy of any status (ended ones too, for history) |
 
-All three use `properties/queries.py` `properties_for_user`, so lists and lookups are scoped the same way.
+All of them use `properties/queries.py` `properties_for_user`, so lists and lookups are scoped the same way: a property the user can't access is **404** before any tenancy is looked at, and a tenancy is only found under its own property. Tenancy JSON is `{id, propertyId, name, flatNumber, mobileNumber, rentAmount, rentDueDay, electricityRate, depositAmount, startDate, endDate, status}`, with money as decimal strings (`"15000.00"`). The endpoints are read-only: tenancies are managed in admin.
+
+## Tenancies
+
+- **Status is derived, never stored:** upcoming (starts after today), current (started, and no end date or ending today or later), ended (end date before today), on the India business date (`properties/models.py` `business_date`).
+- **Validation** (admin and model): name and flat required and tidied (`" g-01 "` → `G-01`), mobile in E.164, rent above zero, due day 1–28, electricity rate and deposit zero or more, end date not before start date. Database check constraints back up the numeric ranges and date order.
+- **No overlaps:** admin refuses a tenancy whose dates overlap another one for the same flat in the same property (end dates inclusive, so the next tenancy starts the day after). Flat numbers repeat across properties and over time. Two simultaneous saves could still overlap; a database rule comes with the tenancy write APIs.
+- **Development data:** `pipenv run python manage.py create_dev_tenancies "<property name or id>"` adds three fictional current tenancies (needs `DJANGO_DEBUG=True`; skips flats that already have one). Never message their numbers.
