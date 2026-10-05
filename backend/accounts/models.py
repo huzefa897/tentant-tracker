@@ -25,6 +25,10 @@ class User(AbstractUser):
         verbose_name="Firebase UID",
     )
 
+    # One field rather than first/last name, which fit many names poorly. Optional:
+    # it only helps admins recognise people.
+    name = models.CharField(max_length=150, blank=True)
+
     phone_number = models.CharField(
         max_length=20,
         blank=True,
@@ -48,12 +52,14 @@ class User(AbstractUser):
     def clean_fields(self, exclude=None):
         # Before field validation, so "+91 89778 67546" validates as "+918977867546".
         self.phone_number = normalize_phone_number(self.phone_number)
+        self.name = " ".join(self.name.split())
         super().clean_fields(exclude=exclude)
 
     @property
     def display_name(self) -> str:
-        # Names come later; until then a person is shown by their mobile number.
-        return format_phone_number(self.phone_number) if self.phone_number else self.username
+        """'Huzefa Saleem — +91 89778 67546', or whichever of the two is set, else the username."""
+        phone = format_phone_number(self.phone_number) if self.phone_number else ""
+        return " — ".join(part for part in (self.name.strip(), phone) if part) or self.username
 
     def __str__(self):
         return self.display_name

@@ -45,9 +45,21 @@ class UserModelTests(TestCase):
         with self.assertRaises(ValidationError):
             self.User(username="q", phone_number="+447911123456").full_clean(exclude=["password"])
 
-    def test_is_shown_by_mobile_number_or_username(self):
+    def test_is_shown_by_name_and_mobile_number_or_username(self):
+        self.assertEqual(
+            str(self.User(username="x", name="Huzefa Saleem", phone_number="+918977867546")),
+            "Huzefa Saleem — +91 89778 67546",
+        )
         self.assertEqual(str(self.User(username="x", phone_number="+918977867546")), "+91 89778 67546")
+        self.assertEqual(str(self.User(username="x", name="Huzefa Saleem")), "Huzefa Saleem")
         self.assertEqual(str(self.User(username="admin")), "admin")
+
+    def test_name_is_optional_and_tidied(self):
+        user = self.User(username="p", name="  Huzefa   Saleem ")
+        user.full_clean(exclude=["password"])
+
+        self.assertEqual(user.name, "Huzefa Saleem")
+        self.User(username="q").full_clean(exclude=["password"])
 
 
 @mock.patch("accounts.services.set_firebase_phone_number")
@@ -60,22 +72,36 @@ class PersonAdminTests(TestCase):
         self.tower = Property.objects.create(name="Tower", address="A")
 
     def add(self, **data):
-        return self.client.post(reverse("admin:accounts_user_add"), {"phone_number": "", "email": "", **data})
+        return self.client.post(
+            reverse("admin:accounts_user_add"), {"name": "", "phone_number": "", "email": "", **data}
+        )
 
     def test_groups_are_hidden(self, *_):
         self.assertFalse(admin.site.is_registered(Group))
 
-    def test_list_shows_people_by_number_with_their_properties(self, *_):
+    def test_list_shows_people_by_name_and_number_with_their_properties(self, *_):
         person = self.User.objects.create_user(
-            username="firebase-abc", firebase_uid="uid-1", phone_number="+918977867546"
+            username="firebase-abc",
+            firebase_uid="uid-1",
+            name="Huzefa Saleem",
+            phone_number="+918977867546",
         )
         PropertyMembership.objects.create(user=person, property=self.tower, role="owner")
 
         response = self.client.get(reverse("admin:accounts_user_changelist"))
 
-        self.assertContains(response, "+91 89778 67546")
+        self.assertContains(response, "Huzefa Saleem — +91 89778 67546")
         self.assertContains(response, "Tower (Owner)")
         self.assertNotContains(response, "firebase-abc")
+
+    def test_people_can_be_found_by_name(self, *_):
+        found = self.User.objects.create_user(username="a", name="Huzefa Saleem")
+        other = self.User.objects.create_user(username="b", name="Someone Else")
+
+        response = self.client.get(reverse("admin:accounts_user_changelist"), {"q": "huzefa"})
+
+        self.assertIn(found, response.context["cl"].result_list)
+        self.assertNotIn(other, response.context["cl"].result_list)
 
     def test_filters_people_waiting_for_access(self, *_):
         waiting = self.User.objects.create_user(username="w", phone_number="+919000000001")
@@ -88,12 +114,13 @@ class PersonAdminTests(TestCase):
         self.assertNotIn(member, response.context["cl"].result_list)
 
     def test_adding_a_person_registers_their_number_for_app_sign_in(self, get_uid, _set):
-        response = self.add(phone_number="+91 90000 00001")
+        response = self.add(name="New Manager", phone_number="+91 90000 00001")
 
         person = self.User.objects.get(phone_number="+919000000001")
         self.assertRedirects(response, reverse("admin:accounts_user_change", args=[person.pk]))
         get_uid.assert_called_once_with("+919000000001")
         self.assertEqual(person.firebase_uid, "uid-new")
+        self.assertEqual(person.name, "New Manager")
         self.assertFalse(person.has_usable_password())
         self.assertFalse(person.is_staff)
         self.assertFalse(PropertyMembership.objects.filter(user=person).exists())
@@ -132,6 +159,7 @@ class PersonAdminTests(TestCase):
 
         for text in ["Profile", "Admin portal access", "Technical", "Property access"]:
             self.assertContains(response, text)
+        self.assertContains(response, 'name="name"')
         self.assertContains(response, 'name="phone_number"')
         self.assertNotContains(response, 'name="firebase_uid"')  # read-only reference
         self.assertNotContains(response, 'name="first_name"')
@@ -142,6 +170,7 @@ class PersonAdminTests(TestCase):
         )
         url = reverse("admin:accounts_user_change", args=[person.pk])
         data = {
+            "name": "Renamed Person",
             "phone_number": "+919000000002",
             "email": "",
             "is_active": "on",
@@ -158,6 +187,7 @@ class PersonAdminTests(TestCase):
         set_phone.assert_called_once_with("uid-1", "+919000000002")
         person.refresh_from_db()
         self.assertEqual(person.phone_number, "+919000000002")
+        self.assertEqual(person.name, "Renamed Person")
 
     def test_granting_access_on_the_person_page_records_who_granted_it(self, *_):
         person = self.User.objects.create_user(

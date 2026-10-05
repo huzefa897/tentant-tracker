@@ -50,7 +50,7 @@ class PersonCreationForm(FirebaseLinkMixin, forms.ModelForm):
 
     class Meta:
         model = User
-        fields = ("phone_number", "email")
+        fields = ("name", "phone_number", "email")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -122,12 +122,12 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
     )
     list_display_links = ("display_name",)
     list_filter = (AppSignInFilter, PropertyAccessFilter, "is_staff", "is_active")
-    search_fields = ("phone_number", "email", "username", "firebase_uid")
-    ordering = ("phone_number", "username")
+    search_fields = ("name", "phone_number", "email", "username", "firebase_uid")
+    ordering = ("name", "phone_number", "username")
     readonly_fields = ("firebase_uid", "last_login", "date_joined")
 
     fieldsets = (
-        ("Profile", {"fields": ("phone_number", "email")}),
+        ("Profile", {"fields": ("name", "phone_number", "email")}),
         (
             "Status",
             {
@@ -155,7 +155,7 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
         (
             None,
             {
-                "fields": ("phone_number", "email"),
+                "fields": ("name", "phone_number", "email"),
                 "description": (
                     "Only numbers added here can sign in to the app. "
                     "After saving, give them access to a property below."
@@ -177,7 +177,7 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
             .prefetch_related(Prefetch("property_memberships", active, to_attr="active_memberships"))
         )
 
-    @admin.display(description="Person", ordering="phone_number")
+    @admin.display(description="Person", ordering="name")
     def display_name(self, obj):
         return obj.display_name
 

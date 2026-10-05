@@ -75,7 +75,13 @@ class PropertyMembershipAdmin(admin.ModelAdmin):
     list_display = ("user", "property", "role", "is_active", "granted_by", "created_at")
     list_filter = ("property", "role", "is_active")
     list_select_related = ("user", "property", "granted_by")
-    search_fields = ("user__phone_number", "user__email", "user__username", "property__name")
+    search_fields = (
+        "user__name",
+        "user__phone_number",
+        "user__email",
+        "user__username",
+        "property__name",
+    )
     autocomplete_fields = ("user", "property")
     readonly_fields = ("granted_by", "created_at")
     fields = ("user", "property", "role", "is_active", "granted_by", "created_at")

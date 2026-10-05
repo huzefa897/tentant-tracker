@@ -54,7 +54,7 @@ Dependency versions are pinned in `Pipfile.lock`. Add packages with `pipenv inst
 | Concept | Is | Where |
 |---|---|---|
 | Firebase identity | Proof of a phone number. No name, no permissions. | Firebase console (not a Django table) |
-| **Person** (`accounts.User`) | A real person: mobile number, email, and a link to their Firebase identity (`firebase_uid`, a read-only reference). | Admin → **People** |
+| **Person** (`accounts.User`) | A real person: optional name, mobile number, email, and a link to their Firebase identity (`firebase_uid`, a read-only reference). Shown as "Name — +91 …". | Admin → **People** |
 | **Property** | A building, independent of people. | Admin → **Properties** |
 | **Property membership** | A person's role (owner/manager) at a property, active or ended. The only thing that grants property access. | Admin → **Property memberships**, or inline on a person or property |
 
@@ -73,7 +73,7 @@ Configure in `.env`: `FIREBASE_PROJECT_ID` (the Vue app's project) and `GOOGLE_A
 
 ### Adding a person and granting access
 
-1. Admin → **People** → **Add person**: enter their mobile number (and optionally email). Saving registers it for app sign-in.
+1. Admin → **People** → **Add person**: enter their mobile number, and optionally a name and email. Saving registers the number for app sign-in.
 2. On the person's page that opens, add **Property access**: the property, a role, active. The admin who granted it is recorded.
 3. They can now sign in to the app. A person with sign-in but no active membership sees "No property access"; filter People by **property access → Waiting for access** to find them.
 
