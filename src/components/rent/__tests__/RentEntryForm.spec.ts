@@ -13,12 +13,21 @@ const tenant: Tenant = {
   electricityRate: 6,
   mobileNumber: '+918341413827',
   depositAmount: 90000,
+  startDate: '2025-04-01',
+  endDate: null,
 }
 
 let wrapper: VueWrapper | undefined
 
-function mountForm(props: { saveError?: string | null } = {}) {
-  wrapper = mount(RentEntryForm, { props: { tenant, ...props }, attachTo: document.body })
+// Payments on by default here, so the payment rules stay covered for when the backend takes
+// payments (BE Phase 5); the 'payments unavailable' tests turn them off.
+function mountForm(
+  props: { saveError?: string | null; saving?: boolean; paymentsEnabled?: boolean } = {},
+) {
+  wrapper = mount(RentEntryForm, {
+    props: { tenant, paymentsEnabled: true, ...props },
+    attachTo: document.body,
+  })
   return wrapper
 }
 
@@ -314,6 +323,58 @@ describe('RentEntryForm', () => {
       await fill({ notes: '' })
 
       expect(wrapper!.emitted('dirtyChange')).toEqual([[true], [false]])
+    })
+  })
+
+  describe('payments unavailable', () => {
+    it('disables the payment inputs and says why', async () => {
+      mountForm({ paymentsEnabled: false })
+
+      expect(wrapper!.get('#paymentAmount').attributes('disabled')).toBeDefined()
+      expect(wrapper!.get('#paidDate').attributes('disabled')).toBeDefined()
+      expect(text('payments-unavailable')).toContain("Payments can't be recorded yet.")
+    })
+
+    it('previews the bill as unpaid and saves it without a payment', async () => {
+      mountForm({ paymentsEnabled: false })
+
+      await fill({ electricityUnits: '75', waterAmount: '300' })
+      expect(text('total-due')).toBe('₹15,750')
+      expect(text('outstanding')).toBe('₹15,750')
+      expect(text('status')).toBe('Unpaid')
+
+      await save()
+
+      expect(wrapper!.emitted('save')).toEqual([
+        [
+          {
+            entry: {
+              tenantId: tenant.id,
+              billingMonth: '2026-10',
+              rentAmount: 15000,
+              electricityUnits: 75,
+              electricityRate: 6,
+              waterAmount: 300,
+              notes: '',
+            },
+            initialPayment: null,
+          },
+        ],
+      ])
+    })
+  })
+
+  describe('while saving', () => {
+    it('disables Save and ignores another submit', async () => {
+      mountForm({ saving: true })
+      await fill({ electricityUnits: '75' })
+
+      await save()
+
+      const button = wrapper!.get('button[type="submit"]')
+      expect(button.text()).toBe('Saving…')
+      expect(button.attributes('disabled')).toBeDefined()
+      expect(wrapper!.emitted('save')).toBeUndefined()
     })
   })
 })

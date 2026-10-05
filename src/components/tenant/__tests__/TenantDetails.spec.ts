@@ -13,6 +13,8 @@ const tenant: Tenant = {
   electricityRate: 6,
   mobileNumber: '+918341413827',
   depositAmount: 90000,
+  startDate: '2025-04-01',
+  endDate: null,
 }
 
 function details(wrapper: ReturnType<typeof mount>) {
