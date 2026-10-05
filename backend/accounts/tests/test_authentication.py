@@ -109,11 +109,28 @@ class FirebaseAuthenticationTests(TestCase):
         self.assertEqual(self.get_me("Bearer token").json()["phoneNumber"], "+919000000002")
         self.assertEqual(get_user_model().objects.get().phone_number, "+919000000002")
 
-    def test_later_requests_clear_a_removed_phone_number(self, verify):
+    def test_a_number_removed_in_firebase_is_cleared_and_ends_access(self, verify):
         self.invite()
         verify.return_value = {"uid": CLAIMS["uid"]}
 
-        self.assertEqual(self.get_me("Bearer token").json()["phoneNumber"], "")
+        response = self.get_me("Bearer token")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "not_registered")
+        self.assertEqual(get_user_model().objects.get().phone_number, "")
+
+    def test_a_number_removed_in_admin_ends_access_even_with_an_older_token(self, verify):
+        # The token still carries the number; it must not put it back.
+        user = self.invite()
+        user.phone_number = ""
+        user.save()
+        verify.return_value = CLAIMS
+
+        response = self.get_me("Bearer token")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "not_registered")
+        self.assertEqual(get_user_model().objects.get().phone_number, "")
 
     def test_phone_number_sync_never_takes_another_persons_number(self, verify):
         self.invite()

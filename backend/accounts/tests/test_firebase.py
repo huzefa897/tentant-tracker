@@ -10,6 +10,7 @@ from accounts.firebase import (
     InvalidFirebaseTokenError,
     find_firebase_uid,
     get_or_create_firebase_uid,
+    revoke_firebase_sessions,
     set_firebase_phone_number,
     verify_firebase_token,
 )
@@ -143,3 +144,19 @@ class SetFirebasePhoneNumberTests(SimpleTestCase):
         with self.assertLogs("accounts.firebase", "ERROR"):
             with self.assertRaises(FirebaseUnavailableError):
                 set_firebase_phone_number("uid-1", "+919000000002")
+
+
+@mock.patch("accounts.firebase.initialize_firebase")
+@mock.patch("accounts.firebase.auth.revoke_refresh_tokens")
+class RevokeFirebaseSessionsTests(SimpleTestCase):
+    def test_revokes_the_identitys_refresh_tokens(self, revoke, _init):
+        revoke_firebase_sessions("uid-1")
+
+        revoke.assert_called_once_with("uid-1")
+
+    def test_outages_raise_unavailable(self, revoke, _init):
+        revoke.side_effect = exceptions.UnavailableError("down")
+
+        with self.assertLogs("accounts.firebase", "ERROR"):
+            with self.assertRaises(FirebaseUnavailableError):
+                revoke_firebase_sessions("uid-1")

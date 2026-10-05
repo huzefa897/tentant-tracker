@@ -63,8 +63,10 @@ class UserModelTests(TestCase):
 
 
 # Firebase is never called: the read-only lookup (validation) and the changes (save)
-# are both mocked. find_firebase_uid is patched per class so its mock isn't passed in.
+# are all mocked. find_firebase_uid and revoke_firebase_sessions are patched with new= so
+# their mocks aren't passed in.
 @mock.patch("accounts.services.find_firebase_uid", new=mock.Mock(return_value=None))
+@mock.patch("accounts.services.revoke_firebase_sessions", new=mock.Mock())
 @mock.patch("accounts.services.set_firebase_phone_number")
 @mock.patch("accounts.services.get_or_create_firebase_uid", return_value="uid-new")
 class PersonAdminTests(TestCase):

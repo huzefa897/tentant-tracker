@@ -4,6 +4,7 @@ from .firebase import (
     FirebasePhoneNumberTakenError,
     find_firebase_uid,
     get_or_create_firebase_uid,
+    revoke_firebase_sessions,
     set_firebase_phone_number,
 )
 from .models import User
@@ -23,8 +24,11 @@ def get_registered_user(claims: dict) -> User:
     """The person linked to verified Firebase claims. Never creates one: sign-in is
     invite-only (see link_firebase_identity).
 
-    The stored number follows the verified claim, so a number changed in Firebase
-    replaces the stored one; a clash with another person's number is logged and skipped.
+    Like the admin's "can sign in", the person needs a mobile number as well as the
+    link: one whose number was removed gets NotRegisteredError, and a claim never puts
+    a number back. Otherwise the stored number follows the verified claim, so a number
+    changed (or removed) in Firebase replaces the stored one; a clash with another
+    person's number is logged and skipped.
     """
     try:
         user = User.objects.get(firebase_uid=claims["uid"])
@@ -32,12 +36,15 @@ def get_registered_user(claims: dict) -> User:
         raise NotRegisteredError(claims["uid"]) from None
 
     phone_number = claims.get("phone_number") or ""
-    if user.phone_number != phone_number:
+    if user.phone_number and user.phone_number != phone_number:
         if phone_number and User.objects.filter(phone_number=phone_number).exclude(pk=user.pk).exists():
             logger.warning("Not syncing phone number for user %s: another person has it", user.pk)
         else:
             user.phone_number = phone_number
             user.save(update_fields=["phone_number"])
+
+    if not user.phone_number:
+        raise NotRegisteredError(claims["uid"])
 
     return user
 
@@ -75,6 +82,9 @@ def link_firebase_identity(user: User, previous_phone_number: str) -> None:
     - Linked, number changed: move the identity to the new number.
     - Linked, number removed: remove the identity's number, so it can't sign in.
 
+    Either change also ends the identity's existing sessions, so whoever is signed in
+    (perhaps on a lost phone) has to sign in again with the current number.
+
     Raises PhoneNumberInUseError if the identity belongs to someone else, and
     FirebaseUnavailableError if Firebase can't be reached (nothing is saved then).
     """
@@ -86,6 +96,7 @@ def link_firebase_identity(user: User, previous_phone_number: str) -> None:
                 set_firebase_phone_number(user.firebase_uid, phone_number or None)
             except FirebasePhoneNumberTakenError:
                 raise PhoneNumberInUseError(phone_number) from None
+            revoke_firebase_sessions(user.firebase_uid)
         return
 
     if not phone_number:

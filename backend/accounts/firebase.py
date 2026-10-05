@@ -100,3 +100,14 @@ def set_firebase_phone_number(uid: str, phone_number: str | None) -> None:
     except (exceptions.FirebaseError, GoogleAuthError, ValueError) as error:
         logger.exception("Firebase phone number update unavailable")
         raise FirebaseUnavailableError(str(error)) from error
+
+
+def revoke_firebase_sessions(uid: str) -> None:
+    """End every existing session of a Firebase identity: its refresh tokens stop working,
+    and verify_firebase_token (check_revoked) rejects ID tokens issued before now."""
+    try:
+        initialize_firebase()
+        auth.revoke_refresh_tokens(uid)
+    except (exceptions.FirebaseError, GoogleAuthError, ValueError) as error:
+        logger.exception("Firebase session revocation unavailable")
+        raise FirebaseUnavailableError(str(error)) from error
