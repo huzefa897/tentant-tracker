@@ -56,6 +56,18 @@ def verify_firebase_token(token: str) -> dict:
         raise FirebaseUnavailableError(str(error)) from error
 
 
+def find_firebase_uid(phone_number: str) -> str | None:
+    """The UID of the Firebase identity with this E.164 number, or None. Read-only."""
+    try:
+        initialize_firebase()
+        return auth.get_user_by_phone_number(phone_number).uid
+    except auth.UserNotFoundError:
+        return None
+    except (exceptions.FirebaseError, GoogleAuthError, ValueError) as error:
+        logger.exception("Firebase identity lookup unavailable")
+        raise FirebaseUnavailableError(str(error)) from error
+
+
 def get_or_create_firebase_uid(phone_number: str) -> str:
     """The UID of the Firebase identity for this E.164 number, creating it if needed.
 

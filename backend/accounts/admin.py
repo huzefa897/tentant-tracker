@@ -4,15 +4,17 @@ from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import UserChangeForm
+from django.contrib import messages
 from django.contrib.auth.models import Group
 from django.db.models import Prefetch
+from django.http import HttpResponseRedirect
 
 from properties.admin import GrantedByMixin, MembershipInlineBase
 from properties.models import PropertyMembership
 
 from .firebase import FirebaseUnavailableError
 from .models import User
-from .services import PhoneNumberInUseError, link_firebase_identity
+from .services import PhoneNumberInUseError, check_firebase_identity, link_firebase_identity
 
 # Django's groups grant admin-portal permissions across every property, so they can't
 # express property roles (those live on PropertyMembership). Hidden until back-office
@@ -23,16 +25,21 @@ IN_USE_MESSAGE = "This number's app sign-in already belongs to another person."
 UNAVAILABLE_MESSAGE = "Couldn't reach Firebase to set up app sign-in. Nothing was saved; try again."
 
 
+class FirebaseSyncError(Exception):
+    """Firebase refused or failed while saving; raised to roll the admin's transaction back."""
+
+
 class FirebaseLinkMixin:
-    """Links the person's app sign-in to their mobile number once the form is valid,
-    before anything is saved, and reports problems on the number field."""
+    """Checks (read-only) that the person's number can be used for app sign-in, and
+    reports problems on the number field. Firebase is only changed once the whole
+    page has validated: see PersonAdmin.save_related."""
 
     def _post_clean(self):
         super()._post_clean()
         if self.errors:
             return
         try:
-            link_firebase_identity(self.instance, self.initial.get("phone_number") or "")
+            check_firebase_identity(self.instance, self.initial.get("phone_number") or "")
         except PhoneNumberInUseError:
             self.add_error("phone_number", IN_USE_MESSAGE)
         except FirebaseUnavailableError:
@@ -163,6 +170,33 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
             },
         ),
     )
+
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except FirebaseSyncError as error:
+            # The transaction has rolled back: nothing about this person changed.
+            self.message_user(request, str(error), messages.ERROR)
+            return HttpResponseRedirect(request.get_full_path())
+
+    def save_related(self, request, form, formsets, change):
+        """Changes Firebase last, after the person and their property access have
+        validated and been written, inside the admin's transaction. A Firebase failure
+        rolls everything back. If the commit itself failed after Firebase changed, the
+        next save (or the person's next sign-in, which syncs the number) repairs it."""
+        super().save_related(request, form, formsets, change)
+
+        user = form.instance
+        linked_uid = user.firebase_uid
+        try:
+            link_firebase_identity(user, form.initial.get("phone_number") or "")
+        except PhoneNumberInUseError:
+            raise FirebaseSyncError(f"{IN_USE_MESSAGE} Nothing was saved.") from None
+        except FirebaseUnavailableError:
+            raise FirebaseSyncError(UNAVAILABLE_MESSAGE) from None
+
+        if user.firebase_uid != linked_uid:
+            user.save(update_fields=["firebase_uid"])
 
     def get_inlines(self, request, obj):
         return (PropertyAccessInline,) if obj else ()

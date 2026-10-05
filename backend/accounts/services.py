@@ -2,6 +2,7 @@ import logging
 
 from .firebase import (
     FirebasePhoneNumberTakenError,
+    find_firebase_uid,
     get_or_create_firebase_uid,
     set_firebase_phone_number,
 )
@@ -41,8 +42,33 @@ def get_registered_user(claims: dict) -> User:
     return user
 
 
+def check_firebase_identity(user: User, previous_phone_number: str) -> None:
+    """Read-only: would link_firebase_identity succeed? For form validation, so a clash
+    shows on the form and Firebase isn't changed until everything else is valid.
+
+    Raises PhoneNumberInUseError or FirebaseUnavailableError.
+    """
+    phone_number = user.phone_number
+    if not phone_number or (user.firebase_uid and phone_number == previous_phone_number):
+        return
+
+    uid = find_firebase_uid(phone_number)
+    if uid is None:
+        return
+
+    if user.firebase_uid:
+        # Moving to a number another Firebase identity already has.
+        if uid != user.firebase_uid:
+            raise PhoneNumberInUseError(phone_number)
+    elif User.objects.filter(firebase_uid=uid).exclude(pk=user.pk).exists():
+        raise PhoneNumberInUseError(phone_number)
+
+
 def link_firebase_identity(user: User, previous_phone_number: str) -> None:
-    """Make the person's Firebase identity match user.phone_number. Call before saving.
+    """Make the person's Firebase identity match user.phone_number. Changes Firebase, so
+    call it as the last step of a save, after all validation (the admin does this inside
+    its transaction, so a failure here rolls the database back). Sets user.firebase_uid
+    on a new link; the caller saves it.
 
     - Not linked yet, with a number: register (or reuse) that number's Firebase
       identity and link it, so the person can sign in.

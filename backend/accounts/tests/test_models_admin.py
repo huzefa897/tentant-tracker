@@ -62,6 +62,9 @@ class UserModelTests(TestCase):
         self.User(username="q").full_clean(exclude=["password"])
 
 
+# Firebase is never called: the read-only lookup (validation) and the changes (save)
+# are both mocked. find_firebase_uid is patched per class so its mock isn't passed in.
+@mock.patch("accounts.services.find_firebase_uid", new=mock.Mock(return_value=None))
 @mock.patch("accounts.services.set_firebase_phone_number")
 @mock.patch("accounts.services.get_or_create_firebase_uid", return_value="uid-new")
 class PersonAdminTests(TestCase):
@@ -135,20 +138,35 @@ class PersonAdminTests(TestCase):
         self.assertEqual(self.User.objects.count(), 2)
 
     def test_adding_refuses_a_sign_in_that_belongs_to_someone_else(self, get_uid, _set):
-        self.User.objects.create_user(username="x", firebase_uid="uid-new")
+        self.User.objects.create_user(username="x", firebase_uid="uid-taken")
 
-        response = self.add(phone_number="+919000000001")
+        with mock.patch("accounts.services.find_firebase_uid", return_value="uid-taken"):
+            response = self.add(phone_number="+919000000001")
 
         self.assertContains(response, "already belongs to another person")
+        get_uid.assert_not_called()  # caught while validating, before Firebase changes
         self.assertFalse(self.User.objects.filter(phone_number="+919000000001").exists())
 
-    def test_a_firebase_outage_saves_nothing(self, get_uid, _set):
+    def test_a_firebase_outage_while_validating_saves_nothing(self, get_uid, _set):
+        with mock.patch(
+            "accounts.services.find_firebase_uid", side_effect=FirebaseUnavailableError("down")
+        ):
+            response = self.add(phone_number="+919000000001")
+
+        self.assertContains(response, "Couldn&#x27;t reach Firebase")
+        get_uid.assert_not_called()
+        self.assertFalse(self.User.objects.filter(phone_number="+919000000001").exists())
+
+    def test_a_firebase_failure_while_saving_rolls_everything_back(self, get_uid, _set):
         get_uid.side_effect = FirebaseUnavailableError("down")
+        url = reverse("admin:accounts_user_add")
 
         response = self.add(phone_number="+919000000001")
 
-        self.assertContains(response, "Couldn&#x27;t reach Firebase")
+        self.assertRedirects(response, url, fetch_redirect_response=False)
         self.assertFalse(self.User.objects.filter(phone_number="+919000000001").exists())
+        messages = [str(m) for m in response.wsgi_request._messages]
+        self.assertTrue(any("Couldn't reach Firebase" in m for m in messages))
 
     def test_change_page_sections_and_property_access(self, *_):
         person = self.User.objects.create_user(
@@ -188,6 +206,31 @@ class PersonAdminTests(TestCase):
         person.refresh_from_db()
         self.assertEqual(person.phone_number, "+919000000002")
         self.assertEqual(person.name, "Renamed Person")
+
+    def test_an_invalid_property_access_row_leaves_firebase_untouched(self, _get, set_phone):
+        person = self.User.objects.create_user(
+            username="p", firebase_uid="uid-1", phone_number="+919000000001"
+        )
+        url = reverse("admin:accounts_user_change", args=[person.pk])
+        data = {
+            "phone_number": "+919000000002",
+            "email": "",
+            "is_active": "on",
+            "username": "p",
+            "date_joined_0": "2026-10-05",
+            "date_joined_1": "10:00:00",
+            "property_memberships-TOTAL_FORMS": "1",
+            "property_memberships-INITIAL_FORMS": "0",
+            "property_memberships-0-property": str(self.tower.pk),
+            "property_memberships-0-role": "",  # missing role: the row is invalid
+        }
+
+        response = self.client.post(url, data)
+
+        self.assertEqual(response.status_code, 200)
+        set_phone.assert_not_called()
+        person.refresh_from_db()
+        self.assertEqual(person.phone_number, "+919000000001")
 
     def test_granting_access_on_the_person_page_records_who_granted_it(self, *_):
         person = self.User.objects.create_user(

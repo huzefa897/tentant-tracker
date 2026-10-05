@@ -8,6 +8,7 @@ from accounts.firebase import (
     FirebasePhoneNumberTakenError,
     FirebaseUnavailableError,
     InvalidFirebaseTokenError,
+    find_firebase_uid,
     get_or_create_firebase_uid,
     set_firebase_phone_number,
     verify_firebase_token,
@@ -58,6 +59,27 @@ class VerifyFirebaseTokenTests(SimpleTestCase):
 
 def firebase_user(uid):
     return mock.Mock(uid=uid)
+
+
+@mock.patch("accounts.firebase.initialize_firebase")
+@mock.patch("accounts.firebase.auth.get_user_by_phone_number")
+class FindFirebaseUidTests(SimpleTestCase):
+    def test_returns_the_identitys_uid(self, get_user, _init):
+        get_user.return_value = firebase_user("existing")
+
+        self.assertEqual(find_firebase_uid("+919000000001"), "existing")
+
+    def test_returns_none_for_an_unknown_number(self, get_user, _init):
+        get_user.side_effect = auth.UserNotFoundError("none")
+
+        self.assertIsNone(find_firebase_uid("+919000000001"))
+
+    def test_outages_raise_unavailable(self, get_user, _init):
+        get_user.side_effect = exceptions.UnavailableError("down")
+
+        with self.assertLogs("accounts.firebase", "ERROR"):
+            with self.assertRaises(FirebaseUnavailableError):
+                find_firebase_uid("+919000000001")
 
 
 @mock.patch("accounts.firebase.initialize_firebase")
