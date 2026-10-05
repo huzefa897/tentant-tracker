@@ -1,31 +1,64 @@
+import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
+import { accessService } from '@/services/access.service'
+import { ApiError } from '@/services/apiError'
+import { authService } from '@/services/auth.service'
+import { useAccessStore } from '@/stores/access'
+import { useAuthStore } from '@/stores/auth'
+import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
+import { resetAuthService, signInAs, testUser } from '@/test/mocks/authService'
+import type { AuthUser } from '@/types/auth'
 
-const user = { id: 'mock-user-1', phoneNumber: '+918341413827' }
+vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
+vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 
-function signIn() {
-  localStorage.setItem('rent-tracker-auth-user', JSON.stringify(user))
+const annex = {
+  id: '6f1c2a4e-0000-4000-8000-000000000002',
+  name: 'Annex',
+  role: 'manager' as const,
 }
 
-function startOtpFlow() {
-  sessionStorage.setItem('rent-tracker-pending-phone', user.phoneNumber)
-}
-
-// The guards read the auth store, which restores itself from storage when created.
-async function navigate(path: string) {
+// A fresh pinia per navigation: the auth store waits for Firebase's restored session.
+// force: the shared router may already be on this path from an earlier test.
+async function navigate(path: string, beforeNavigate?: () => Promise<void> | void) {
   setActivePinia(createPinia())
-  await router.push(path)
+  await beforeNavigate?.()
+  await router.push({ path, force: true })
   return router.currentRoute.value.name
 }
 
+async function startOtpFlow() {
+  await useAuthStore().sendOtp('+918341413827', document.createElement('div'))
+}
+
 beforeEach(() => {
-  localStorage.clear()
-  sessionStorage.clear()
+  resetAuthService()
+  resetAccessService()
 })
 
 describe('route guards', () => {
+  it('waits for Firebase to restore the session before deciding', async () => {
+    let restore: (user: AuthUser | null) => void = () => {}
+    vi.mocked(authService.onAuthStateChanged).mockImplementation((listener) => {
+      restore = listener
+      return () => {}
+    })
+    setActivePinia(createPinia())
+
+    let settled = false
+    const navigation = router.push('/dashboard').then(() => (settled = true))
+    await flushPromises()
+    expect(settled).toBe(false)
+
+    restore(testUser)
+    await navigation
+
+    expect(router.currentRoute.value.name).toBe('dashboard')
+  })
+
   describe('signed out', () => {
     it('shows login', async () => {
       expect(await navigate('/login')).toBe('login')
@@ -39,37 +72,37 @@ describe('route guards', () => {
       expect(await navigate('/nope')).toBe('login')
     })
 
-    it('redirects the dashboard to login', async () => {
-      expect(await navigate('/dashboard')).toBe('login')
+    it.each([
+      '/dashboard',
+      '/properties',
+      '/tenants/tenant-001/entries/new',
+      '/tenants/tenant-001/entries',
+      '/tenants/tenant-001/entries/entry-1',
+    ])('redirects %s to login', async (path) => {
+      expect(await navigate(path)).toBe('login')
     })
 
-    it('redirects a new rent entry to login', async () => {
-      expect(await navigate('/tenants/tenant-001/entries/new')).toBe('login')
-    })
+    it('never asks the backend for access', async () => {
+      await navigate('/dashboard')
 
-    it.each(['/tenants/tenant-001/entries', '/tenants/tenant-001/entries/entry-1'])(
-      'redirects %s to login',
-      async (path) => {
-        expect(await navigate(path)).toBe('login')
-      },
-    )
+      expect(accessService.getMe).not.toHaveBeenCalled()
+    })
 
     it('redirects verify to login without a pending number', async () => {
       expect(await navigate('/verify')).toBe('login')
     })
 
     it('allows verify mid OTP flow', async () => {
-      startOtpFlow()
-
-      expect(await navigate('/verify')).toBe('verify')
+      expect(await navigate('/verify', startOtpFlow)).toBe('verify')
     })
   })
 
-  describe('signed in', () => {
-    beforeEach(signIn)
+  describe('signed in with one property', () => {
+    beforeEach(() => signInAs())
 
-    it('allows the dashboard', async () => {
+    it('selects it and allows the dashboard', async () => {
       expect(await navigate('/dashboard')).toBe('dashboard')
+      expect(useAccessStore().selectedProperty).toEqual(testProperty)
     })
 
     it('allows a new rent entry for a tenant', async () => {
@@ -95,9 +128,31 @@ describe('route guards', () => {
     })
 
     it('redirects verify to the dashboard', async () => {
-      startOtpFlow()
+      expect(await navigate('/verify', startOtpFlow)).toBe('dashboard')
+    })
+  })
 
-      expect(await navigate('/verify')).toBe('dashboard')
+  describe('signed in without a selected property', () => {
+    beforeEach(() => signInAs())
+
+    it('sends a user with no access to the property page', async () => {
+      vi.mocked(accessService.getMe).mockResolvedValue(identityWith([]))
+
+      expect(await navigate('/dashboard')).toBe('property-select')
+    })
+
+    it('asks a user with several properties to choose, remembering where they were going', async () => {
+      vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty, annex]))
+
+      expect(await navigate('/tenants/tenant-001/entries')).toBe('property-select')
+      expect(router.currentRoute.value.query.redirect).toBe('/tenants/tenant-001/entries')
+    })
+
+    it('sends the user to the property page when access fails to load', async () => {
+      vi.mocked(accessService.getMe).mockRejectedValue(new ApiError('unavailable'))
+
+      expect(await navigate('/dashboard')).toBe('property-select')
+      expect(useAccessStore().status).toBe('error')
     })
   })
 })

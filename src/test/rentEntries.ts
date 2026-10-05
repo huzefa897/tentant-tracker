@@ -4,6 +4,7 @@ import { h } from 'vue'
 import { RouterView } from 'vue-router'
 
 import router from '@/router'
+import { signInAs } from '@/test/mocks/authService'
 import type { Payment } from '@/types/payment'
 import type { PaymentReceipt } from '@/types/receipt'
 import type { RentEntry } from '@/types/rentEntry'
@@ -94,11 +95,10 @@ export function storeEntries(...entries: RentEntry[]) {
 // Signs in and opens the URL directly, as after a refresh: fresh Pinia, nothing selected.
 // Rendered through RouterView, as in the app.
 // `beforeMount` runs with the fresh Pinia active, e.g. to stub a store action.
+// Signs in through the fake auth service: the calling test file must mock
+// '@/services/auth.service' and '@/services/access.service' with '@/test/mocks/*'.
 export async function openPage(path: string, beforeMount?: () => void): Promise<VueWrapper> {
-  localStorage.setItem(
-    'rent-tracker-auth-user',
-    JSON.stringify({ id: 'mock-user-1', phoneNumber: '+918341413827' }),
-  )
+  signInAs()
   const pinia = createPinia()
   setActivePinia(pinia)
   beforeMount?.()

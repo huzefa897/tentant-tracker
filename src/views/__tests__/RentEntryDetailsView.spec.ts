@@ -14,13 +14,14 @@ import { RECEIPT_PDF_ERROR_MESSAGE } from '@/composables/useReceiptDownload'
 import { makeEntry, makePayment, openPage, storeEntries, storeLedger } from '@/test/rentEntries'
 import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
+import { resetAccessService } from '@/test/mocks/accessService'
+import { resetAuthService } from '@/test/mocks/authService'
 
 // The PDF itself is covered by its own tests; here, which receipt gets downloaded.
 vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
-vi.mock('@/services/auth.service', () => ({
-  authService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), logout: vi.fn() },
-}))
+vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
+vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 
 let view: VueWrapper | undefined
 
@@ -75,6 +76,8 @@ function paymentRows() {
 }
 
 beforeEach(() => {
+  resetAuthService()
+  resetAccessService()
   localStorage.clear()
   sessionStorage.clear()
 })

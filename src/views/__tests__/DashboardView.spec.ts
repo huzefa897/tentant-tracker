@@ -3,26 +3,29 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
+import { accessService } from '@/services/access.service'
 import { authService } from '@/services/auth.service'
+import { useAccessStore } from '@/stores/access'
+import { useAuthStore } from '@/stores/auth'
 import { LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
+import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
+import { resetAuthService, signInAs } from '@/test/mocks/authService'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 import DashboardView from '@/views/DashboardView.vue'
 
-vi.mock('@/services/auth.service', () => ({
-  authService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), logout: vi.fn() },
-}))
+vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
+vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 
 let view: VueWrapper | undefined
 const body = new DOMWrapper(document.body)
 
-async function mountView() {
-  localStorage.setItem(
-    'rent-tracker-auth-user',
-    JSON.stringify({ id: 'mock-user-1', phoneNumber: '+918341413827' }),
-  )
+// beforeOpen runs with the fresh pinia active, before navigating to the dashboard.
+async function mountView(beforeOpen?: () => Promise<void>) {
+  signInAs()
   const pinia = createPinia()
   setActivePinia(pinia)
+  await beforeOpen?.()
   await router.push('/dashboard')
   view = mount(DashboardView, { global: { plugins: [pinia, router] }, attachTo: document.body })
   await flushPromises()
@@ -30,9 +33,10 @@ async function mountView() {
 }
 
 beforeEach(() => {
+  resetAuthService()
+  resetAccessService()
   localStorage.clear()
   sessionStorage.clear()
-  vi.mocked(authService.logout).mockReset().mockResolvedValue()
 })
 
 afterEach(() => {
@@ -177,7 +181,52 @@ describe('DashboardView', () => {
 
     expect(authService.logout).toHaveBeenCalled()
     expect(useTenantStore().selectedTenantId).toBeNull()
-    expect(localStorage.getItem('rent-tracker-auth-user')).toBeNull()
+    expect(useAccessStore().selectedPropertyId).toBeNull()
     expect(router.currentRoute.value.name).toBe('login')
+  })
+
+  it('keeps saved entries on logout (they are not per user yet)', async () => {
+    localStorage.setItem(RENT_LEDGER_STORAGE_KEY, 'kept')
+    await mountView()
+
+    await view!.get('button[aria-label="Logout"]').trigger('click')
+    await flushPromises()
+
+    expect(localStorage.getItem(RENT_LEDGER_STORAGE_KEY)).toBe('kept')
+  })
+
+  describe('property', () => {
+    const annex = {
+      id: '6f1c2a4e-0000-4000-8000-000000000002',
+      name: 'Annex',
+      role: 'manager' as const,
+    }
+
+    it('shows the selected property', async () => {
+      await mountView()
+
+      expect(view!.get('[data-testid="selected-property"]').text()).toBe('Test Towers')
+    })
+
+    it('offers no property switch with a single property', async () => {
+      await mountView()
+
+      expect(view!.find('button[aria-label="Switch property"]').exists()).toBe(false)
+    })
+
+    it('switches property when there are several', async () => {
+      vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty, annex]))
+      // Chosen on the property page first.
+      await mountView(async () => {
+        await useAuthStore().init()
+        await useAccessStore().load()
+        useAccessStore().selectProperty(annex.id)
+      })
+      expect(view!.get('[data-testid="selected-property"]').text()).toBe('Annex')
+
+      await view!.get('button[aria-label="Switch property"]').trigger('click')
+
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('property-select'))
+    })
   })
 })

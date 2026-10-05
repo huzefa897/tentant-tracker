@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft } from '@lucide/vue'
 
@@ -13,6 +13,8 @@ const RESEND_COOLDOWN_SECONDS = 60
 
 const authStore = useAuthStore()
 const router = useRouter()
+// Resending needs a fresh reCAPTCHA check, rendered here (see authService.sendOtp).
+const recaptchaHost = useTemplateRef<HTMLElement>('recaptcha-host')
 
 const resent = ref(false)
 const secondsLeft = ref(0)
@@ -55,12 +57,12 @@ async function handleVerify(code: string) {
 
 async function handleResend() {
   const phoneNumber = authStore.pendingPhoneNumber
-  if (!phoneNumber || secondsLeft.value > 0) return
+  if (!phoneNumber || !recaptchaHost.value || secondsLeft.value > 0) return
 
   resent.value = false
 
   try {
-    await authStore.sendOtp(phoneNumber)
+    await authStore.sendOtp(phoneNumber, recaptchaHost.value)
     resent.value = true
     startCooldown()
   } catch {
@@ -117,5 +119,6 @@ async function handleChangeNumber() {
         </Button>
       </p>
     </div>
+    <div ref="recaptcha-host" />
   </AuthLayout>
 </template>
