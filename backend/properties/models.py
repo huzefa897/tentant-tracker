@@ -3,10 +3,12 @@ from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
+from django.contrib.postgres.constraints import ExclusionConstraint
+from django.contrib.postgres.fields import DateRangeField, RangeOperators
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models import Q
+from django.db.models import Func, Q, Value
 from django.utils import timezone
 
 from accounts.phone import normalize_phone_number, validate_phone_number
@@ -95,6 +97,21 @@ def business_date() -> date:
 def normalize_flat_number(value: str) -> str:
     """' g-01 ' -> 'G-01', so the same flat is always written the same way."""
     return " ".join((value or "").split()).upper()
+
+
+class InclusiveDateRange(Func):
+    """daterange(start, end, '[]'): both ends inclusive; a NULL end is open-ended."""
+
+    function = "DATERANGE"
+    output_field = DateRangeField()
+
+    def __init__(self, start, end):
+        super().__init__(start, end, Value("[]"))
+
+
+# The database's guarantee that a flat has one occupant at a time, even if two admins save at
+# once. clean() checks the same rule first, with a message naming the clashing tenancy.
+TENANCY_OVERLAP_CONSTRAINT = "tenancy_no_overlapping_occupancy"
 
 
 class TenancyQuerySet(models.QuerySet):
@@ -203,6 +220,16 @@ class Tenancy(models.Model):
                 name="tenancy_end_date_not_before_start_date",
                 violation_error_message="The end date can't be before the start date.",
             ),
+            # Needs the btree_gist extension (migration 0004) for the = comparisons.
+            ExclusionConstraint(
+                name=TENANCY_OVERLAP_CONSTRAINT,
+                expressions=[
+                    ("property", RangeOperators.EQUAL),
+                    ("flat_number", RangeOperators.EQUAL),
+                    (InclusiveDateRange("start_date", "end_date"), RangeOperators.OVERLAPS),
+                ],
+                violation_error_message="This flat already has a tenancy in this period.",
+            ),
         ]
 
     def __str__(self):
@@ -225,6 +252,15 @@ class Tenancy(models.Model):
         self.mobile_number = normalize_phone_number(self.mobile_number)
         super().clean_fields(exclude=exclude)
 
+    def get_constraints(self):
+        # clean() reports overlaps with the clashing tenancy's details, so model validation
+        # skips the exclusion constraint rather than repeat a vaguer message. The database
+        # still enforces it.
+        return [
+            (model, [c for c in constraints if c.name != TENANCY_OVERLAP_CONSTRAINT])
+            for model, constraints in super().get_constraints()
+        ]
+
     def clean(self):
         super().clean()
         if self.end_date and self.start_date and self.end_date < self.start_date:
@@ -235,8 +271,8 @@ class Tenancy(models.Model):
         """A flat has one occupant at a time. Both end dates are inclusive, so a tenancy can
         start the day after the previous one ends, not on the same day.
 
-        Admin validation only: two simultaneous saves can still overlap. A database rule
-        comes with the tenancy write APIs.
+        Two simultaneous saves can both pass this check; the exclusion constraint then
+        rejects the second in the database.
         """
         if not (self.property_id and self.flat_number and self.start_date):
             return

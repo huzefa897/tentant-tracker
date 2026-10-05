@@ -1,7 +1,15 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.db import IntegrityError
+from django.http import HttpResponseRedirect
 from django.db.models import Count, Prefetch, Q
 
-from .models import Property, PropertyMembership, Tenancy, business_date
+from .models import (
+    TENANCY_OVERLAP_CONSTRAINT,
+    Property,
+    PropertyMembership,
+    Tenancy,
+    business_date,
+)
 
 
 class GrantedByMixin:
@@ -138,6 +146,22 @@ class TenancyAdmin(admin.ModelAdmin):
         ),
         ("Technical", {"classes": ("collapse",), "fields": ("id", "created_at", "updated_at")}),
     )
+
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except IntegrityError as error:
+            # Another admin saved an overlapping tenancy for this flat between validation and
+            # saving; the database refused this one, and the save was rolled back.
+            if TENANCY_OVERLAP_CONSTRAINT not in str(error):
+                raise
+            self.message_user(
+                request,
+                "Not saved: this flat already has a tenancy in this period "
+                "(someone saved one just now). Check the flat's tenancies and try again.",
+                messages.ERROR,
+            )
+            return HttpResponseRedirect(request.get_full_path())
 
     @admin.display(description="Status")
     def status(self, obj):

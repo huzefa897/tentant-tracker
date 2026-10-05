@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 from io import StringIO
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -130,7 +131,33 @@ class TenancyModelTests(TestCase):
         ):
             with self.subTest(start=start, end=end):
                 errors = self.errors(name="Other", flat_number=" 202", start_date=start, end_date=end)
+                # One message, naming the clash (the database constraint isn't repeated).
+                self.assertEqual(len(errors["__all__"]), 1)
                 self.assertIn("Flat 202 already has a tenancy", errors["__all__"][0])
+
+    def test_the_database_refuses_overlaps_that_skip_validation(self):
+        # As when two admins save at once: both pass clean(), then insert.
+        Tenancy.objects.create(
+            **valid_fields(self.tower, start_date=date(2026, 1, 1), end_date=date(2026, 3, 31))
+        )
+
+        for start, end in (
+            (date(2026, 3, 31), None),
+            (date(2025, 12, 1), date(2026, 1, 1)),
+            (date(2025, 1, 1), None),
+        ):
+            with self.subTest(start=start, end=end), self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    Tenancy.objects.create(
+                        **valid_fields(self.tower, name="Other", start_date=start, end_date=end)
+                    )
+
+        # The day after, another flat, or another property is fine.
+        Tenancy.objects.create(**valid_fields(self.tower, name="Next", start_date=date(2026, 4, 1)))
+        Tenancy.objects.create(**valid_fields(self.tower, flat_number="301"))
+        annex = Property.objects.create(name="Annex", address="B")
+        Tenancy.objects.create(**valid_fields(annex))
+        self.assertEqual(Tenancy.objects.count(), 4)
 
     def test_an_open_tenancy_blocks_later_ones(self):
         Tenancy.objects.create(**valid_fields(self.tower))
@@ -183,6 +210,17 @@ class TenancyAdminTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Flat 202 already has a tenancy")
         self.assertEqual(Tenancy.objects.count(), 1)
+
+    def test_an_overlap_saved_at_the_same_time_is_refused_without_an_error_page(self):
+        self.post()
+        # The other admin's tenancy wasn't there when this one was validated.
+        with mock.patch.object(Tenancy, "_check_no_overlap"):
+            response = self.post(name="Someone Else", start_date="2026-06-01")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Tenancy.objects.count(), 1)
+        page = self.client.get(response["Location"])
+        self.assertContains(page, "Not saved: this flat already has a tenancy in this period")
 
     def test_list_search_and_filters(self):
         Tenancy.objects.create(**valid_fields(self.tower))
