@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.db.models import Count, Prefetch, Q
 
-from .models import Property, PropertyMembership
+from .models import Property, PropertyMembership, Tenancy, business_date
 
 
 class GrantedByMixin:
@@ -94,3 +94,53 @@ class PropertyMembershipAdmin(admin.ModelAdmin):
         if not change:
             obj.granted_by = request.user
         super().save_model(request, obj, form, change)
+
+
+class TenancyStatusFilter(admin.SimpleListFilter):
+    title = "status"
+    parameter_name = "status"
+
+    def lookups(self, request, model_admin):
+        return Tenancy.Status.choices
+
+    def queryset(self, request, queryset):
+        if self.value() in Tenancy.Status.values:
+            return queryset.with_status(self.value(), business_date())
+        return queryset
+
+
+@admin.register(Tenancy)
+class TenancyAdmin(admin.ModelAdmin):
+    """Tenancies are entered here for now; the app only reads them."""
+
+    list_display = (
+        "name",
+        "property",
+        "flat_number",
+        "rent_amount",
+        "start_date",
+        "end_date",
+        "status",
+    )
+    list_filter = ("property", TenancyStatusFilter)
+    list_select_related = ("property",)
+    search_fields = ("name", "flat_number", "mobile_number")
+    readonly_fields = ("status", "id", "created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("property", "name", "flat_number", "mobile_number")}),
+        ("Rent", {"fields": ("rent_amount", "rent_due_day", "electricity_rate", "deposit_amount")}),
+        (
+            "Occupancy",
+            {
+                "fields": ("start_date", "end_date", "status"),
+                "description": "A flat can have one tenancy at a time; end dates are inclusive.",
+            },
+        ),
+        ("Technical", {"classes": ("collapse",), "fields": ("id", "created_at", "updated_at")}),
+    )
+
+    @admin.display(description="Status")
+    def status(self, obj):
+        if obj.pk is None or obj.start_date is None:
+            return "—"
+        return obj.get_status_display_on(business_date())

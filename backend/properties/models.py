@@ -1,7 +1,15 @@
 import uuid
+from datetime import date
+from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import Q
+from django.utils import timezone
+
+from accounts.phone import normalize_phone_number, validate_phone_number
 
 
 class Property(models.Model):
@@ -76,3 +84,174 @@ class PropertyMembership(models.Model):
 
     def __str__(self):
         return f"{self.user} | {self.property} | {self.get_role_display()}"
+
+
+def business_date() -> date:
+    """Today at the property. Every property is in India (settings.TIME_ZONE), so tenancy
+    status never depends on the server's or the viewer's time zone."""
+    return timezone.localdate()
+
+
+def normalize_flat_number(value: str) -> str:
+    """' g-01 ' -> 'G-01', so the same flat is always written the same way."""
+    return " ".join((value or "").split()).upper()
+
+
+class TenancyQuerySet(models.QuerySet):
+    """Status comes from the dates (end date inclusive), never from a stored flag."""
+
+    def upcoming(self, today: date):
+        return self.filter(start_date__gt=today)
+
+    def current(self, today: date):
+        return self.filter(Q(end_date__isnull=True) | Q(end_date__gte=today), start_date__lte=today)
+
+    def ended(self, today: date):
+        return self.filter(end_date__lt=today)
+
+    def with_status(self, status: str, today: date):
+        if status == "all":
+            return self
+        return getattr(self, status)(today)
+
+
+class Tenancy(models.Model):
+    """One occupancy of a flat: a flat has a new tenancy (and id) for each occupant, and
+    bills will belong to the tenancy. Tenants don't sign in; this only describes them."""
+
+    class Status(models.TextChoices):
+        UPCOMING = "upcoming", "Upcoming"
+        CURRENT = "current", "Current"
+        ENDED = "ended", "Ended"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.PROTECT,
+        related_name="tenancies",
+    )
+    name = models.CharField(max_length=150)
+    flat_number = models.CharField(
+        max_length=20,
+        help_text="As written on the door, e.g. 202 or G-01.",
+    )
+    mobile_number = models.CharField(
+        max_length=20,
+        validators=[validate_phone_number],
+        help_text="With its country code, e.g. +91 83414 13827.",
+    )
+    rent_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text="Current monthly rent (₹).",
+    )
+    rent_due_day = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(28)],
+        help_text="Day of the month rent is due (1–28).",
+    )
+    electricity_rate = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Current price per unit (₹).",
+    )
+    deposit_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Deposit held (₹).",
+    )
+    start_date = models.DateField()
+    end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Last day of the occupancy. Leave empty while it continues.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = TenancyQuerySet.as_manager()
+
+    class Meta:
+        verbose_name_plural = "tenancies"
+        ordering = ("flat_number", "name", "id")
+        # The validators above give friendly messages; these protect the stored data.
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(rent_amount__gt=0),
+                name="tenancy_rent_amount_positive",
+                violation_error_message="Rent must be more than zero.",
+            ),
+            models.CheckConstraint(
+                condition=Q(rent_due_day__gte=1, rent_due_day__lte=28),
+                name="tenancy_rent_due_day_1_to_28",
+                violation_error_message="The rent due day must be between 1 and 28.",
+            ),
+            models.CheckConstraint(
+                condition=Q(electricity_rate__gte=0),
+                name="tenancy_electricity_rate_not_negative",
+                violation_error_message="The electricity rate can't be negative.",
+            ),
+            models.CheckConstraint(
+                condition=Q(deposit_amount__gte=0),
+                name="tenancy_deposit_amount_not_negative",
+                violation_error_message="The deposit can't be negative.",
+            ),
+            models.CheckConstraint(
+                condition=Q(end_date__isnull=True) | Q(end_date__gte=models.F("start_date")),
+                name="tenancy_end_date_not_before_start_date",
+                violation_error_message="The end date can't be before the start date.",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} — Flat {self.flat_number}"
+
+    def status_on(self, today: date) -> str:
+        if self.start_date > today:
+            return self.Status.UPCOMING
+        if self.end_date is not None and self.end_date < today:
+            return self.Status.ENDED
+        return self.Status.CURRENT
+
+    def get_status_display_on(self, today: date) -> str:
+        return self.Status(self.status_on(today)).label
+
+    def clean_fields(self, exclude=None):
+        # Before field validation, so "+91 83414 13827" validates as "+918341413827".
+        self.name = " ".join((self.name or "").split())
+        self.flat_number = normalize_flat_number(self.flat_number)
+        self.mobile_number = normalize_phone_number(self.mobile_number)
+        super().clean_fields(exclude=exclude)
+
+    def clean(self):
+        super().clean()
+        if self.end_date and self.start_date and self.end_date < self.start_date:
+            raise ValidationError({"end_date": "The end date can't be before the start date."})
+        self._check_no_overlap()
+
+    def _check_no_overlap(self):
+        """A flat has one occupant at a time. Both end dates are inclusive, so a tenancy can
+        start the day after the previous one ends, not on the same day.
+
+        Admin validation only: two simultaneous saves can still overlap. A database rule
+        comes with the tenancy write APIs.
+        """
+        if not (self.property_id and self.flat_number and self.start_date):
+            return
+
+        overlapping = Tenancy.objects.filter(
+            property_id=self.property_id,
+            flat_number=self.flat_number,
+        ).filter(Q(end_date__isnull=True) | Q(end_date__gte=self.start_date))
+        if self.end_date:
+            overlapping = overlapping.filter(start_date__lte=self.end_date)
+        other = overlapping.exclude(pk=self.pk).order_by("start_date").first()
+
+        if other:
+            until = other.end_date.isoformat() if other.end_date else "now"
+            raise ValidationError(
+                f"Flat {self.flat_number} already has a tenancy in this period: "
+                f"{other.name}, {other.start_date.isoformat()} to {until}."
+            )
