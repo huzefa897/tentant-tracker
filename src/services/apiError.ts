@@ -9,9 +9,11 @@ export type ApiErrorKind =
   | 'unknown'
 
 export class ApiError extends Error {
+  // code: the backend's machine-readable reason, when it gives one (e.g. 'not_registered').
   constructor(
     readonly kind: ApiErrorKind,
     message: string = kind,
+    readonly code: string | null = null,
   ) {
     super(message)
     this.name = 'ApiError'

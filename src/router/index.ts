@@ -105,6 +105,11 @@ router.beforeEach(async (to) => {
     const accessStore = useAccessStore()
     await accessStore.load()
 
+    // The backend refused this number and the session was ended.
+    if (!authStore.isAuthenticated) {
+      return { name: 'login' }
+    }
+
     // Loading failed, no access, or several properties and none chosen yet.
     if (!accessStore.selectedProperty) {
       return { name: 'property-select', query: { redirect: to.fullPath } }

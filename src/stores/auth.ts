@@ -34,7 +34,8 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null)
   // False until Firebase has restored (or ruled out) a saved session. Guards wait for it.
   const ready = ref(false)
-  const setupError = ref<string | null>(null)
+  // Shown on the login page: sign-in couldn't start, or the backend refused this number.
+  const loginNotice = ref<string | null>(null)
   // In memory only, like Firebase's pending confirmation: a refresh on /verify starts over.
   const pendingPhoneNumber = ref<string | null>(null)
   const loading = ref(false)
@@ -56,7 +57,7 @@ export const useAuthStore = defineStore('auth', () => {
       } catch (err) {
         // e.g. missing Firebase config: treat as signed out and say so on the login page.
         console.error(err)
-        setupError.value = messageFor(err, SEND_MESSAGES, 'Sign-in is unavailable right now.')
+        loginNotice.value = messageFor(err, SEND_MESSAGES, 'Sign-in is unavailable right now.')
         ready.value = true
         resolve()
       }
@@ -68,6 +69,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function sendOtp(phoneNumber: string, recaptchaHost: HTMLElement) {
     loading.value = true
     error.value = null
+    loginNotice.value = null
 
     try {
       await authService.sendOtp({ phoneNumber }, recaptchaHost)
@@ -120,10 +122,16 @@ export const useAuthStore = defineStore('auth', () => {
     resetOtpFlow()
   }
 
+  // Signs out of Firebase and explains why on the login page, e.g. a number nobody added.
+  async function endSession(notice: string) {
+    await logout()
+    loginNotice.value = notice
+  }
+
   return {
     user,
     ready,
-    setupError,
+    loginNotice,
     pendingPhoneNumber,
     loading,
     error,
@@ -134,5 +142,6 @@ export const useAuthStore = defineStore('auth', () => {
     resetOtpFlow,
     clearError,
     logout,
+    endSession,
   }
 })

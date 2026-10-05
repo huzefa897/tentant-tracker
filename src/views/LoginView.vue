@@ -35,11 +35,11 @@ async function handleSubmit(phoneNumber: string) {
     </header>
 
     <p
-      v-if="authStore.setupError"
+      v-if="authStore.loginNotice"
       class="mb-6 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
       role="alert"
     >
-      {{ authStore.setupError }}
+      {{ authStore.loginNotice }}
     </p>
 
     <PhoneNumberForm :loading="authStore.loading" :error="authStore.error" @submit="handleSubmit" />

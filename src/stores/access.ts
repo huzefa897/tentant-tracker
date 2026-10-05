@@ -8,6 +8,9 @@ import type { AppIdentity } from '@/types/access'
 
 export type AccessStatus = 'idle' | 'loading' | 'ready' | 'error'
 
+export const NOT_REGISTERED_MESSAGE =
+  "This number isn't registered. Contact the property owner to be added."
+
 function messageFor(error: unknown): string {
   const kind = error instanceof ApiError ? error.kind : 'unknown'
 
@@ -67,6 +70,13 @@ export const useAccessStore = defineStore('access', () => {
           selectedPropertyId.value = result.properties[0]!.id
         }
       } catch (err) {
+        // Firebase verified the number, but nobody added it: sign out and say why.
+        if (err instanceof ApiError && err.code === 'not_registered') {
+          clear()
+          await authStore.endSession(NOT_REGISTERED_MESSAGE)
+          return
+        }
+
         identity.value = null
         loadedForUserId.value = null
         selectedPropertyId.value = null

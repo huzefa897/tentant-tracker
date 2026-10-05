@@ -148,6 +148,16 @@ describe('route guards', () => {
       expect(router.currentRoute.value.query.redirect).toBe('/tenants/tenant-001/entries')
     })
 
+    it('signs out a number nobody added and returns to login with a notice', async () => {
+      vi.mocked(accessService.getMe).mockRejectedValue(
+        new ApiError('forbidden', 'forbidden', 'not_registered'),
+      )
+
+      expect(await navigate('/dashboard')).toBe('login')
+      expect(useAuthStore().isAuthenticated).toBe(false)
+      expect(useAuthStore().loginNotice).toContain("isn't registered")
+    })
+
     it('sends the user to the property page when access fails to load', async () => {
       vi.mocked(accessService.getMe).mockRejectedValue(new ApiError('unavailable'))
 

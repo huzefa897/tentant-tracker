@@ -81,7 +81,7 @@ describe('auth store', () => {
 
       expect(store.ready).toBe(true)
       expect(store.isAuthenticated).toBe(false)
-      expect(store.setupError).toBe(
+      expect(store.loginNotice).toBe(
         "Phone sign-in isn't available right now. Contact the property owner.",
       )
     })
@@ -211,6 +211,27 @@ describe('auth store', () => {
       expect(authService.logout).toHaveBeenCalled()
       expect(store.user).toBeNull()
       expect(store.pendingPhoneNumber).toBeNull()
+    })
+
+    it('endSession signs out and leaves a notice for the login page', async () => {
+      signInAs()
+      const store = useAuthStore()
+      await store.init()
+
+      await store.endSession('Not registered.')
+
+      expect(authService.logout).toHaveBeenCalled()
+      expect(store.isAuthenticated).toBe(false)
+      expect(store.loginNotice).toBe('Not registered.')
+    })
+
+    it('sending a new code clears the notice', async () => {
+      const store = useAuthStore()
+      await store.endSession('Not registered.')
+
+      await store.sendOtp(phoneNumber, host())
+
+      expect(store.loginNotice).toBeNull()
     })
 
     it('keeps saved rent entries', async () => {

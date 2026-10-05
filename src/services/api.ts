@@ -31,10 +31,16 @@ export function toApiError(error: unknown): ApiError {
   }
 
   const status = error.response?.status
+  const data: unknown = error.response?.data
+  const code =
+    typeof data === 'object' && data !== null && 'code' in data && typeof data.code === 'string'
+      ? data.code
+      : null
+
   if (status === undefined) return new ApiError('network', error.message)
-  if (status === 401) return new ApiError('unauthorized', error.message)
-  if (status === 403) return new ApiError('forbidden', error.message)
-  if (status === 404) return new ApiError('not-found', error.message)
-  if (status >= 500) return new ApiError('unavailable', error.message)
-  return new ApiError('unknown', error.message)
+  if (status === 401) return new ApiError('unauthorized', error.message, code)
+  if (status === 403) return new ApiError('forbidden', error.message, code)
+  if (status === 404) return new ApiError('not-found', error.message, code)
+  if (status >= 500) return new ApiError('unavailable', error.message, code)
+  return new ApiError('unknown', error.message, code)
 }

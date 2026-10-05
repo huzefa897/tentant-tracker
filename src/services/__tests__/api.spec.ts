@@ -9,10 +9,10 @@ import { resetAuthService } from '@/test/mocks/authService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 
-function axiosError(status?: number) {
+function axiosError(status?: number, data: unknown = {}) {
   const config = { headers: new AxiosHeaders() } as InternalAxiosRequestConfig
   const response =
-    status === undefined ? undefined : { status, statusText: '', headers: {}, config, data: {} }
+    status === undefined ? undefined : { status, statusText: '', headers: {}, config, data }
   return new AxiosError('request failed', undefined, config, undefined, response)
 }
 
@@ -58,6 +58,17 @@ describe('toApiError', () => {
     [400, 'unknown'],
   ])('maps HTTP %i to %s', (status, kind) => {
     expect(toApiError(axiosError(status)).kind).toBe(kind)
+  })
+
+  it('keeps the backend’s reason code', () => {
+    const error = toApiError(axiosError(403, { detail: 'Not registered', code: 'not_registered' }))
+
+    expect(error).toMatchObject({ kind: 'forbidden', code: 'not_registered' })
+  })
+
+  it('has no code when the backend gives none', () => {
+    expect(toApiError(axiosError(403, { detail: 'No' })).code).toBeNull()
+    expect(toApiError(axiosError(500, 'Server Error')).code).toBeNull()
   })
 
   it('treats no response as a network failure', () => {

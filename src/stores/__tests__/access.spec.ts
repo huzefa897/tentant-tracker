@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessService } from '@/services/access.service'
 import { ApiError, type ApiErrorKind } from '@/services/apiError'
 import { authService } from '@/services/auth.service'
-import { useAccessStore } from '@/stores/access'
+import { NOT_REGISTERED_MESSAGE, useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
@@ -113,6 +113,31 @@ describe('access store', () => {
     expect(store.status).toBe('error')
     expect(store.error).toBe(message)
     expect(store.identity).toBeNull()
+  })
+
+  it('ends the session when the backend says the number is not registered', async () => {
+    vi.mocked(accessService.getMe).mockRejectedValue(
+      new ApiError('forbidden', 'forbidden', 'not_registered'),
+    )
+    const store = await signedInStore()
+
+    await store.load()
+
+    expect(authService.logout).toHaveBeenCalled()
+    expect(useAuthStore().isAuthenticated).toBe(false)
+    expect(useAuthStore().loginNotice).toBe(NOT_REGISTERED_MESSAGE)
+    expect(store.status).toBe('idle')
+    expect(store.identity).toBeNull()
+  })
+
+  it('treats other refusals as errors without signing out', async () => {
+    vi.mocked(accessService.getMe).mockRejectedValue(new ApiError('forbidden'))
+    const store = await signedInStore()
+
+    await store.load()
+
+    expect(authService.logout).not.toHaveBeenCalled()
+    expect(store.status).toBe('error')
   })
 
   it('retries after an error', async () => {

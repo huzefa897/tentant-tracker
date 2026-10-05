@@ -87,6 +87,20 @@ describe('LoginView', () => {
     expect(view.find('[role="alert"]').exists()).toBe(false)
   })
 
+  it('explains why the user was signed out', async () => {
+    const view = await mountView()
+
+    await useAuthStore().endSession(
+      "This number isn't registered. Contact the property owner to be added.",
+    )
+    await flushPromises()
+
+    expect(view.get('[role="alert"]').text()).toBe(
+      "This number isn't registered. Contact the property owner to be added.",
+    )
+    view.unmount()
+  })
+
   it('says when sign-in could not start', async () => {
     vi.mocked(authService.onAuthStateChanged).mockImplementation(() => {
       throw new AuthError('not-configured')
