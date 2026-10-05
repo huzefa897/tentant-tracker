@@ -55,7 +55,9 @@ describe('toApiError', () => {
     [404, 'not-found'],
     [503, 'unavailable'],
     [500, 'unavailable'],
-    [400, 'unknown'],
+    [400, 'invalid-request'],
+    [409, 'conflict'],
+    [422, 'unknown'],
   ])('maps HTTP %i to %s', (status, kind) => {
     expect(toApiError(axiosError(status)).kind).toBe(kind)
   })
@@ -69,6 +71,16 @@ describe('toApiError', () => {
   it('has no code when the backend gives none', () => {
     expect(toApiError(axiosError(403, { detail: 'No' })).code).toBeNull()
     expect(toApiError(axiosError(500, 'Server Error')).code).toBeNull()
+  })
+
+  it('keeps the first message of each field a 400 rejected', () => {
+    const error = toApiError(
+      axiosError(400, { rentAmount: ['Too many digits.', 'Another'], notes: 'Too long.', x: [1] }),
+    )
+
+    expect(error.fieldErrors).toEqual({ rentAmount: 'Too many digits.', notes: 'Too long.' })
+    expect(toApiError(axiosError(400, ['not an object'])).fieldErrors).toEqual({})
+    expect(toApiError(axiosError(403)).fieldErrors).toEqual({})
   })
 
   it('treats no response as a network failure', () => {

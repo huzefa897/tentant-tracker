@@ -21,6 +21,18 @@ api.interceptors.request.use(async (config) => {
   return config
 })
 
+// DRF validation errors: {"field": ["message", ...]}. Keeps the first message of each field.
+function fieldErrorsOf(data: unknown): Record<string, string> {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return {}
+
+  const errors: Record<string, string> = {}
+  for (const [field, messages] of Object.entries(data)) {
+    const first: unknown = Array.isArray(messages) ? messages[0] : messages
+    if (typeof first === 'string') errors[field] = first
+  }
+  return errors
+}
+
 export function toApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error
   if (error instanceof AuthError && error.code === 'network') {
@@ -38,9 +50,12 @@ export function toApiError(error: unknown): ApiError {
       : null
 
   if (status === undefined) return new ApiError('network', error.message)
+  if (status === 400)
+    return new ApiError('invalid-request', error.message, code, fieldErrorsOf(data))
   if (status === 401) return new ApiError('unauthorized', error.message, code)
   if (status === 403) return new ApiError('forbidden', error.message, code)
   if (status === 404) return new ApiError('not-found', error.message, code)
+  if (status === 409) return new ApiError('conflict', error.message, code)
   if (status >= 500) return new ApiError('unavailable', error.message, code)
   return new ApiError('unknown', error.message, code)
 }
