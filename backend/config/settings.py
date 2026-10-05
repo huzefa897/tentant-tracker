@@ -117,8 +117,12 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
-    # Session auth for local development; Firebase auth arrives in BE Phase 2.
+    # Firebase ID tokens only (Authorization: Bearer). Django admin keeps its own session login.
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
+        "accounts.authentication.FirebaseAuthentication",
     ],
 }
+
+# The Firebase project the Vue app signs in with. Its service-account credentials come
+# from GOOGLE_APPLICATION_CREDENTIALS: a path to a JSON key kept outside the repository.
+FIREBASE_PROJECT_ID = os.environ["FIREBASE_PROJECT_ID"]
