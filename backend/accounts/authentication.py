@@ -2,13 +2,25 @@ from rest_framework import exceptions, status
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 
 from .firebase import FirebaseUnavailableError, InvalidFirebaseTokenError, verify_firebase_token
-from .services import get_or_create_firebase_user
+from .services import NotRegisteredError, get_registered_user
 
 
 class AuthenticationUnavailable(exceptions.APIException):
     status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     default_detail = "Sign-in could not be verified right now. Try again shortly."
     default_code = "authentication_unavailable"
+
+
+class NotRegistered(exceptions.APIException):
+    """A real Firebase sign-in for a number nobody has added. The code lets the app
+    tell this apart from other refusals."""
+
+    status_code = status.HTTP_403_FORBIDDEN
+    default_detail = {
+        "detail": "This phone number isn't registered. Contact the property owner.",
+        "code": "not_registered",
+    }
+    default_code = "not_registered"
 
 
 class FirebaseAuthentication(BaseAuthentication):
@@ -46,7 +58,10 @@ class FirebaseAuthentication(BaseAuthentication):
         except FirebaseUnavailableError:
             raise AuthenticationUnavailable() from None
 
-        user = get_or_create_firebase_user(claims)
+        try:
+            user = get_registered_user(claims)
+        except NotRegisteredError:
+            raise NotRegistered() from None
 
         if not user.is_active:
             raise exceptions.AuthenticationFailed("User inactive or deleted.")

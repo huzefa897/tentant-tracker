@@ -5,8 +5,13 @@ from firebase_admin import auth, exceptions
 from google.auth.exceptions import DefaultCredentialsError
 
 from accounts.firebase import (
+    FirebasePhoneNumberTakenError,
     FirebaseUnavailableError,
     InvalidFirebaseTokenError,
+    find_firebase_uid,
+    get_or_create_firebase_uid,
+    revoke_firebase_sessions,
+    set_firebase_phone_number,
     verify_firebase_token,
 )
 
@@ -51,3 +56,107 @@ class VerifyFirebaseTokenTests(SimpleTestCase):
                 with self.assertLogs("accounts.firebase", "ERROR"):
                     with self.assertRaises(FirebaseUnavailableError):
                         verify_firebase_token("token")
+
+
+def firebase_user(uid):
+    return mock.Mock(uid=uid)
+
+
+@mock.patch("accounts.firebase.initialize_firebase")
+@mock.patch("accounts.firebase.auth.get_user_by_phone_number")
+class FindFirebaseUidTests(SimpleTestCase):
+    def test_returns_the_identitys_uid(self, get_user, _init):
+        get_user.return_value = firebase_user("existing")
+
+        self.assertEqual(find_firebase_uid("+919000000001"), "existing")
+
+    def test_returns_none_for_an_unknown_number(self, get_user, _init):
+        get_user.side_effect = auth.UserNotFoundError("none")
+
+        self.assertIsNone(find_firebase_uid("+919000000001"))
+
+    def test_outages_raise_unavailable(self, get_user, _init):
+        get_user.side_effect = exceptions.UnavailableError("down")
+
+        with self.assertLogs("accounts.firebase", "ERROR"):
+            with self.assertRaises(FirebaseUnavailableError):
+                find_firebase_uid("+919000000001")
+
+
+@mock.patch("accounts.firebase.initialize_firebase")
+class GetOrCreateFirebaseUidTests(SimpleTestCase):
+    @mock.patch("accounts.firebase.auth.create_user")
+    @mock.patch("accounts.firebase.auth.get_user_by_phone_number")
+    def test_reuses_an_existing_identity(self, get_user, create_user, _init):
+        get_user.return_value = firebase_user("existing")
+
+        self.assertEqual(get_or_create_firebase_uid("+919000000001"), "existing")
+        create_user.assert_not_called()
+
+    @mock.patch("accounts.firebase.auth.create_user")
+    @mock.patch("accounts.firebase.auth.get_user_by_phone_number")
+    def test_creates_an_identity_for_a_new_number(self, get_user, create_user, _init):
+        get_user.side_effect = auth.UserNotFoundError("none")
+        create_user.return_value = firebase_user("created")
+
+        self.assertEqual(get_or_create_firebase_uid("+919000000001"), "created")
+        create_user.assert_called_once_with(phone_number="+919000000001")
+
+    @mock.patch("accounts.firebase.auth.create_user")
+    @mock.patch("accounts.firebase.auth.get_user_by_phone_number")
+    def test_a_concurrent_create_reuses_the_winner(self, get_user, create_user, _init):
+        get_user.side_effect = [auth.UserNotFoundError("none"), firebase_user("winner")]
+        create_user.side_effect = auth.PhoneNumberAlreadyExistsError("exists", None, None)
+
+        self.assertEqual(get_or_create_firebase_uid("+919000000001"), "winner")
+
+    @mock.patch("accounts.firebase.auth.get_user_by_phone_number")
+    def test_outages_raise_unavailable(self, get_user, _init):
+        get_user.side_effect = exceptions.UnavailableError("down")
+
+        with self.assertLogs("accounts.firebase", "ERROR"):
+            with self.assertRaises(FirebaseUnavailableError):
+                get_or_create_firebase_uid("+919000000001")
+
+
+@mock.patch("accounts.firebase.initialize_firebase")
+@mock.patch("accounts.firebase.auth.update_user")
+class SetFirebasePhoneNumberTests(SimpleTestCase):
+    def test_sets_a_new_number(self, update_user, _init):
+        set_firebase_phone_number("uid-1", "+919000000002")
+
+        update_user.assert_called_once_with("uid-1", phone_number="+919000000002")
+
+    def test_removes_the_number(self, update_user, _init):
+        set_firebase_phone_number("uid-1", None)
+
+        update_user.assert_called_once_with("uid-1", phone_number=auth.DELETE_ATTRIBUTE)
+
+    def test_a_taken_number_is_reported(self, update_user, _init):
+        update_user.side_effect = auth.PhoneNumberAlreadyExistsError("taken", None, None)
+
+        with self.assertRaises(FirebasePhoneNumberTakenError):
+            set_firebase_phone_number("uid-1", "+919000000002")
+
+    def test_outages_raise_unavailable(self, update_user, _init):
+        update_user.side_effect = exceptions.UnavailableError("down")
+
+        with self.assertLogs("accounts.firebase", "ERROR"):
+            with self.assertRaises(FirebaseUnavailableError):
+                set_firebase_phone_number("uid-1", "+919000000002")
+
+
+@mock.patch("accounts.firebase.initialize_firebase")
+@mock.patch("accounts.firebase.auth.revoke_refresh_tokens")
+class RevokeFirebaseSessionsTests(SimpleTestCase):
+    def test_revokes_the_identitys_refresh_tokens(self, revoke, _init):
+        revoke_firebase_sessions("uid-1")
+
+        revoke.assert_called_once_with("uid-1")
+
+    def test_outages_raise_unavailable(self, revoke, _init):
+        revoke.side_effect = exceptions.UnavailableError("down")
+
+        with self.assertLogs("accounts.firebase", "ERROR"):
+            with self.assertRaises(FirebaseUnavailableError):
+                revoke_firebase_sessions("uid-1")

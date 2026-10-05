@@ -16,7 +16,8 @@ export default defineConfigWithVueTs(
     files: ['**/*.{vue,ts,mts,tsx}'],
   },
 
-  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**']),
+  // backend/ is Python (its virtualenv ships vendored JS); it's checked by its own CI job.
+  globalIgnores(['**/dist/**', '**/dist-ssr/**', '**/coverage/**', 'backend/**']),
 
   ...pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,

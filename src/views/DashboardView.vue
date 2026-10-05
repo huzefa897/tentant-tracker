@@ -1,24 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { LogOut, Users } from '@lucide/vue'
+import { ArrowLeftRight, LogOut, Users } from '@lucide/vue'
 
 import LatestEntryCard from '@/components/rent/LatestEntryCard.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import TenantDetails from '@/components/tenant/TenantDetails.vue'
 import TenantSelector from '@/components/tenant/TenantSelector.vue'
 import { Button } from '@/components/ui/button'
+import { useLogout } from '@/composables/useLogout'
 import AppLayout from '@/layouts/AppLayout.vue'
-import { useAuthStore } from '@/stores/auth'
+import { useAccessStore } from '@/stores/access'
 import { useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import type { RentEntry } from '@/types/rentEntry'
 import { sortPaymentsNewestFirst } from '@/utils/rentCalculations'
 
-const authStore = useAuthStore()
+const accessStore = useAccessStore()
 const tenantStore = useTenantStore()
 const rentEntryStore = useRentEntryStore()
 const router = useRouter()
+const handleLogout = useLogout()
 
 onMounted(() => {
   tenantStore.loadTenants()
@@ -59,10 +61,8 @@ const latestBill = computed(() => {
   }
 })
 
-async function handleLogout() {
-  tenantStore.clearSelectedTenant()
-  await authStore.logout()
-  await router.replace({ name: 'login' })
+function switchProperty() {
+  router.push({ name: 'property-select' })
 }
 
 function openNewEntry() {
@@ -105,6 +105,17 @@ function openHistory() {
           />
         </div>
         <Button
+          v-if="accessStore.properties.length > 1"
+          variant="ghost"
+          size="icon"
+          class="size-11 shrink-0 text-muted-foreground"
+          aria-label="Switch property"
+          title="Switch property"
+          @click="switchProperty"
+        >
+          <ArrowLeftRight class="size-5!" />
+        </Button>
+        <Button
           variant="ghost"
           size="icon"
           class="size-11 shrink-0 text-muted-foreground"
@@ -118,6 +129,13 @@ function openHistory() {
     </template>
 
     <header class="mb-8">
+      <p
+        v-if="accessStore.selectedProperty"
+        class="mb-1 text-sm font-semibold text-primary"
+        data-testid="selected-property"
+      >
+        {{ accessStore.selectedProperty.name }}
+      </p>
       <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Tenant Overview</h1>
       <p class="mt-2 text-muted-foreground">
         View tenant details, rent information and manage entries.

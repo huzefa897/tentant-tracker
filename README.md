@@ -17,18 +17,23 @@ Frontend application for managing tenant rent and utility payments.
 
 ```sh
 npm install
-cp .env.example .env
+cp .env.example .env.local   # then fill in the Firebase web app values
 npm run dev
 ```
 
-## Mock login
+Sign-in needs the backend running too: `npm run dev` proxies `/api` to Django on
+`127.0.0.1:8000`. See [backend/README.md](backend/README.md) to start it.
 
-Authentication is mocked for now. Sign in with any valid Indian mobile number
-(10 digits starting 6–9) and the OTP **`924636`**.
+## Signing in
 
-The signed-in session is kept in `localStorage`. While you're on the
-verification step, the phone number is kept in `sessionStorage`, so a refresh
-stays on that screen; a new tab starts again from login.
+Sign-in is Firebase phone auth. In the Firebase console (Authentication) the
+Phone provider must be enabled and the countries allowed under SMS region
+policy; add a test number with a fixed code to sign in without a real SMS.
+
+Signing in only proves who you are. The app then asks the backend
+(`/api/v1/me/`) which properties you can access, and a new account has none:
+it shows "Your account has no property access". Grant access in Django admin by
+adding a membership for your user (see "Granting access" in the backend README).
 
 ## Mock data
 
@@ -53,6 +58,10 @@ by name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
 Variables prefixed with `VITE_` are bundled into the frontend and visible to
 anyone using the app. Never put secrets in them.
 
-| Variable            | Purpose                |
-| ------------------- | ---------------------- |
-| `VITE_API_BASE_URL` | Base URL for API calls |
+| Variable                    | Purpose                                                              |
+| --------------------------- | -------------------------------------------------------------------- |
+| `VITE_API_BASE_URL`         | Optional API base URL; defaults to `/api/v1` on the app's own origin |
+| `VITE_FIREBASE_API_KEY`     | Firebase web app config (public by design; identifies the project)   |
+| `VITE_FIREBASE_AUTH_DOMAIN` | Firebase web app config                                              |
+| `VITE_FIREBASE_PROJECT_ID`  | Firebase web app config; same project as the backend                 |
+| `VITE_FIREBASE_APP_ID`      | Firebase web app config                                              |

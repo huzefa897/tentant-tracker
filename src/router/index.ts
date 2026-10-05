@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
 import DashboardView from '@/views/DashboardView.vue'
 import LoginView from '@/views/LoginView.vue'
@@ -9,6 +10,8 @@ declare module 'vue-router' {
   interface RouteMeta {
     requiresAuth?: boolean
     guestOnly?: boolean
+    // Needs a selected property the user has access to (implies requiresAuth).
+    requiresProperty?: boolean
   }
 }
 
@@ -35,6 +38,13 @@ const router = createRouter({
       path: '/dashboard',
       name: 'dashboard',
       component: DashboardView,
+      meta: { requiresAuth: true, requiresProperty: true },
+    },
+    // Loading, no-access and multi-property selection after sign-in.
+    {
+      path: '/properties',
+      name: 'property-select',
+      component: () => import('@/views/PropertySelectView.vue'),
       meta: { requiresAuth: true },
     },
     {
@@ -42,14 +52,14 @@ const router = createRouter({
       name: 'rent-entry-new',
       component: () => import('@/views/NewRentEntryView.vue'),
       props: true,
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresProperty: true },
     },
     {
       path: '/tenants/:tenantId/entries',
       name: 'rent-entry-history',
       component: () => import('@/views/RentEntryHistoryView.vue'),
       props: true,
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresProperty: true },
     },
     // After /entries/new, so "new" reads as its own route rather than an entry id.
     {
@@ -61,7 +71,7 @@ const router = createRouter({
         ...route.params,
         from: route.query.from === 'dashboard' ? 'dashboard' : 'history',
       }),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresProperty: true },
     },
     {
       path: '/:pathMatch(.*)*',
@@ -71,10 +81,14 @@ const router = createRouter({
 })
 
 // Pinia is installed before the router in main.ts, so the store is available here.
-router.beforeEach((to) => {
+// Guards are UX only: the backend enforces authentication and property access.
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
 
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+  // Firebase restores a saved session asynchronously; decide only once it has.
+  await authStore.init()
+
+  if ((to.meta.requiresAuth || to.meta.requiresProperty) && !authStore.isAuthenticated) {
     return { name: 'login' }
   }
 
@@ -82,9 +96,24 @@ router.beforeEach((to) => {
     return { name: 'dashboard' }
   }
 
-  // /verify only makes sense mid-flow (pending number survives a refresh, not a new tab)
+  // /verify only makes sense mid-flow; the pending code doesn't survive a refresh.
   if (to.name === 'verify' && !authStore.pendingPhoneNumber) {
     return { name: 'login' }
+  }
+
+  if (to.meta.requiresProperty) {
+    const accessStore = useAccessStore()
+    await accessStore.load()
+
+    // The backend refused this number and the session was ended.
+    if (!authStore.isAuthenticated) {
+      return { name: 'login' }
+    }
+
+    // Loading failed, no access, or several properties and none chosen yet.
+    if (!accessStore.selectedProperty) {
+      return { name: 'property-select', query: { redirect: to.fullPath } }
+    }
   }
 })
 
