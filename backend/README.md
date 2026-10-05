@@ -43,7 +43,7 @@ Dependency versions are pinned in `Pipfile.lock`. Add packages with `pipenv inst
 - `docker compose down -v` deletes the `postgres_data` volume, which is the whole database.
 - `AUTH_USER_MODEL` is `accounts.User` (an `AbstractUser` with `firebase_uid` and `phone_number`). Roles go on property membership (BE Phase 2), not on the user.
 - CORS only allows the Vue dev origin and is not authentication.
-- `billing` has no models yet; bills will belong to a tenancy (BE Phase 4).
+- `billing` holds rent entries (bills), one per tenancy and month. They're created through the API and are view-only in admin; there's no update or delete yet. Tests in `billing/tests/test_concurrency.py` run real concurrent transactions, so they need PostgreSQL.
 
 ## Authentication and property access
 
