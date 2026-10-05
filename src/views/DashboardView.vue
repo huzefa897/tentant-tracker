@@ -76,7 +76,12 @@ function openEntry(entryId: string) {
   const tenant = tenantStore.selectedTenant
   if (!tenant) return
 
-  router.push({ name: 'rent-entry-details', params: { tenantId: tenant.id, entryId } })
+  // The summary's back button then returns here rather than to Previous Entries.
+  router.push({
+    name: 'rent-entry-details',
+    params: { tenantId: tenant.id, entryId },
+    query: { from: 'dashboard' },
+  })
 }
 
 function openHistory() {

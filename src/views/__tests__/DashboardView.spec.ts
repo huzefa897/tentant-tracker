@@ -181,6 +181,8 @@ describe('DashboardView', () => {
         tenantId: 'tenant-001',
         entryId: 'entry-oct',
       })
+      // So the summary's back button returns to the dashboard.
+      expect(router.currentRoute.value.query).toEqual({ from: 'dashboard' })
     })
 
     it('shows no latest entry for a tenant without entries, or when entries fail to load', async () => {

@@ -19,6 +19,7 @@ import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
+import { useTenantStore } from '@/stores/tenant'
 import { formatINR } from '@/utils/currency'
 import type { PaymentInput } from '@/types/payment'
 import { formatMonthValue, formatTimestamp } from '@/utils/date'
@@ -31,9 +32,12 @@ import {
 const props = defineProps<{
   tenantId: string
   entryId: string
+  // Where the page was opened from, so the back button returns there.
+  from?: 'dashboard' | 'history'
 }>()
 
 const rentEntryStore = useRentEntryStore()
+const tenantStore = useTenantStore()
 const router = useRouter()
 
 const {
@@ -136,6 +140,13 @@ function goToDashboard() {
   router.push({ name: 'dashboard' })
 }
 
+// Back to the dashboard with this tenant selected, as it was when the summary was opened (a
+// refresh clears the selection).
+function backToDashboard() {
+  if (tenant.value) tenantStore.selectTenant(tenant.value.id)
+  goToDashboard()
+}
+
 // Explicit route, not router.back(): a direct link has no in-app page to go back to.
 function goToHistory() {
   router.push({ name: 'rent-entry-history', params: { tenantId: props.tenantId } })
@@ -145,11 +156,16 @@ function goToHistory() {
 <template>
   <AppLayout>
     <template #header-actions>
-      <Button v-if="tenant" variant="ghost" class="h-11 text-muted-foreground" @click="goToHistory">
+      <Button
+        v-if="tenant && from !== 'dashboard'"
+        variant="ghost"
+        class="h-11 text-muted-foreground"
+        @click="goToHistory"
+      >
         <ArrowLeft aria-hidden="true" />
         Back to Previous Entries
       </Button>
-      <Button v-else variant="ghost" class="h-11 text-muted-foreground" @click="goToDashboard">
+      <Button v-else variant="ghost" class="h-11 text-muted-foreground" @click="backToDashboard">
         <ArrowLeft aria-hidden="true" />
         Back to Dashboard
       </Button>
