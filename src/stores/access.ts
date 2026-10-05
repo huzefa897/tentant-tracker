@@ -43,20 +43,32 @@ export const useAccessStore = defineStore('access', () => {
     () => properties.value.find((p) => p.id === selectedPropertyId.value) ?? null,
   )
 
-  let inFlight: Promise<void> | null = null
+  // The pending /me request and the account it's for. Never shared across accounts: a
+  // response for an account that has since signed out is discarded.
+  let inFlight: { userId: string; promise: Promise<void> } | null = null
 
   // Idempotent for the same user; doubles as Retry after an error.
   function load(): Promise<void> {
     const userId = authStore.user?.id ?? null
     if (!userId) return Promise.resolve()
     if (status.value === 'ready' && loadedForUserId.value === userId) return Promise.resolve()
+    if (inFlight?.userId === userId) return inFlight.promise
 
-    inFlight ??= (async () => {
+    const request: { userId: string; promise: Promise<void> } = {
+      userId,
+      promise: Promise.resolve(),
+    }
+    // Registered before the request starts, so isCurrent() holds from the first line.
+    inFlight = request
+    const isCurrent = () => inFlight === request && authStore.user?.id === userId
+
+    request.promise = (async () => {
       status.value = 'loading'
       error.value = null
 
       try {
         const result = await accessService.getMe()
+        if (!isCurrent()) return
 
         identity.value = result
         loadedForUserId.value = userId
@@ -70,6 +82,8 @@ export const useAccessStore = defineStore('access', () => {
           selectedPropertyId.value = result.properties[0]!.id
         }
       } catch (err) {
+        if (!isCurrent()) return
+
         // Firebase verified the number, but nobody added it: sign out and say why.
         if (err instanceof ApiError && err.code === 'not_registered') {
           clear()
@@ -83,11 +97,11 @@ export const useAccessStore = defineStore('access', () => {
         error.value = messageFor(err)
         status.value = 'error'
       } finally {
-        inFlight = null
+        if (inFlight === request) inFlight = null
       }
     })()
 
-    return inFlight
+    return request.promise
   }
 
   function selectProperty(propertyId: string) {
@@ -97,6 +111,8 @@ export const useAccessStore = defineStore('access', () => {
   }
 
   function clear() {
+    // Any pending response is now for a previous session.
+    inFlight = null
     identity.value = null
     status.value = 'idle'
     error.value = null

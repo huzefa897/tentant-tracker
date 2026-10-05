@@ -99,6 +99,88 @@ describe('access store', () => {
     expect(accessService.getMe).toHaveBeenCalledTimes(2)
   })
 
+  describe('when the account changes while /me is pending', () => {
+    let notify: (user: AuthUser | null) => void = () => {}
+    const first = { id: 'first', phoneNumber: '+918341413827' }
+    const second = { id: 'second', phoneNumber: '+61412345678' }
+    const firstProperty = { ...testProperty, id: 'first-property', name: 'First Towers' }
+    const secondProperty = { ...testProperty, id: 'second-property', name: 'Second Towers' }
+
+    function deferred<T>() {
+      let resolve: (value: T) => void = () => {}
+      let reject: (error: unknown) => void = () => {}
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res
+        reject = rej
+      })
+      return { promise, resolve, reject }
+    }
+
+    beforeEach(async () => {
+      vi.mocked(authService.onAuthStateChanged).mockImplementation((listener) => {
+        notify = listener
+        listener(first)
+        return () => {}
+      })
+      await useAuthStore().init()
+    })
+
+    it('never gives the new account the previous account’s pending request', async () => {
+      const firstResponse = deferred<ReturnType<typeof identityWith>>()
+      const secondResponse = deferred<ReturnType<typeof identityWith>>()
+      vi.mocked(accessService.getMe)
+        .mockReturnValueOnce(firstResponse.promise)
+        .mockReturnValueOnce(secondResponse.promise)
+      const store = useAccessStore()
+
+      const firstLoad = store.load()
+      notify(second)
+      store.clear()
+      const secondLoad = store.load()
+
+      expect(secondLoad).not.toBe(firstLoad)
+      expect(accessService.getMe).toHaveBeenCalledTimes(2)
+
+      // The first account's answer arrives late and is discarded.
+      firstResponse.resolve(identityWith([firstProperty]))
+      await firstLoad
+      expect(store.identity).toBeNull()
+      expect(store.selectedProperty).toBeNull()
+
+      secondResponse.resolve(identityWith([secondProperty]))
+      await secondLoad
+      expect(store.selectedProperty).toEqual(secondProperty)
+    })
+
+    it('discards a late answer after sign-out, even without clear()', async () => {
+      const firstResponse = deferred<ReturnType<typeof identityWith>>()
+      vi.mocked(accessService.getMe).mockReturnValueOnce(firstResponse.promise)
+      const store = useAccessStore()
+
+      const firstLoad = store.load()
+      notify(null)
+      firstResponse.resolve(identityWith([firstProperty]))
+      await firstLoad
+
+      expect(store.identity).toBeNull()
+      expect(store.selectedPropertyId).toBeNull()
+    })
+
+    it('discards a late failure for the previous account', async () => {
+      const firstResponse = deferred<ReturnType<typeof identityWith>>()
+      vi.mocked(accessService.getMe).mockReturnValueOnce(firstResponse.promise)
+      const store = useAccessStore()
+
+      const firstLoad = store.load()
+      notify(second)
+      firstResponse.reject(new ApiError('forbidden', 'forbidden', 'not_registered'))
+      await firstLoad
+
+      expect(authService.logout).not.toHaveBeenCalled()
+      expect(store.status).not.toBe('error')
+    })
+  })
+
   it.each<[ApiErrorKind, string]>([
     ['unauthorized', "Your sign-in couldn't be verified. Log out and sign in again."],
     ['unavailable', "Sign-in couldn't be checked right now. Please try again shortly."],
