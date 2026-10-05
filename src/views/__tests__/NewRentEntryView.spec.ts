@@ -5,24 +5,26 @@ import { RouterView } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
+import { tenantService } from '@/services/tenant.service'
 import {
   LOAD_ERROR_MESSAGE,
   RECEIPT_SAVE_ERROR_MESSAGE,
   SAVE_ERROR_MESSAGE,
   useRentEntryStore,
 } from '@/stores/rentEntry'
-import { useTenantStore } from '@/stores/tenant'
 import { openPage } from '@/test/rentEntries'
 import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
+import { resetTenantService } from '@/test/mocks/tenantService'
 
 // The PDF itself is covered by its own tests; here, which receipt gets downloaded.
 vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
+vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 
 let app: VueWrapper | undefined
 const body = new DOMWrapper(document.body)
@@ -68,6 +70,7 @@ const validEntry = {
 }
 
 beforeEach(() => {
+  resetTenantService()
   resetAuthService()
   resetAccessService()
   localStorage.clear()
@@ -378,13 +381,8 @@ describe('NewRentEntryView', () => {
 describe('NewRentEntryView when tenants fail to load', () => {
   it('shows the error with Retry instead of Tenant not found, then shows the form', async () => {
     app = await openPage('/tenants/tenant-001/entries/new', () => {
-      const tenantStore = useTenantStore()
-      const realLoad = tenantStore.loadTenants
-      vi.spyOn(tenantStore, 'loadTenants')
-        .mockImplementationOnce(async () => {
-          tenantStore.error = 'Unable to load tenants. Please try again.'
-        })
-        .mockImplementation(realLoad)
+      // The tenancy request fails once; Retry succeeds.
+      vi.mocked(tenantService.getTenant).mockRejectedValueOnce(new Error('boom'))
     })
 
     expect(app.get('[role="alert"]').text()).toContain('Unable to load tenants. Please try again.')
