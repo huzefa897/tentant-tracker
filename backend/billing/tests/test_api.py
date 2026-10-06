@@ -119,9 +119,9 @@ class CreateRentEntryTests(RentEntryApiTestCase):
 
     def test_rejects_payment_and_derived_fields_rather_than_ignoring_them(self):
         for field, value, message in [
-            ("totalPaid", "500.00", "Payments can't be recorded with a bill yet."),
-            ("paidDate", "2026-10-05", "Payments can't be recorded with a bill yet."),
-            ("initialPayment", {"amount": "500.00"}, "Payments can't be recorded with a bill yet."),
+            ("totalPaid", "500.00", "This is calculated by the server."),
+            ("paidDate", "2026-10-05", "Send a payment received with the bill as initialPayment."),
+            ("paymentAmount", "500.00", "Send a payment received with the bill as initialPayment."),
             ("totalDue", "1.00", "This is calculated by the server."),
             ("paymentStatus", "paid", "This is calculated by the server."),
             ("surprise", "x", "Unknown field."),

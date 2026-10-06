@@ -4,7 +4,8 @@ from datetime import date
 
 from django.conf import settings
 from django.db import models
-from django.db.models import Q
+from django.db.models import DecimalField, F, Q, Sum, Value
+from django.db.models.functions import Coalesce, Round
 
 from properties.models import Tenancy
 
@@ -19,6 +20,39 @@ def tenancy_covers_month(tenancy: Tenancy, billing_month: date) -> bool:
     return tenancy.start_date <= month_end(billing_month) and (
         tenancy.end_date is None or tenancy.end_date >= billing_month
     )
+
+
+MONEY = DecimalField(max_digits=12, decimal_places=2)
+
+
+class RentEntryQuerySet(models.QuerySet):
+    def with_amounts(self):
+        """Annotates each bill's payments sum (`paid_total`) and total due (`due_total`) in the
+        query itself, so a list of bills needs no query per bill and can be filtered by status.
+
+        due_total follows billing/calculations.py: electricity rounded to paise, then added.
+        PostgreSQL rounds halves away from zero, which is half up for these non-negative
+        amounts. The serializer still calculates the shown figures with calculations.py.
+        """
+        return self.annotate(
+            paid_total=Coalesce(Sum("payments__amount"), Value(0), output_field=MONEY),
+            due_total=models.ExpressionWrapper(
+                F("rent_amount")
+                + Round(F("electricity_units") * F("electricity_rate"), 2)
+                + F("water_amount"),
+                output_field=MONEY,
+            ),
+        )
+
+    def with_payment_status(self, status: str):
+        """Bills in one payment status (calculations.PaymentStatus). Needs with_amounts()."""
+        if status == "unpaid":
+            return self.filter(paid_total=0)
+        if status == "partially_paid":
+            return self.filter(paid_total__gt=0, paid_total__lt=F("due_total"))
+        if status == "paid":
+            return self.filter(paid_total__gte=F("due_total"))
+        raise ValueError(f"Unknown payment status: {status}")
 
 
 class RentEntry(models.Model):
@@ -49,6 +83,14 @@ class RentEntry(models.Model):
         related_name="+",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = RentEntryQuerySet.as_manager()
+
+    # Retry protection for creating the bill (the Idempotency-Key header). A retry with the same
+    # key returns this bill instead of creating another; the fingerprint is the original
+    # request, so a retry with different details is refused. Required with an initial payment.
+    creation_key = models.UUIDField(null=True, blank=True, editable=False)
+    creation_fingerprint = models.CharField(max_length=64, blank=True, editable=False)
 
     class Meta:
         verbose_name_plural = "rent entries"
@@ -81,7 +123,54 @@ class RentEntry(models.Model):
                 condition=Q(billing_month__day=1),
                 name="rent_entry_billing_month_first_day",
             ),
+            models.UniqueConstraint(
+                fields=["creation_key"],
+                name="unique_rent_entry_creation_key",
+            ),
         ]
 
     def __str__(self):
         return f"{self.tenancy} — {self.billing_month:%B %Y}"
+
+
+class Payment(models.Model):
+    """Money received against one bill. A bill can have several; they're never allocated
+    across months. The tenancy and property come through the bill (Payment → RentEntry →
+    Tenancy → Property), never stored again here, so they can't contradict it.
+
+    Created only through billing/services.py record_payment, which locks the bill so payments
+    never exceed it. Read-only afterwards: editing or reversing payments needs its own rules.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    entry = models.ForeignKey(RentEntry, on_delete=models.PROTECT, related_name="payments")
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    paid_date = models.DateField(help_text="The day the money was received.")
+    notes = models.CharField(max_length=500, blank=True)
+    # One intended payment, chosen by the app (the Idempotency-Key header): a retry with the
+    # same key returns this payment instead of recording the money twice.
+    idempotency_key = models.UUIDField(editable=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # Newest received first; the same day by when it was recorded; then the id, so the
+        # order never changes between requests.
+        ordering = ("-paid_date", "-created_at", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["idempotency_key"],
+                name="unique_payment_idempotency_key",
+            ),
+            models.CheckConstraint(
+                condition=Q(amount__gt=0),
+                name="payment_amount_positive",
+            ),
+        ]
+
+    def __str__(self):
+        return f"₹{self.amount} on {self.paid_date:%d %b %Y} — {self.entry}"

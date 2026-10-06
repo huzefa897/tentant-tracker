@@ -42,9 +42,10 @@ backend. Add them in Django admin (**Tenancies**), or add three fictional ones
 for development with `create_dev_tenancies` (see the backend README). Search by
 name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
 
-Rent entries (bills) are saved in the backend, which calculates every total.
-Payments can't be recorded yet (BE Phase 5), and entries saved in this browser
-before BE Phase 4 are no longer shown.
+Rent entries (bills) and payments are saved in the backend, which calculates
+every total and balance, so they show in any browser for anyone with access to
+the property. Receipts aren't available yet (BE Phase 6), and entries saved in
+this browser before BE Phase 4 are no longer shown.
 
 ## Scripts
 

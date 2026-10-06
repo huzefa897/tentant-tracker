@@ -48,9 +48,13 @@ const existingEntry = ref<RentEntry | null>(null)
 // The rent and rate the form previewed, to point out when the saved bill used others.
 const previewedRent = ref<number | null>(null)
 const previewedRate = ref<number | null>(null)
+// One per intended bill. Kept after an uncertain failure (no response), so saving again is a
+// retry the backend recognises: it returns the bill if the first attempt saved it, and never
+// saves a second bill or payment. Replaced after a definite rejection.
+let creationKey: string | null = null
 
-// The backend saves the bill and returns it; only then does the confirmation appear. On failure
-// the form stays open with its values.
+// The backend saves the bill (and any payment received with it) and returns it; only then does
+// the confirmation appear. On failure the form stays open with its values.
 async function handleSave(submission: NewRentEntrySubmission) {
   if (saving.value) return
 
@@ -59,10 +63,12 @@ async function handleSave(submission: NewRentEntrySubmission) {
   existingEntry.value = null
   previewedRent.value = submission.entry.rentAmount
   previewedRate.value = submission.entry.electricityRate
+  creationKey ??= crypto.randomUUID()
 
   try {
-    savedEntry.value = await rentEntryStore.addEntry(submission)
+    savedEntry.value = await rentEntryStore.addEntry(submission, creationKey)
   } catch (error) {
+    if (!(error instanceof EntrySaveError && error.uncertain)) creationKey = null
     saveError.value = error instanceof Error ? error.message : SAVE_ERROR_MESSAGE
     existingEntry.value = error instanceof EntrySaveError ? error.existingEntry : null
   } finally {
@@ -282,13 +288,11 @@ function handleDialogOpenChange(open: boolean) {
           </Button>
         </div>
 
-        <!-- Payments are disabled until the backend records them (BE Phase 5). -->
         <RentEntryForm
           :key="tenant.id"
           :tenant="tenant"
           :save-error="saveError"
           :saving="saving"
-          :payments-enabled="false"
           @save="handleSave"
           @cancel="goToDashboard"
           @dirty-change="isDirty = $event"

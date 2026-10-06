@@ -9,7 +9,7 @@ import { ApiError } from '@/services/apiError'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
 import { useAuthStore } from '@/stores/auth'
-import { SAVE_ERROR_MESSAGE } from '@/stores/rentEntry'
+import { SAVE_UNCONFIRMED_MESSAGE } from '@/stores/rentEntry'
 import { makeEntry, openPage } from '@/test/rentEntries'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
@@ -20,6 +20,7 @@ vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
+vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
 
 const createEntry = vi.mocked(rentEntryService.createEntry)
 
@@ -101,13 +102,41 @@ describe('NewRentEntryView', () => {
     expect(app!.get<HTMLInputElement>('#rentAmount').element.value).toBe('18000')
   })
 
-  it('disables the payment inputs while payments aren’t on the backend', async () => {
+  it('saves a payment received with the bill, and confirms the backend’s balance', async () => {
     await openEntryPage()
+    await fill({ ...validEntry, paymentAmount: '10000' })
+    await fill({ paidDate: '2026-10-01', paymentNotes: 'Initial payment' })
+    await save()
 
-    expect(app!.get('#paymentAmount').attributes('disabled')).toBeDefined()
-    expect(app!.get('[data-testid="payments-unavailable"]').text()).toContain(
-      "Payments can't be recorded yet.",
+    expect(createEntry).toHaveBeenCalledWith(
+      expect.any(String),
+      'tenant-001',
+      expect.objectContaining({
+        initialPayment: { amount: 10000, paidDate: '2026-10-01', notes: 'Initial payment' },
+      }),
+      expect.any(String),
     )
+    expect(savedSummary()).toMatchObject({
+      'Total paid': '₹10,000',
+      Outstanding: '₹5,750',
+      Status: 'Partially paid',
+    })
+    expect(fakeEntries.payments).toHaveLength(1)
+  })
+
+  it('explains a payment more than the bill the backend calculated, saving neither', async () => {
+    // The rate went down while the form was open: ₹15,375 due, not the ₹15,750 previewed.
+    fakeEntries.rate = 1
+    await openEntryPage()
+    await fill({ ...validEntry, paymentAmount: '15750' })
+    await fill({ paidDate: '2026-10-01' })
+    await save()
+
+    expect(app!.get('[role="alert"]').text()).toBe(
+      "The payment is more than the bill's total due of ₹15,375. Check the amount and try again.",
+    )
+    expect(fakeEntries.entries).toEqual([])
+    expect(fakeEntries.payments).toEqual([])
   })
 
   it('shows a message for an unknown tenant', async () => {
@@ -127,16 +156,24 @@ describe('NewRentEntryView', () => {
     await fill(validEntry)
     await save()
 
-    expect(createEntry).toHaveBeenCalledWith(expect.any(String), 'tenant-001', {
-      tenantId: 'tenant-001',
-      billingMonth: '2026-09',
-      rentAmount: 15000,
-      electricityUnits: 75,
-      electricityRate: 6,
-      waterAmount: 300,
-      notes: 'September charges',
-      useTenancyRent: true,
-    })
+    expect(createEntry).toHaveBeenCalledWith(
+      expect.any(String),
+      'tenant-001',
+      {
+        entry: {
+          tenantId: 'tenant-001',
+          billingMonth: '2026-09',
+          rentAmount: 15000,
+          electricityUnits: 75,
+          electricityRate: 6,
+          waterAmount: 300,
+          notes: 'September charges',
+          useTenancyRent: true,
+        },
+        initialPayment: null,
+      },
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+    )
     expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
     expect(app!.text()).toContain('September 2026 for Shaik Zahid Ali, Flat 202')
     expect(savedSummary()).toEqual({
@@ -271,12 +308,12 @@ describe('NewRentEntryView', () => {
   })
 
   it('keeps the form and its values when the save fails, with no confirmation', async () => {
-    createEntry.mockRejectedValueOnce(new ApiError('unknown'))
+    createEntry.mockRejectedValueOnce(new ApiError('unavailable'))
     await openEntryPage()
     await fill(validEntry)
     await save()
 
-    expect(app!.get('[role="alert"]').text()).toBe(SAVE_ERROR_MESSAGE)
+    expect(app!.get('[role="alert"]').text()).toBe(SAVE_UNCONFIRMED_MESSAGE)
     expect(app!.find('#entry-saved-heading').exists()).toBe(false)
     expect(app!.get<HTMLInputElement>('#electricityUnits').element.value).toBe('75')
     expect(app!.get<HTMLTextAreaElement>('#notes').element.value).toBe('September charges')
@@ -310,22 +347,41 @@ describe('NewRentEntryView', () => {
     expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
   })
 
-  it('checks for the bill after a timeout instead of inviting a second save', async () => {
-    createEntry.mockImplementationOnce(async (_property: string, tenancyId: string) => {
-      fakeEntries.entries = [
-        makeEntry({ id: 'saved-anyway', tenantId: tenancyId, billingMonth: '2026-09' }),
-      ]
+  it('retries a save with no response with the same key, so the bill is saved once', async () => {
+    // Saved on the server (with its payment), but the response never arrived.
+    const create = createEntry.getMockImplementation()!
+    createEntry.mockImplementationOnce(async (...args) => {
+      await create(...args)
       throw new ApiError('network')
     })
     await openEntryPage()
-    await fill(validEntry)
+    await fill({ ...validEntry, paymentAmount: '10000' })
+    await fill({ paidDate: '2026-10-01' })
     await save()
 
-    expect(app!.get('[role="alert"]').text()).toBe(
-      'September 2026 now has a saved entry. Open it to check it before adding another.',
-    )
-    expect(app!.find('[data-testid="existing-entry"]').exists()).toBe(true)
+    expect(app!.get('[role="alert"]').text()).toBe(SAVE_UNCONFIRMED_MESSAGE)
     expect(app!.find('#entry-saved-heading').exists()).toBe(false)
+
+    await save()
+
+    const [first, retry] = createEntry.mock.calls
+    expect(retry![3]).toBe(first![3])
+    expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+    expect(fakeEntries.entries).toHaveLength(1)
+    expect(fakeEntries.payments).toHaveLength(1)
+  })
+
+  it('uses a new key after a definite rejection', async () => {
+    createEntry.mockRejectedValueOnce(
+      new ApiError('invalid-request', 'Bad request', null, { notes: 'Too long.' }),
+    )
+    await openEntryPage()
+    await fill(validEntry)
+    await save()
+    await save()
+
+    const [first, second] = createEntry.mock.calls
+    expect(second![3]).not.toBe(first![3])
   })
 
   it('shows the backend’s reason for a rejected month', async () => {

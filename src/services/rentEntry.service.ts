@@ -1,6 +1,7 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
 import type {
+  NewRentEntrySubmission,
   PaymentStatus,
   RentEntry,
   RentEntryFilters,
@@ -29,7 +30,8 @@ export interface RentEntryDto {
 }
 
 // What a new bill sends. No electricity rate (the server takes the tenancy's), tenancy, creator
-// or payment: the server assigns or refuses those.
+// or balances: the server assigns or refuses those. A payment received with the bill is saved
+// with it, or neither is.
 export interface CreateRentEntryDto {
   billingMonth: string
   // Left out to charge the tenancy's current rent.
@@ -37,6 +39,11 @@ export interface CreateRentEntryDto {
   electricityUnits: string
   waterAmount: string
   notes: string
+  initialPayment?: {
+    amount: string
+    paidDate: string
+    notes: string
+  }
 }
 
 const STATUSES: readonly PaymentStatus[] = ['unpaid', 'partially_paid', 'paid']
@@ -106,14 +113,25 @@ export function toRentEntry(dto: RentEntryDto): RentEntry {
 // Decimal strings, so the backend never parses a float. Validation has already limited the
 // decimals (utils/rentEntryValidation.ts), so toFixed doesn't round anything away. An unedited
 // rent is left out, so the backend charges the tenancy's rent as it is now.
-export function toCreateRentEntryDto(input: RentEntryInput): CreateRentEntryDto {
-  return {
+export function toCreateRentEntryDto(
+  input: RentEntryInput,
+  initialPayment: NewRentEntrySubmission['initialPayment'] = null,
+): CreateRentEntryDto {
+  const dto: CreateRentEntryDto = {
     billingMonth: input.billingMonth,
     ...(input.useTenancyRent ? {} : { rentAmount: input.rentAmount.toFixed(2) }),
     electricityUnits: input.electricityUnits.toFixed(3),
     waterAmount: input.waterAmount.toFixed(2),
     notes: input.notes,
   }
+  if (initialPayment) {
+    dto.initialPayment = {
+      amount: initialPayment.amount.toFixed(2),
+      paidDate: initialPayment.paidDate,
+      notes: initialPayment.notes,
+    }
+  }
+  return dto
 }
 
 export function parseRentEntryPage(data: unknown, page: number): RentEntryPage {
@@ -149,19 +167,33 @@ async function request<T>(send: () => Promise<{ data: T }>): Promise<T> {
 }
 
 export const rentEntryService = {
-  // Saves a new bill. The response is authoritative: its rate and totals may differ from the
-  // form's preview (e.g. the tenancy's rate changed meanwhile). A month that already has a bill
-  // is ApiError 'conflict' (code 'duplicate_billing_month'); rejected fields are
-  // 'invalid-request' with fieldErrors.
-  async createEntry(propertyId: string, tenancyId: string, input: RentEntryInput) {
+  // Saves a new bill, with the payment received with it if there is one (both or neither). The
+  // response is authoritative: its rate and totals may differ from the form's preview (e.g. the
+  // tenancy's rate changed meanwhile).
+  // idempotencyKey identifies one intended bill: a retry (e.g. after a timeout) must reuse it
+  // and gets the bill it created, never a second one.
+  // Errors: 'conflict' with code 'duplicate_billing_month' (the month has a bill),
+  // 'idempotency_conflict' (the key was used for another request) or
+  // 'payment_exceeds_outstanding' (the payment is more than the bill); 'invalid-request' with
+  // fieldErrors.
+  async createEntry(
+    propertyId: string,
+    tenancyId: string,
+    submission: NewRentEntrySubmission,
+    idempotencyKey: string,
+  ): Promise<RentEntry> {
     const data = await request(() =>
-      api.post(entriesUrl(propertyId, tenancyId), toCreateRentEntryDto(input)),
+      api.post(
+        entriesUrl(propertyId, tenancyId),
+        toCreateRentEntryDto(submission.entry, submission.initialPayment),
+        { headers: { 'Idempotency-Key': idempotencyKey } },
+      ),
     )
     return toRentEntry(parseRentEntry(data))
   },
 
-  // One page of the tenancy's bills, newest billing month first. billingMonth finds one month's
-  // bill, e.g. to check whether a save that timed out went through.
+  // One page of the tenancy's bills, newest billing month first, filtered by the backend before
+  // paging. billingMonth finds one month's bill, e.g. the one a duplicate save clashed with.
   async getEntries(
     propertyId: string,
     tenancyId: string,
@@ -171,6 +203,7 @@ export const rentEntryService = {
     const params: Record<string, string | number> = {}
     if (filters.year) params.year = filters.year
     if (filters.billingMonth) params.billing_month = filters.billingMonth
+    if (filters.paymentStatus) params.payment_status = filters.paymentStatus
     if (page > 1) params.page = page
 
     const data = await request(() => api.get(entriesUrl(propertyId, tenancyId), { params }))

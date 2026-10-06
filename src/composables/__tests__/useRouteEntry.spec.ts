@@ -17,6 +17,7 @@ import { makeEntry } from '@/test/rentEntries'
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
+vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
 
 const getEntry = vi.mocked(rentEntryService.getEntry)
 

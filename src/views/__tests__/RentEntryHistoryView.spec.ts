@@ -16,6 +16,7 @@ vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
+vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
 
 const getEntries = vi.mocked(rentEntryService.getEntries)
 
@@ -154,9 +155,49 @@ describe('RentEntryHistoryView', () => {
 
     expect(getEntries).toHaveBeenLastCalledWith(expect.any(String), 'tenant-001', {
       year: '2025',
+      paymentStatus: undefined,
       page: 1,
     })
     expect(rows().map((row) => row[0])).toEqual(['December 2025'])
+  })
+
+  it('filters by payment status on the server, with the backend’s balances', async () => {
+    fakeEntries.entries = [
+      october,
+      makeEntry({ ...september, totalPaid: 5000, outstanding: 10450, status: 'partially_paid' }),
+      makeEntry({ ...lastYear, totalPaid: 15750, outstanding: 0, status: 'paid' }),
+    ]
+    await openHistory()
+
+    expect(view!.findAll('#filter-status option').map((o) => o.text())).toEqual([
+      'All',
+      'Unpaid',
+      'Partially paid',
+      'Paid',
+    ])
+
+    await view!.get('#filter-status').setValue('partially_paid')
+    await flushPromises()
+
+    expect(getEntries).toHaveBeenLastCalledWith(expect.any(String), 'tenant-001', {
+      year: undefined,
+      paymentStatus: 'partially_paid',
+      page: 1,
+    })
+    expect(rows().map((row) => [row[0], row[2], row[3], row[4]])).toEqual([
+      ['September 2026', '₹5,000', '₹10,450', 'Partially paid'],
+    ])
+  })
+
+  it('names both filters when nothing matches', async () => {
+    fakeEntries.entries = [october]
+    await openHistory()
+
+    await view!.get('#filter-year').setValue('2026')
+    await view!.get('#filter-status').setValue('paid')
+    await flushPromises()
+
+    expect(view!.text()).toContain('No paid entries in 2026.')
   })
 
   it('shows a no-match message with Clear filters when a year has no bills', async () => {

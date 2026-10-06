@@ -3,7 +3,7 @@ from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 
 from accounts.views import me
-from billing.views import RentEntryViewSet
+from billing.views import PaymentViewSet, RentEntryViewSet
 from properties.views import PropertyViewSet, TenancyViewSet
 
 from .views import health_check
@@ -17,6 +17,7 @@ tenancy_detail = TenancyViewSet.as_view({"get": "retrieve"})
 # Bills are reached through their property and tenancy, both checked first.
 rent_entry_list = RentEntryViewSet.as_view({"get": "list", "post": "create"})
 rent_entry_detail = RentEntryViewSet.as_view({"get": "retrieve"})
+payment_list = PaymentViewSet.as_view({"get": "list", "post": "create"})
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -41,6 +42,11 @@ urlpatterns = [
         "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/entries/<uuid:pk>/",
         rent_entry_detail,
         name="rent-entry-detail",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/entries/<uuid:entry_id>/payments/",
+        payment_list,
+        name="payment-list",
     ),
     path("api/v1/", include(router.urls)),
 ]
