@@ -53,10 +53,26 @@ class CalculationTests(SimpleTestCase):
             water_amount=D("300.00"),
         )
 
-        amounts = entry_amounts(entry)
+        amounts = entry_amounts(entry, D("0"))
 
         self.assertEqual(amounts.electricity_amount, D("450.00"))
         self.assertEqual(amounts.total_due, D("15750.00"))
         self.assertEqual(amounts.total_paid, D("0.00"))
         self.assertEqual(amounts.outstanding_amount, D("15750.00"))
         self.assertEqual(amounts.payment_status, "unpaid")
+
+    def test_entry_amounts_from_the_payments_sum(self):
+        # The spec's example: ₹15,750 due, ₹13,000 paid.
+        entry = SimpleNamespace(
+            rent_amount=D("15000.00"),
+            electricity_units=D("75.000"),
+            electricity_rate=D("6.00"),
+            water_amount=D("300.00"),
+            paid_total=D("13000.00"),
+        )
+
+        amounts = entry_amounts(entry)
+
+        self.assertEqual(amounts.total_paid, D("13000.00"))
+        self.assertEqual(amounts.outstanding_amount, D("2750.00"))
+        self.assertEqual(amounts.payment_status, "partially_paid")
