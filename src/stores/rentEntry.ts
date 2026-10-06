@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import { ApiError } from '@/services/apiError'
+import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { useAccessStore } from '@/stores/access'
 import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
@@ -29,6 +29,8 @@ export function entryLoadErrorMessage(error: unknown): string {
       return 'Rent entries are unavailable right now. Please try again shortly.'
     case 'unauthorized':
       return "Your sign-in couldn't be verified. Log out and sign in again."
+    case 'rate-limited':
+      return RATE_LIMITED_MESSAGE
     default:
       return ENTRIES_LOAD_ERROR_MESSAGE
   }
@@ -296,6 +298,10 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         if (!checked) throw new EntrySaveError(SAVE_UNCONFIRMED_MESSAGE)
       }
 
+      // Refused before anything was saved, so trying again later is safe.
+      if (kind === 'rate-limited') {
+        throw new EntrySaveError(`${RATE_LIMITED_MESSAGE} Your form has been kept.`)
+      }
       if (kind === 'unauthorized') {
         throw new EntrySaveError("Your sign-in couldn't be verified. Log out and sign in again.")
       }

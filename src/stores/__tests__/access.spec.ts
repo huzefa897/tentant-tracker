@@ -185,6 +185,7 @@ describe('access store', () => {
     ['unauthorized', "Your sign-in couldn't be verified. Log out and sign in again."],
     ['unavailable', "Sign-in couldn't be checked right now. Please try again shortly."],
     ['network', "Couldn't reach the server. Check your connection and try again."],
+    ['rate-limited', 'Too many requests. Wait a minute and try again.'],
     ['invalid-response', 'Unable to load your property access. Please try again.'],
   ])('reports a %s failure as an error, never as no access', async (kind, message) => {
     vi.mocked(accessService.getMe).mockRejectedValue(new ApiError(kind))

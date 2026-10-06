@@ -56,6 +56,7 @@ export function toApiError(error: unknown): ApiError {
   if (status === 403) return new ApiError('forbidden', error.message, code)
   if (status === 404) return new ApiError('not-found', error.message, code)
   if (status === 409) return new ApiError('conflict', error.message, code)
+  if (status === 429) return new ApiError('rate-limited', error.message, code)
   if (status >= 500) return new ApiError('unavailable', error.message, code)
   return new ApiError('unknown', error.message, code)
 }

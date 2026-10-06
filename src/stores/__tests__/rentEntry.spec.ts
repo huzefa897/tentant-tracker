@@ -240,6 +240,17 @@ describe('loadSummary', () => {
       error: 'Rent entries are unavailable right now. Please try again shortly.',
     })
   })
+
+  it('asks to wait when requests are rate limited', async () => {
+    const store = await withProperty()
+    getEntries.mockRejectedValueOnce(new ApiError('rate-limited'))
+
+    await store.loadSummary('tenant-001')
+
+    expect(store.summaries['tenant-001']?.error).toBe(
+      'Too many requests. Wait a minute and try again.',
+    )
+  })
 })
 
 describe('loadEntry', () => {
@@ -396,6 +407,19 @@ describe('addEntry', () => {
     const error = await saveError(store.addEntry(submission()))
 
     expect(error.message).toBe(SAVE_UNCONFIRMED_MESSAGE)
+  })
+
+  it('asks to wait when rate limited, without checking for a saved bill', async () => {
+    const store = await withProperty()
+    createEntry.mockRejectedValueOnce(new ApiError('rate-limited'))
+
+    const error = await saveError(store.addEntry(submission()))
+
+    expect(error.message).toBe(
+      'Too many requests. Wait a minute and try again. Your form has been kept.',
+    )
+    expect(error.existingEntry).toBeNull()
+    expect(getEntries).not.toHaveBeenCalled()
   })
 
   it('explains a refusal to save', async () => {

@@ -57,6 +57,7 @@ describe('toApiError', () => {
     [500, 'unavailable'],
     [400, 'invalid-request'],
     [409, 'conflict'],
+    [429, 'rate-limited'],
     [422, 'unknown'],
   ])('maps HTTP %i to %s', (status, kind) => {
     expect(toApiError(axiosError(status)).kind).toBe(kind)
