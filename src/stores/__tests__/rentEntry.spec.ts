@@ -164,6 +164,53 @@ describe('loadHistory', () => {
 })
 
 describe('loadSummary', () => {
+  it('ignores a slower, older summary for the same tenant', async () => {
+    const store = await withProperty()
+    const slow = deferred()
+    getEntries.mockReturnValueOnce(slow.promise)
+
+    const first = store.loadSummary('tenant-001')
+    await store.loadSummary('tenant-001')
+    slow.resolve({ entries: [lastYear], count: 1, page: 1, hasNext: false, hasPrevious: false })
+    await first
+
+    expect(store.summaries['tenant-001']).toMatchObject({ status: 'ready', count: 3 })
+    expect(store.summaries['tenant-001']!.latest?.id).toBe('oct')
+  })
+
+  it('discards a summary that was in flight when a bill was saved', async () => {
+    fakeEntries.entries = [september]
+    const store = await withProperty()
+    const slow = deferred()
+    getEntries.mockReturnValueOnce(slow.promise)
+
+    const pending = store.loadSummary('tenant-001')
+    await store.addEntry({ entry: { ...input }, initialPayment: null })
+    // The response from before the save: one bill, September.
+    slow.resolve({ entries: [september], count: 1, page: 1, hasNext: false, hasPrevious: false })
+    await pending
+
+    expect(store.summaries['tenant-001']).toBeUndefined()
+
+    await store.loadSummary('tenant-001')
+    expect(store.summaries['tenant-001']).toMatchObject({ count: 2 })
+    expect(store.summaries['tenant-001']!.latest?.billingMonth).toBe('2026-10')
+  })
+
+  it('keeps summaries of different tenants independent', async () => {
+    const store = await withProperty()
+    const slow = deferred()
+    getEntries.mockReturnValueOnce(slow.promise)
+
+    const first = store.loadSummary('tenant-001')
+    await store.loadSummary('tenant-002')
+    slow.resolve({ entries: [october], count: 3, page: 1, hasNext: false, hasPrevious: false })
+    await first
+
+    expect(store.summaries['tenant-001']).toMatchObject({ status: 'ready', count: 3 })
+    expect(store.summaries['tenant-002']).toMatchObject({ status: 'ready', count: 1 })
+  })
+
   it('keeps the tenant’s newest bill and bill count', async () => {
     const store = await withProperty()
 

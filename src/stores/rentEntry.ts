@@ -93,10 +93,18 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
   const history = ref<EntryHistory>(emptyHistory())
   const summaries = ref<Record<string, EntrySummary>>({})
 
-  // Responses are discarded once reset() runs (another property, or logout), and a history
-  // response once a newer history request starts.
+  // Responses are discarded once reset() runs (another property, or logout), a history
+  // response once a newer history request starts, and a tenant's summary response once a newer
+  // summary request for that tenant starts or a bill is saved for them (it predates the bill).
   let generation = 0
   let historySeq = 0
+  const summarySeq = new Map<string, number>()
+
+  function nextSummarySeq(tenantId: string): number {
+    const seq = (summarySeq.get(tenantId) ?? 0) + 1
+    summarySeq.set(tenantId, seq)
+    return seq
+  }
 
   function remember(entries: RentEntry[]) {
     const next = { ...entriesById.value }
@@ -159,6 +167,8 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     if (!propertyId) return
 
     const gen = generation
+    const seq = nextSummarySeq(tenantId)
+    const isCurrent = () => gen === generation && summarySeq.get(tenantId) === seq
     const previous = summaries.value[tenantId]
     // Keeps what's shown while it refreshes, so the card doesn't flash.
     summaries.value = {
@@ -174,7 +184,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     let summary: EntrySummary
     try {
       const result = await rentEntryService.getEntries(propertyId, tenantId)
-      if (gen !== generation) return
+      if (!isCurrent()) return
       remember(result.entries)
       summary = {
         status: 'ready',
@@ -183,7 +193,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         error: null,
       }
     } catch (err) {
-      if (gen !== generation) return
+      if (!isCurrent()) return
       summary = { status: 'error', latest: null, count: 0, error: entryLoadErrorMessage(err) }
     }
     summaries.value = { ...summaries.value, [tenantId]: summary }
@@ -246,7 +256,9 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       const entry = await rentEntryService.createEntry(propertyId, input.tenantId, input)
       if (gen === generation) {
         remember([entry])
-        // The dashboard reloads it with this bill included.
+        // The dashboard reloads it with this bill included. A summary request still in flight
+        // predates the bill, so its response is discarded too.
+        nextSummarySeq(input.tenantId)
         const next = { ...summaries.value }
         delete next[input.tenantId]
         summaries.value = next
@@ -299,6 +311,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
   function reset() {
     generation++
     historySeq++
+    summarySeq.clear()
     entriesById.value = {}
     history.value = emptyHistory()
     summaries.value = {}
