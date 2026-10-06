@@ -32,7 +32,8 @@ export interface RentEntryDto {
 // or payment: the server assigns or refuses those.
 export interface CreateRentEntryDto {
   billingMonth: string
-  rentAmount: string
+  // Left out to charge the tenancy's current rent.
+  rentAmount?: string
   electricityUnits: string
   waterAmount: string
   notes: string
@@ -103,11 +104,12 @@ export function toRentEntry(dto: RentEntryDto): RentEntry {
 }
 
 // Decimal strings, so the backend never parses a float. Validation has already limited the
-// decimals (utils/rentEntryValidation.ts), so toFixed doesn't round anything away.
+// decimals (utils/rentEntryValidation.ts), so toFixed doesn't round anything away. An unedited
+// rent is left out, so the backend charges the tenancy's rent as it is now.
 export function toCreateRentEntryDto(input: RentEntryInput): CreateRentEntryDto {
   return {
     billingMonth: input.billingMonth,
-    rentAmount: input.rentAmount.toFixed(2),
+    ...(input.useTenancyRent ? {} : { rentAmount: input.rentAmount.toFixed(2) }),
     electricityUnits: input.electricityUnits.toFixed(3),
     waterAmount: input.waterAmount.toFixed(2),
     notes: input.notes,

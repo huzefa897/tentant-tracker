@@ -134,6 +134,7 @@ describe('NewRentEntryView', () => {
       electricityRate: 6,
       waterAmount: 300,
       notes: 'September charges',
+      useTenancyRent: true,
     })
     expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
     expect(app!.text()).toContain('September 2026 for Shaik Zahid Ali, Flat 202')
@@ -148,6 +149,27 @@ describe('NewRentEntryView', () => {
       Status: 'Unpaid',
     })
     expect(app!.find('[data-testid="rate-changed"]').exists()).toBe(false)
+    expect(app!.find('[data-testid="rent-changed"]').exists()).toBe(false)
+  })
+
+  it('charges the tenancy’s current rent when it changed during editing', async () => {
+    fakeEntries.rent = 16000
+    await openEntryPage()
+    await fill(validEntry)
+    await save()
+
+    expect(savedSummary()).toMatchObject({ Rent: '₹16,000', 'Total due': '₹16,750' })
+    expect(app!.get('[data-testid="rent-changed"]').text()).toContain('₹16,000')
+  })
+
+  it('keeps a rent the user edited, even if the tenancy’s changed', async () => {
+    fakeEntries.rent = 16000
+    await openEntryPage()
+    await fill({ ...validEntry, rentAmount: '14000' })
+    await save()
+
+    expect(savedSummary()).toMatchObject({ Rent: '₹14,000' })
+    expect(app!.find('[data-testid="rent-changed"]').exists()).toBe(false)
   })
 
   it('shows the backend’s charges when the rate changed during editing', async () => {

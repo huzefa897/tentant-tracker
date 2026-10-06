@@ -10,6 +10,10 @@ export interface RentEntryInput {
   electricityRate: number
   waterAmount: number
   notes: string
+  // True while the rent is still the tenant's rent the form started with. The request then leaves
+  // it out and the backend charges the tenancy's current rent, so a rent changed meanwhile isn't
+  // overridden by the old one.
+  useTenancyRent?: boolean
 }
 
 // What the new-entry form submits: the bill, and optionally a payment received with it.

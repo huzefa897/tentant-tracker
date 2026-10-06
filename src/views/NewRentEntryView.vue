@@ -45,7 +45,8 @@ const saveError = ref<string | null>(null)
 // The bill already saved for the month that failed (a duplicate, or a save whose response was
 // lost), so the user can open it rather than submit again.
 const existingEntry = ref<RentEntry | null>(null)
-// The rate the form previewed, to point out when the saved bill used another.
+// The rent and rate the form previewed, to point out when the saved bill used others.
+const previewedRent = ref<number | null>(null)
 const previewedRate = ref<number | null>(null)
 
 // The backend saves the bill and returns it; only then does the confirmation appear. On failure
@@ -56,6 +57,7 @@ async function handleSave(submission: NewRentEntrySubmission) {
   saving.value = true
   saveError.value = null
   existingEntry.value = null
+  previewedRent.value = submission.entry.rentAmount
   previewedRate.value = submission.entry.electricityRate
 
   try {
@@ -76,6 +78,7 @@ const savedSummary = computed(() => {
   return {
     entry,
     month: formatMonthValue(entry.billingMonth),
+    rentChanged: previewedRent.value !== null && previewedRent.value !== entry.rentAmount,
     rateChanged: previewedRate.value !== null && previewedRate.value !== entry.electricityRate,
     charges: [
       { label: 'Rent', value: formatINR(entry.rentAmount) },
@@ -170,6 +173,15 @@ function handleDialogOpenChange(open: boolean) {
         <p class="mt-2 text-muted-foreground">
           {{ savedSummary.month }} for {{ tenant.name }}, Flat {{ tenant.flatNumber }}, has been
           recorded.
+        </p>
+
+        <p
+          v-if="savedSummary.rentChanged"
+          class="mt-4 w-full rounded-lg bg-secondary px-4 py-3 text-left text-sm text-secondary-foreground"
+          data-testid="rent-changed"
+        >
+          The tenant's rent changed while you were filling in the form. The bill uses the current
+          rent, {{ formatINR(savedSummary.entry.rentAmount) }}.
         </p>
 
         <p

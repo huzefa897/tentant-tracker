@@ -110,6 +110,19 @@ describe('toCreateRentEntryDto', () => {
       notes: 'October charges',
     })
   })
+
+  it('leaves out an unedited rent, so the backend charges the tenancy’s current rent', () => {
+    expect(toCreateRentEntryDto({ ...input, useTenancyRent: true })).toEqual({
+      billingMonth: '2026-10',
+      electricityUnits: '1.125',
+      waterAmount: '300.50',
+      notes: 'October charges',
+    })
+    expect(toCreateRentEntryDto({ ...input, useTenancyRent: false })).toHaveProperty(
+      'rentAmount',
+      '15000.00',
+    )
+  })
 })
 
 describe('parseRentEntryPage', () => {

@@ -7,12 +7,14 @@ import type { RentEntry, RentEntryFilters, RentEntryInput, RentEntryPage } from 
 // A fake rentEntryService that saves, filters and pages like the API. Use it with
 //   vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 // and call resetRentEntryService() in beforeEach. Tests may change `fakeEntries.entries` (the
-// saved bills, any tenant), `pageSize` and `rate` (what the "server" charges per unit; null
-// uses the rate the form previewed).
+// saved bills, any tenant), `pageSize`, `rate` (what the "server" charges per unit; null
+// uses the rate the form previewed) and `rent` (the tenancy's rent, charged when the form left
+// the rent unedited; null uses the form's).
 export const fakeEntries = {
   entries: [] as RentEntry[],
   pageSize: 12,
   rate: null as number | null,
+  rent: null as number | null,
 }
 
 let nextId = 1
@@ -53,6 +55,7 @@ export function resetRentEntryService() {
   fakeEntries.entries = []
   fakeEntries.pageSize = 12
   fakeEntries.rate = null
+  fakeEntries.rent = null
   nextId = 1
 
   rentEntryService.createEntry
@@ -70,7 +73,8 @@ export function resetRentEntryService() {
         id: `saved-${nextId++}`,
         tenantId: tenancyId,
         billingMonth: input.billingMonth,
-        rentAmount: input.rentAmount,
+        rentAmount:
+          input.useTenancyRent && fakeEntries.rent !== null ? fakeEntries.rent : input.rentAmount,
         electricityUnits: input.electricityUnits,
         electricityRate: fakeEntries.rate ?? input.electricityRate,
         waterAmount: input.waterAmount,
