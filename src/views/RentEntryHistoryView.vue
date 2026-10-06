@@ -1,19 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, History, Plus, User } from '@lucide/vue'
+import { ArrowLeft, ChevronLeft, ChevronRight, History, Plus, User } from '@lucide/vue'
 
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import RentEntryFilters from '@/components/rent/RentEntryFilters.vue'
 import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
 import RentEntryTotals from '@/components/rent/RentEntryTotals.vue'
 import { Button } from '@/components/ui/button'
-import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
-import type { PaymentStatus } from '@/types/rentEntry'
-import { getEntryAmounts, sumEntryAmounts } from '@/utils/rentCalculations'
+import { sumEntryAmounts } from '@/utils/rentCalculations'
 
 // The URL is the source of truth, never the dashboard's selected tenant, so a saved link
 // always shows the tenant it names.
@@ -31,53 +29,62 @@ const {
   retry: retryTenants,
 } = useRouteTenant(() => props.tenantId)
 
-onMounted(() => rentEntryStore.initialize())
-
-const tenantEntries = computed(() => rentEntryStore.getEntriesForTenant(props.tenantId))
-
-// YYYY-MM sorts as text. Copy first: sort() would reorder the store's array.
-const sortedEntries = computed(() =>
-  [...tenantEntries.value].sort((a, b) => b.billingMonth.localeCompare(a.billingMonth)),
-)
-
-const years = computed(() => [
-  ...new Set(sortedEntries.value.map((entry) => entry.billingMonth.slice(0, 4))),
-])
+// Bills per page, as the API returns them (backend billing/views.py RentEntryPagination).
+const PAGE_SIZE = 12
 
 const selectedYear = ref('all')
-const selectedStatus = ref<PaymentStatus | 'all'>('all')
+const page = ref(1)
 
-// Each bill with the sum of its payments, so filters, rows and totals agree.
-const filteredBills = computed(() =>
-  sortedEntries.value
-    .map((entry) => ({ entry, totalPaid: rentEntryStore.getTotalPaid(entry.id) }))
-    .filter(({ entry, totalPaid }) => {
-      const matchesYear =
-        selectedYear.value === 'all' || entry.billingMonth.startsWith(`${selectedYear.value}-`)
-      const matchesStatus =
-        selectedStatus.value === 'all' ||
-        getEntryAmounts(entry, totalPaid).status === selectedStatus.value
-
-      return matchesYear && matchesStatus
-    }),
-)
-
-const totals = computed(() => sumEntryAmounts(filteredBills.value))
-
-function clearFilters() {
-  selectedYear.value = 'all'
-  selectedStatus.value = 'all'
+// The backend filters and pages; this page asks for what's shown.
+function load() {
+  rentEntryStore.loadHistory(props.tenantId, {
+    year: selectedYear.value === 'all' ? null : selectedYear.value,
+    page: page.value,
+  })
 }
 
-// The router reuses this page when only the tenant in the URL changes; one tenant's filters
-// shouldn't hide another's entries.
+// The router reuses this page when only the tenant in the URL changes; one tenant's filter
+// and page shouldn't apply to another's entries.
 watch(
   () => props.tenantId,
   () => {
-    clearFilters()
-    clearReceiptError()
+    selectedYear.value = 'all'
+    page.value = 1
+    load()
   },
+  { immediate: true },
 )
+
+watch(selectedYear, () => {
+  page.value = 1
+  load()
+})
+
+function goToPage(next: number) {
+  page.value = next
+  load()
+}
+
+const history = computed(() => rentEntryStore.history)
+const entries = computed(() => history.value.entries)
+const pageCount = computed(() => Math.max(1, Math.ceil(history.value.count / PAGE_SIZE)))
+
+// Years the tenancy covers, newest first: bills can only be for months it overlaps.
+const years = computed(() => {
+  if (!tenant.value) return []
+  const first = Number(tenant.value.startDate.slice(0, 4))
+  const last = tenant.value.endDate
+    ? Number(tenant.value.endDate.slice(0, 4))
+    : Math.max(new Date().getFullYear(), first)
+  return Array.from({ length: last - first + 1 }, (_, i) => String(last - i))
+})
+
+// This page's bills only: a tenant's other pages aren't loaded, so this is never their balance.
+const totals = computed(() => sumEntryAmounts(entries.value))
+
+function clearFilters() {
+  selectedYear.value = 'all'
+}
 
 function goToDashboard() {
   router.push({ name: 'dashboard' })
@@ -89,27 +96,6 @@ function addEntry() {
 
 function viewEntry(entryId: string) {
   router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
-}
-
-const {
-  downloadingPaymentId,
-  error: receiptError,
-  downloadReceipt,
-  clearError: clearReceiptError,
-} = useReceiptDownload()
-
-const downloadingEntryId = computed(() =>
-  downloadingPaymentId.value
-    ? (rentEntryStore.payments.find((payment) => payment.id === downloadingPaymentId.value)
-        ?.entryId ?? null)
-    : null,
-)
-
-// Downloads the receipt for the bill's most recently recorded payment, issued first if needed.
-// It shows the bill's total paid to date. Each payment's own receipt is on the summary page.
-function downloadBillReceipt(entryId: string) {
-  const payment = rentEntryStore.getPaymentsForEntry(entryId).slice(-1)[0]
-  if (payment) downloadReceipt(payment.id)
 }
 </script>
 
@@ -162,17 +148,17 @@ function downloadBillReceipt(entryId: string) {
 
       <!-- A failed load must never look like an empty history or a zero balance. -->
       <RentEntriesLoadError
-        v-if="rentEntryStore.loadError"
-        :message="rentEntryStore.loadError"
-        @retry="rentEntryStore.initialize"
+        v-if="history.status === 'error'"
+        :message="history.error ?? ''"
+        @retry="load"
       />
 
-      <p v-else-if="!rentEntryStore.initialized" class="text-muted-foreground" role="status">
+      <p v-else-if="history.status !== 'ready'" class="text-muted-foreground" role="status">
         Loading entries…
       </p>
 
       <div
-        v-else-if="sortedEntries.length === 0"
+        v-else-if="history.count === 0 && selectedYear === 'all'"
         class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
       >
         <div
@@ -193,36 +179,47 @@ function downloadBillReceipt(entryId: string) {
       <div v-else class="space-y-6">
         <!-- Wide screens: filters and totals share a row, so the table starts higher. -->
         <div class="grid gap-6 xl:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] xl:items-end">
-          <RentEntryFilters
-            v-model:year="selectedYear"
-            v-model:status="selectedStatus"
-            :years="years"
-          />
-          <RentEntryTotals v-if="filteredBills.length > 0" :totals="totals" />
+          <RentEntryFilters v-model:year="selectedYear" :years="years" />
+          <RentEntryTotals v-if="entries.length > 0" :totals="totals" />
         </div>
 
-        <template v-if="filteredBills.length > 0">
-          <p
-            v-if="receiptError"
-            class="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive"
-            role="alert"
-            data-testid="receipt-error"
+        <template v-if="entries.length > 0">
+          <RentEntryHistory :entries="entries" @view="viewEntry" />
+
+          <nav
+            v-if="history.hasNext || history.hasPrevious"
+            class="flex items-center justify-between gap-3"
+            aria-label="Pages"
           >
-            {{ receiptError }}
-          </p>
-          <RentEntryHistory
-            :bills="filteredBills"
-            :downloading-entry-id="downloadingEntryId"
-            @view="viewEntry"
-            @download-receipt="downloadBillReceipt"
-          />
+            <Button
+              variant="outline"
+              class="h-11"
+              :disabled="!history.hasPrevious"
+              @click="goToPage(history.page - 1)"
+            >
+              <ChevronLeft aria-hidden="true" />
+              Newer
+            </Button>
+            <p class="text-sm text-muted-foreground" data-testid="page-position">
+              Page {{ history.page }} of {{ pageCount }} · {{ history.count }} entries
+            </p>
+            <Button
+              variant="outline"
+              class="h-11"
+              :disabled="!history.hasNext"
+              @click="goToPage(history.page + 1)"
+            >
+              Older
+              <ChevronRight aria-hidden="true" />
+            </Button>
+          </nav>
         </template>
 
         <div
           v-else
           class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-10 text-center"
         >
-          <p class="text-muted-foreground">No entries match these filters.</p>
+          <p class="text-muted-foreground">No entries in {{ selectedYear }}.</p>
           <Button variant="outline" class="mt-4 h-11 px-6" @click="clearFilters">
             Clear filters
           </Button>

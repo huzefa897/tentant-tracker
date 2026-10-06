@@ -100,6 +100,31 @@ describe('validateRentEntryDraft', () => {
     )
   })
 
+  it('limits decimals to what the backend stores', () => {
+    expect(validateRentEntryDraft(draft({ rentAmount: 15000.5, electricityUnits: 1.125 }))).toEqual(
+      {},
+    )
+    expect(validateRentEntryDraft(draft({ rentAmount: 100.001 })).rentAmount).toBe(
+      'Rent amount can have at most 2 decimals.',
+    )
+    expect(validateRentEntryDraft(draft({ electricityUnits: 1.0001 })).electricityUnits).toBe(
+      'Electricity units can have at most 3 decimals.',
+    )
+    expect(validateRentEntryDraft(draft({ waterAmount: 1.234 })).waterAmount).toBe(
+      'Water amount can have at most 2 decimals.',
+    )
+  })
+
+  it('limits amounts to what the backend stores', () => {
+    expect(validateRentEntryDraft(draft({ rentAmount: 99_999_999.99 }))).toEqual({})
+    expect(validateRentEntryDraft(draft({ rentAmount: 100_000_000 })).rentAmount).toBe(
+      'Rent amount must be at most 9,99,99,999.99.',
+    )
+    expect(validateRentEntryDraft(draft({ electricityUnits: 10_000_000 })).electricityUnits).toBe(
+      'Electricity units must be at most 99,99,999.999.',
+    )
+  })
+
   it('limits notes to the maximum length', () => {
     expect(validateRentEntryDraft(draft({ notes: 'a'.repeat(NOTES_MAX_LENGTH) }))).toEqual({})
     expect(validateRentEntryDraft(draft({ notes: 'a'.repeat(NOTES_MAX_LENGTH + 1) })).notes).toBe(

@@ -2,52 +2,39 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
 import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
-import type { RentEntry } from '@/types/rentEntry'
-import type { BilledEntry } from '@/utils/rentCalculations'
+import { makeEntry } from '@/test/rentEntries'
 
-// Each bill with the sum of its payments, as the page passes it.
-function bill(id: string, billingMonth: string, totalPaid: number): BilledEntry<RentEntry> {
-  const entry: RentEntry = {
-    id,
-    tenantId: 'tenant-001',
-    billingMonth,
-    rentAmount: 15000,
-    electricityUnits: 75,
-    electricityRate: 6,
-    waterAmount: 300,
-    notes: '',
-    createdAt: '2026-10-03T06:00:00.000Z',
-  }
-  return { entry, totalPaid }
-}
-
-const bills = [bill('a', '2026-10', 10000), bill('b', '2026-09', 15750), bill('c', '2026-08', 0)]
+const entries = [
+  makeEntry({ id: 'a', billingMonth: '2026-10', totalPaid: 10000 }),
+  makeEntry({ id: 'b', billingMonth: '2026-09', totalPaid: 15750 }),
+  makeEntry({ id: 'c', billingMonth: '2026-08', electricityUnits: 1.125 }),
+]
 
 describe('RentEntryHistory', () => {
-  it('shows each entry’s month, amounts and status in a table row, in the given order', () => {
-    const wrapper = mount(RentEntryHistory, { props: { bills } })
+  it('shows each bill’s month, figures and status in a table row, in the given order', () => {
+    const wrapper = mount(RentEntryHistory, { props: { entries } })
 
     const rows = wrapper
       .findAll('[data-testid="history-row"]')
       .map((row) => row.findAll('th, td').map((cell) => cell.text()))
 
     expect(rows).toEqual([
-      [
-        'October 2026',
-        '₹15,750',
-        '₹10,000',
-        '₹5,750',
-        'Partially paid',
-        'View Summary  Download Receipt',
-      ],
-      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'View Summary  Download Receipt'],
-      // Nothing paid, so nothing to receipt.
-      ['August 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
+      ['October 2026', '₹15,750', '₹10,000', '₹5,750', 'Partially paid', 'View Summary'],
+      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'View Summary'],
+      ['August 2026', '₹15,306.75', '₹0', '₹15,306.75', 'Unpaid', 'View Summary'],
     ])
   })
 
+  it('shows the bill’s own figures rather than recalculating them', () => {
+    const wrapper = mount(RentEntryHistory, {
+      props: { entries: [makeEntry({ totalDue: 99, outstanding: 99 })] },
+    })
+
+    expect(wrapper.get('[data-testid="history-row"]').text()).toContain('₹99')
+  })
+
   it('shows the same figures on mobile cards', () => {
-    const wrapper = mount(RentEntryHistory, { props: { bills } })
+    const wrapper = mount(RentEntryHistory, { props: { entries } })
     const card = wrapper.findAll('[data-testid="history-card"]')[0]!
 
     expect(card.get('h3').text()).toBe('October 2026')
@@ -58,35 +45,12 @@ describe('RentEntryHistory', () => {
   })
 
   it('emits view with the entry id from the table and the cards', async () => {
-    const wrapper = mount(RentEntryHistory, { props: { bills } })
+    const wrapper = mount(RentEntryHistory, { props: { entries } })
     const summaries = wrapper.findAll('[aria-label="View summary for September 2026"]')
 
     await summaries[0]!.trigger('click')
     await summaries[1]!.trigger('click')
 
     expect(wrapper.emitted('view')).toEqual([['b'], ['b']])
-  })
-
-  it('emits download-receipt from the table and the cards, only for bills with a payment', async () => {
-    const wrapper = mount(RentEntryHistory, { props: { bills } })
-    const receipts = wrapper.findAll('[aria-label="Download receipt for October 2026"]')
-
-    expect(receipts).toHaveLength(2)
-    await receipts[0]!.trigger('click')
-    await receipts[1]!.trigger('click')
-
-    expect(wrapper.emitted('download-receipt')).toEqual([['a'], ['a']])
-    expect(wrapper.find('[aria-label="Download receipt for August 2026"]').exists()).toBe(false)
-  })
-
-  it('shows which bill’s receipt is being prepared and disables the others meanwhile', () => {
-    const wrapper = mount(RentEntryHistory, { props: { bills, downloadingEntryId: 'a' } })
-    const [october, september] = wrapper.findAll('[data-testid="history-row"]')
-
-    expect(october!.text()).toContain('Preparing…')
-    expect(september!.text()).toContain('Download Receipt')
-    expect(
-      september!.get('[aria-label="Download receipt for September 2026"]').attributes('disabled'),
-    ).toBeDefined()
   })
 })

@@ -47,6 +47,8 @@ describe('toTenant', () => {
       rentDueDay: 11,
       electricityRate: 6.5,
       depositAmount: 90000,
+      startDate: '2026-01-01',
+      endDate: null,
     })
   })
 })

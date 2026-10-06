@@ -68,6 +68,8 @@ export function toTenant(dto: TenancyDto): Tenant {
     rentDueDay: dto.rentDueDay,
     electricityRate: Number(dto.electricityRate),
     depositAmount: Number(dto.depositAmount),
+    startDate: dto.startDate,
+    endDate: dto.endDate,
   }
 }
 

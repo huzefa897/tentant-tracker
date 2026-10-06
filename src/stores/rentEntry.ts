@@ -1,333 +1,339 @@
-import { onScopeDispose, ref } from 'vue'
+import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import { receiptIssuer } from '@/config/receiptIssuer'
-import { useTenantStore } from '@/stores/tenant'
-import type { Payment, PaymentInput } from '@/types/payment'
-import type { PaymentReceipt } from '@/types/receipt'
+import { ApiError } from '@/services/apiError'
+import { rentEntryService } from '@/services/rentEntry.service'
+import { useAccessStore } from '@/stores/access'
 import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
-import type { RentLedger } from '@/types/rentLedger'
-import { previousMonthValue, toDateValue } from '@/utils/date'
-import { validatePaymentInput } from '@/utils/paymentValidation'
-import { validateReceiptIssuer } from '@/utils/receiptValidation'
-import { calculateOutstanding, calculateTotalDue, sumPayments } from '@/utils/rentCalculations'
+import { formatMonthValue } from '@/utils/date'
 import { validateRentEntryInput } from '@/utils/rentEntryValidation'
-import { loadRentLedger, RENT_LEDGER_STORAGE_KEY, saveRentLedger } from '@/utils/rentLedgerStorage'
 
-export const LOAD_ERROR_MESSAGE = 'Saved entries could not be loaded. Please retry.'
+export type EntryListStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+export const ENTRIES_LOAD_ERROR_MESSAGE = 'Unable to load rent entries. Please try again.'
 export const SAVE_ERROR_MESSAGE =
-  'Unable to save on this device. Your form has been kept open. Please try again.'
-export const DUPLICATE_PAYMENT_MESSAGE = 'This payment has already been recorded.'
-export const RECEIPT_SAVE_ERROR_MESSAGE =
-  'Unable to save the receipt on this device. The payment is still recorded. Please try again.'
+  'Unable to save the entry. Your form has been kept. Please try again.'
+export const DUPLICATE_ENTRY_MESSAGE = 'An entry already exists for this tenant and billing month.'
+export const PAYMENTS_UNAVAILABLE_MESSAGE =
+  "Payments can't be recorded with a bill yet. Save the bill without a payment."
+export const SAVE_UNCONFIRMED_MESSAGE =
+  "We couldn't confirm whether the entry was saved. Check Previous Entries before trying again."
 
-// "RCP-102-202609" for a bill's first payment, "RCP-102-202609-2" for its second. Derived from
-// the payment's place among its bill's payments, not a counter, so it's the same whenever it's
-// issued. Saved with the receipt and never regenerated. A backend can allocate references
-// under a uniqueness constraint later.
-export const RECEIPT_REFERENCE_PREFIX = 'RCP'
+export function entryLoadErrorMessage(error: unknown): string {
+  const kind = error instanceof ApiError ? error.kind : 'unknown'
 
-export function receiptReferenceFor(
-  flatNumber: string,
-  billingMonth: string,
-  paymentNumber: number,
-): string {
-  const flat = flatNumber.trim().replace(/\s+/g, '-')
-  const base = `${RECEIPT_REFERENCE_PREFIX}-${flat}-${billingMonth.replace('-', '')}`
-  return paymentNumber > 1 ? `${base}-${paymentNumber}` : base
+  switch (kind) {
+    case 'network':
+      return "Couldn't reach the server. Check your connection and try again."
+    case 'unavailable':
+      return 'Rent entries are unavailable right now. Please try again shortly.'
+    case 'unauthorized':
+      return "Your sign-in couldn't be verified. Log out and sign in again."
+    default:
+      return ENTRIES_LOAD_ERROR_MESSAGE
+  }
 }
 
-// Entries, their payments and the receipts for those payments persist together in localStorage
-// (utils/rentLedgerStorage.ts) until there's a backend.
+// A failed save, with what the page needs to say about it. existingEntry: the bill that's now
+// saved for that month (a duplicate, or a save that went through although its response was
+// lost), so the page can link to it rather than invite another submission.
+export class EntrySaveError extends Error {
+  constructor(
+    message: string,
+    readonly existingEntry: RentEntry | null = null,
+  ) {
+    super(message)
+    this.name = 'EntrySaveError'
+  }
+}
+
+// One page of one tenant's bills, as the history page shows it.
+export interface EntryHistory {
+  tenantId: string | null
+  year: string | null
+  page: number
+  entries: RentEntry[]
+  count: number
+  hasNext: boolean
+  hasPrevious: boolean
+  status: EntryListStatus
+  error: string | null
+}
+
+// A tenant's newest bill and how many they have, for the dashboard.
+export interface EntrySummary {
+  status: EntryListStatus
+  latest: RentEntry | null
+  count: number
+  error: string | null
+}
+
+function emptyHistory(): EntryHistory {
+  return {
+    tenantId: null,
+    year: null,
+    page: 1,
+    entries: [],
+    count: 0,
+    hasNext: false,
+    hasPrevious: false,
+    status: 'idle',
+    error: null,
+  }
+}
+
+// Bills (rent entries) of the selected property, from the backend. Nothing is saved on this
+// device: a bill shows as saved only once the backend has returned it, and its figures are
+// the backend's.
 export const useRentEntryStore = defineStore('rentEntry', () => {
-  const entries = ref<RentEntry[]>([])
-  const payments = ref<Payment[]>([])
-  const receipts = ref<PaymentReceipt[]>([])
-  const initialized = ref(false)
-  const loadError = ref<string | null>(null)
+  const accessStore = useAccessStore()
 
-  // Replaces state with what's stored (migrating old data first). On failure the stored data is
-  // left untouched and saving stays blocked until a load succeeds.
-  function load(): boolean {
+  // Every bill loaded for this property, by id: from lists, details and saves.
+  const entriesById = ref<Record<string, RentEntry>>({})
+  const history = ref<EntryHistory>(emptyHistory())
+  const summaries = ref<Record<string, EntrySummary>>({})
+
+  // Responses are discarded once reset() runs (another property, or logout), a history
+  // response once a newer history request starts, and a tenant's summary response once a newer
+  // summary request for that tenant starts or a bill is saved for them (it predates the bill).
+  let generation = 0
+  let historySeq = 0
+  const summarySeq = new Map<string, number>()
+
+  function nextSummarySeq(tenantId: string): number {
+    const seq = (summarySeq.get(tenantId) ?? 0) + 1
+    summarySeq.set(tenantId, seq)
+    return seq
+  }
+
+  function remember(entries: RentEntry[]) {
+    const next = { ...entriesById.value }
+    for (const entry of entries) next[entry.id] = entry
+    entriesById.value = next
+  }
+
+  function requireProperty(): string {
+    const propertyId = accessStore.selectedPropertyId
+    if (!propertyId) throw new Error('Choose a property first.')
+    return propertyId
+  }
+
+  // One page of a tenant's bills, newest first. Also the history page's Retry.
+  async function loadHistory(tenantId: string, options: { year?: string | null; page?: number }) {
+    const propertyId = accessStore.selectedPropertyId
+    if (!propertyId) return
+
+    const seq = ++historySeq
+    const gen = generation
+    const year = options.year ?? null
+    const page = options.page ?? 1
+    history.value = { ...emptyHistory(), tenantId, year, page, status: 'loading' }
+
     try {
-      const ledger = loadRentLedger()
-      entries.value = ledger.entries
-      payments.value = ledger.payments
-      receipts.value = ledger.receipts
-      initialized.value = true
-      loadError.value = null
-      return true
-    } catch {
-      initialized.value = false
-      loadError.value = LOAD_ERROR_MESSAGE
-      return false
+      const result = await rentEntryService.getEntries(propertyId, tenantId, {
+        year: year ?? undefined,
+        page,
+      })
+      if (seq !== historySeq || gen !== generation) return
+
+      remember(result.entries)
+      history.value = {
+        tenantId,
+        year,
+        page: result.page,
+        entries: result.entries,
+        count: result.count,
+        hasNext: result.hasNext,
+        hasPrevious: result.hasPrevious,
+        status: 'ready',
+        error: null,
+      }
+    } catch (err) {
+      if (seq !== historySeq || gen !== generation) return
+      history.value = {
+        ...emptyHistory(),
+        tenantId,
+        year,
+        page,
+        status: 'error',
+        error: entryLoadErrorMessage(err),
+      }
     }
   }
 
-  // Another tab saved (or storage was cleared, key null): pick up its changes.
-  function handleStorage(event: StorageEvent) {
-    if (event.key === RENT_LEDGER_STORAGE_KEY || event.key === null) load()
-  }
+  // The tenant's newest bill and bill count (the first page is newest first). Also Retry.
+  async function loadSummary(tenantId: string) {
+    const propertyId = accessStore.selectedPropertyId
+    if (!propertyId) return
 
-  let listening = false
-  onScopeDispose(() => window.removeEventListener('storage', handleStorage))
-
-  // Safe to call from every page that needs entries; also the Retry action after a failure.
-  function initialize() {
-    if (!listening) {
-      window.addEventListener('storage', handleStorage)
-      listening = true
+    const gen = generation
+    const seq = nextSummarySeq(tenantId)
+    const isCurrent = () => gen === generation && summarySeq.get(tenantId) === seq
+    const previous = summaries.value[tenantId]
+    // Keeps what's shown while it refreshes, so the card doesn't flash.
+    summaries.value = {
+      ...summaries.value,
+      [tenantId]: {
+        status: 'loading',
+        latest: previous?.latest ?? null,
+        count: previous?.count ?? 0,
+        error: null,
+      },
     }
 
-    if (initialized.value) return
-
-    load()
-  }
-
-  function getEntriesForTenant(tenantId: string): RentEntry[] {
-    return entries.value.filter((entry) => entry.tenantId === tenantId)
-  }
-
-  function getPaymentsForEntry(entryId: string): Payment[] {
-    return payments.value.filter((payment) => payment.entryId === entryId)
-  }
-
-  // Always the sum of the entry's payment records, never a stored figure.
-  function getTotalPaid(entryId: string): number {
-    return sumPayments(getPaymentsForEntry(entryId))
-  }
-
-  function getReceipt(receiptId: string): PaymentReceipt | null {
-    return receipts.value.find((receipt) => receipt.id === receiptId) ?? null
-  }
-
-  function getReceiptForPayment(paymentId: string): PaymentReceipt | null {
-    return receipts.value.find((receipt) => receipt.paymentId === paymentId) ?? null
-  }
-
-  // Shared start of every write. Saving without the stored ledger would overwrite it, and
-  // re-reading right before writing picks up what another tab saved since this one loaded
-  // (writing this tab's stale copy would erase it). Read, check and write happen in one
-  // synchronous step; a backend must do this atomically for real.
-  function reloadBeforeWrite(action: string) {
-    if (!initialized.value || loadError.value) {
-      throw new Error(`Saved entries must load successfully before ${action}.`)
-    }
-
-    if (!load()) {
-      throw new Error(LOAD_ERROR_MESSAGE)
-    }
-  }
-
-  // Write first: only a successful write updates state and lets the page confirm.
-  function commit(next: RentLedger, saveErrorMessage = SAVE_ERROR_MESSAGE) {
+    let summary: EntrySummary
     try {
-      saveRentLedger(next)
-    } catch {
-      throw new Error(saveErrorMessage)
+      const result = await rentEntryService.getEntries(propertyId, tenantId)
+      if (!isCurrent()) return
+      remember(result.entries)
+      summary = {
+        status: 'ready',
+        latest: result.entries[0] ?? null,
+        count: result.count,
+        error: null,
+      }
+    } catch (err) {
+      if (!isCurrent()) return
+      summary = { status: 'error', latest: null, count: 0, error: entryLoadErrorMessage(err) }
     }
-
-    entries.value = next.entries
-    payments.value = next.payments
-    receipts.value = next.receipts
+    summaries.value = { ...summaries.value, [tenantId]: summary }
   }
 
-  // Saves the bill and its optional initial payment in one write: never one without the other.
-  function addEntry(submission: NewRentEntrySubmission): RentEntry {
+  // Matches both ids, so a bill never shows under another tenant's URL.
+  function getEntry(tenantId: string, entryId: string): RentEntry | null {
+    const entry = entriesById.value[entryId]
+    return entry && entry.tenantId === tenantId ? entry : null
+  }
+
+  // One bill, for pages opened by URL: from what's loaded, or the detail API. null when the
+  // tenant has no such bill; other failures throw (an outage isn't "not found").
+  async function loadEntry(tenantId: string, entryId: string): Promise<RentEntry | null> {
+    const cached = getEntry(tenantId, entryId)
+    if (cached) return cached
+
+    const propertyId = accessStore.selectedPropertyId
+    if (!propertyId) return null
+
+    const gen = generation
+    try {
+      const entry = await rentEntryService.getEntry(propertyId, tenantId, entryId)
+      if (gen === generation) remember([entry])
+      return entry
+    } catch (err) {
+      if (err instanceof ApiError && err.kind === 'not-found') return null
+      throw err
+    }
+  }
+
+  // The bill saved for that month, if any. Never throws: null when it can't be checked.
+  async function findSavedEntry(propertyId: string, tenantId: string, billingMonth: string) {
+    try {
+      const result = await rentEntryService.getEntries(propertyId, tenantId, { billingMonth })
+      return { checked: true, entry: result.entries[0] ?? null }
+    } catch {
+      return { checked: false, entry: null }
+    }
+  }
+
+  // Saves a new bill. Only the backend's response counts as saved: it's added to state and
+  // returned (with the backend's rate and totals), and on any failure nothing changes, so the
+  // page keeps the form. Throws EntrySaveError with a message for the page.
+  async function addEntry(submission: NewRentEntrySubmission): Promise<RentEntry> {
     const { entry: input, initialPayment } = submission
-    const today = toDateValue(new Date())
+
+    // Payments move to the backend in BE Phase 5. Refused rather than dropped: a payment the
+    // user entered must never disappear silently.
+    if (initialPayment) throw new EntrySaveError(PAYMENTS_UNAVAILABLE_MESSAGE)
 
     if (Object.keys(validateRentEntryInput(input)).length > 0) {
-      throw new Error('This entry is not valid. Check the form and try again.')
+      throw new EntrySaveError('This entry is not valid. Check the form and try again.')
     }
 
-    if (
-      initialPayment &&
-      Object.keys(
-        validatePaymentInput(
-          { ...initialPayment, entryId: 'new-entry' },
-          { today, outstanding: calculateTotalDue(input) },
-        ),
-      ).length > 0
-    ) {
-      throw new Error('This payment is not valid. Check the form and try again.')
+    const propertyId = requireProperty()
+    const gen = generation
+
+    try {
+      const entry = await rentEntryService.createEntry(propertyId, input.tenantId, input)
+      if (gen === generation) {
+        remember([entry])
+        // The dashboard reloads it with this bill included. A summary request still in flight
+        // predates the bill, so its response is discarded too.
+        nextSummarySeq(input.tenantId)
+        const next = { ...summaries.value }
+        delete next[input.tenantId]
+        summaries.value = next
+      }
+      return entry
+    } catch (err) {
+      const kind = err instanceof ApiError ? err.kind : 'unknown'
+      const month = formatMonthValue(input.billingMonth)
+
+      if (kind === 'conflict') {
+        const { entry } = await findSavedEntry(propertyId, input.tenantId, input.billingMonth)
+        throw new EntrySaveError(DUPLICATE_ENTRY_MESSAGE, entry)
+      }
+
+      if (err instanceof ApiError && kind === 'invalid-request') {
+        // The backend's own message, e.g. a month outside the tenancy.
+        const first = Object.values(err.fieldErrors)[0]
+        throw new EntrySaveError(first ?? 'This entry is not valid. Check the form and try again.')
+      }
+
+      // No response (e.g. a timeout) or a server error: the bill may have been saved anyway.
+      // Check before inviting another submission.
+      if (kind === 'network' || kind === 'unavailable') {
+        const { checked, entry } = await findSavedEntry(
+          propertyId,
+          input.tenantId,
+          input.billingMonth,
+        )
+        if (entry) {
+          throw new EntrySaveError(
+            `${month} now has a saved entry. Open it to check it before adding another.`,
+            entry,
+          )
+        }
+        if (!checked) throw new EntrySaveError(SAVE_UNCONFIRMED_MESSAGE)
+      }
+
+      if (kind === 'unauthorized') {
+        throw new EntrySaveError("Your sign-in couldn't be verified. Log out and sign in again.")
+      }
+      if (kind === 'forbidden') {
+        throw new EntrySaveError("You don't have permission to add entries for this property.")
+      }
+
+      throw new EntrySaveError(SAVE_ERROR_MESSAGE)
     }
-
-    reloadBeforeWrite('adding an entry')
-
-    // One bill per tenant per month. The backend must enforce this too once it exists.
-    const duplicate = entries.value.some(
-      (entry) => entry.tenantId === input.tenantId && entry.billingMonth === input.billingMonth,
-    )
-
-    if (duplicate) {
-      throw new Error('An entry already exists for this tenant and billing month.')
-    }
-
-    const createdAt = new Date().toISOString()
-    const entry: RentEntry = { ...input, id: crypto.randomUUID(), createdAt }
-    const nextPayments = initialPayment
-      ? [
-          ...payments.value,
-          { ...initialPayment, entryId: entry.id, id: crypto.randomUUID(), createdAt },
-        ]
-      : payments.value
-
-    commit({ entries: [...entries.value, entry], payments: nextPayments, receipts: receipts.value })
-
-    return entry
   }
 
-  // `id` is generated once per form submission and reused on retries, so a retried save that
-  // had in fact succeeded can't record the payment twice. Same amount and date is fine:
-  // two genuine payments can match.
-  function addPayment(input: PaymentInput, id: string = crypto.randomUUID()): Payment {
-    reloadBeforeWrite('recording a payment')
-
-    const entry = entries.value.find((item) => item.id === input.entryId)
-    if (!entry) {
-      throw new Error('This entry no longer exists.')
-    }
-
-    if (payments.value.some((payment) => payment.id === id)) {
-      throw new Error(DUPLICATE_PAYMENT_MESSAGE)
-    }
-
-    // Recalculated from what's stored now: the form's preview may be stale.
-    const outstanding = calculateOutstanding(calculateTotalDue(entry), getTotalPaid(entry.id))
-    const errors = validatePaymentInput(input, { today: toDateValue(new Date()), outstanding })
-
-    if (Object.keys(errors).length > 0) {
-      throw new Error(errors.amount ?? 'This payment is not valid. Check the form and try again.')
-    }
-
-    const payment: Payment = { ...input, id, createdAt: new Date().toISOString() }
-
-    commit({
-      entries: entries.value,
-      payments: [...payments.value, payment],
-      receipts: receipts.value,
-    })
-
-    return payment
+  // Forget the previous property's (or user's) bills, and ignore their pending responses.
+  function reset() {
+    generation++
+    historySeq++
+    summarySeq.clear()
+    entriesById.value = {}
+    history.value = emptyHistory()
+    summaries.value = {}
   }
 
-  // Issues the receipt for one payment: a snapshot of the payment, its bill, the tenant and the
-  // issuer as they are now, saved so every reprint shows the same thing. A payment that
-  // already has a receipt gets that one back, so repeated clicks never issue a second.
-  // A failure leaves the payment recorded and no receipt in state.
-  function issueReceipt(paymentId: string): PaymentReceipt {
-    reloadBeforeWrite('issuing a receipt')
-
-    const existing = getReceiptForPayment(paymentId)
-    if (existing) return existing
-
-    const payment = payments.value.find((item) => item.id === paymentId)
-    if (!payment) {
-      throw new Error('This payment no longer exists.')
-    }
-
-    const entry = entries.value.find((item) => item.id === payment.entryId)
-    if (!entry) {
-      throw new Error('This entry no longer exists.')
-    }
-
-    const tenant = useTenantStore().getTenant(entry.tenantId)
-    if (!tenant) {
-      throw new Error('Tenant details are unavailable, so no receipt was issued. Please try again.')
-    }
-
-    // A deployed build must not print the placeholder address on a real receipt.
-    const issuerError = validateReceiptIssuer(receiptIssuer, {
-      allowPlaceholderAddress: import.meta.env.DEV,
-    })
-    if (issuerError) {
-      throw new Error(issuerError)
-    }
-
-    // The bill as it stood right after this payment: the payments recorded before it, plus it.
-    const billPayments = getPaymentsForEntry(entry.id)
-    const paymentNumber = billPayments.findIndex((item) => item.id === payment.id) + 1
-    const totalDue = calculateTotalDue(entry)
-    const totalPaid = sumPayments(billPayments.slice(0, paymentNumber))
-
-    const previousEntry = entries.value.find(
-      (item) =>
-        item.tenantId === entry.tenantId &&
-        item.billingMonth === previousMonthValue(entry.billingMonth),
-    )
-    const previousMonthOutstanding = previousEntry
-      ? calculateOutstanding(calculateTotalDue(previousEntry), getTotalPaid(previousEntry.id))
-      : 0
-
-    // References must be unique. A clash (e.g. a flat reused under another tenant id) falls
-    // back to one that includes the payment id, which can't clash.
-    let reference = receiptReferenceFor(tenant.flatNumber, entry.billingMonth, paymentNumber)
-    if (receipts.value.some((item) => item.reference === reference)) {
-      reference = `${reference}-${payment.id}`
-    }
-
-    const now = new Date()
-    const receipt: PaymentReceipt = {
-      id: crypto.randomUUID(),
-      reference,
-      paymentId: payment.id,
-      entryId: entry.id,
-      issuedAt: now.toISOString(),
-      issuedDate: toDateValue(now),
-      // Copies, so the snapshot never shares objects with the config or the tenant list.
-      issuer: {
-        name: receiptIssuer.name.trim(),
-        managerName: receiptIssuer.managerName.trim(),
-        address: receiptIssuer.address.trim(),
-        contactNumber: receiptIssuer.contactNumber,
-        email: receiptIssuer.email,
-      },
-      tenant: {
-        name: tenant.name,
-        flatNumber: tenant.flatNumber,
-        mobileNumber: tenant.mobileNumber,
-        depositAmount: tenant.depositAmount,
-      },
-      billingMonth: entry.billingMonth,
-      rentDueDay: tenant.rentDueDay,
-      charges: {
-        rentAmount: entry.rentAmount,
-        electricityUnits: entry.electricityUnits,
-        electricityRate: entry.electricityRate,
-        waterAmount: entry.waterAmount,
-      },
-      totalDue,
-      totalPaid,
-      outstanding: calculateOutstanding(totalDue, totalPaid),
-      previousMonthOutstanding,
-      paymentAmount: payment.amount,
-      paidDate: payment.paidDate,
-      paymentNotes: payment.notes,
-    }
-
-    commit(
-      { entries: entries.value, payments: payments.value, receipts: [...receipts.value, receipt] },
-      RECEIPT_SAVE_ERROR_MESSAGE,
-    )
-
-    return receipt
-  }
+  // Switching property, logging out and losing access all change the selected property.
+  watch(
+    () => accessStore.selectedPropertyId,
+    (next, previous) => {
+      if (next !== previous) reset()
+    },
+    { flush: 'sync' },
+  )
 
   return {
-    entries,
-    payments,
-    receipts,
-    initialized,
-    loadError,
-    initialize,
-    getEntriesForTenant,
-    getPaymentsForEntry,
-    getTotalPaid,
-    getReceipt,
-    getReceiptForPayment,
+    history,
+    summaries,
+    loadHistory,
+    loadSummary,
+    getEntry,
+    loadEntry,
     addEntry,
-    addPayment,
-    issueReceipt,
+    reset,
   }
 })

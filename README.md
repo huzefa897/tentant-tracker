@@ -42,8 +42,9 @@ backend. Add them in Django admin (**Tenancies**), or add three fictional ones
 for development with `create_dev_tenancies` (see the backend README). Search by
 name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
 
-Rent entries are still saved in this browser only, and entries saved before
-tenants came from the backend don't appear under them.
+Rent entries (bills) are saved in the backend, which calculates every total.
+Payments can't be recorded yet (BE Phase 5), and entries saved in this browser
+before BE Phase 4 are no longer shown.
 
 ## Scripts
 

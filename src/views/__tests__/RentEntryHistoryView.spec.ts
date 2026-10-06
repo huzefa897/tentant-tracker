@@ -2,25 +2,22 @@ import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
+import { ApiError } from '@/services/apiError'
+import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
-import {
-  LOAD_ERROR_MESSAGE,
-  RECEIPT_SAVE_ERROR_MESSAGE,
-  useRentEntryStore,
-} from '@/stores/rentEntry'
-import { makeEntry, makePayment, openPage, storeLedger } from '@/test/rentEntries'
-import { downloadReceiptPdf } from '@/utils/receiptDownload'
-import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
+import { ENTRIES_LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
+import { makeEntry, openPage } from '@/test/rentEntries'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService } from '@/test/mocks/authService'
+import { fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { resetTenantService } from '@/test/mocks/tenantService'
-
-// The PDF itself is covered by its own tests; here, which receipt gets downloaded.
-vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
+vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
+
+const getEntries = vi.mocked(rentEntryService.getEntries)
 
 let view: VueWrapper | undefined
 
@@ -37,20 +34,20 @@ function rows() {
 
 function totals() {
   const section = view!.get('section[aria-labelledby="entry-totals-heading"]')
-  return Object.fromEntries(
+  const tiles: Record<string, string> = Object.fromEntries(
     section.findAll('dl > div').map((tile) => [tile.get('dt').text(), tile.get('dd').text()]),
   )
+  return { ...tiles, heading: section.get('h2').text() } as Record<string, string>
 }
 
 function button(label: string) {
-  const match = view!.findAll('button').find((b) => b.text() === label)
+  const match = view!.findAll('button').find((b) => b.text().trim() === label)
   if (!match) throw new Error(`No "${label}" button`)
   return match
 }
 
 const october = makeEntry({ id: 'oct', billingMonth: '2026-10' })
-const september = makeEntry({ id: 'sep', billingMonth: '2026-09' })
-const august = makeEntry({ id: 'aug', billingMonth: '2026-08' })
+const september = makeEntry({ id: 'sep', billingMonth: '2026-09', waterAmount: 0 })
 const lastYear = makeEntry({ id: 'dec', billingMonth: '2025-12' })
 const otherTenant = makeEntry({
   id: 'other',
@@ -59,25 +56,22 @@ const otherTenant = makeEntry({
   rentAmount: 18000,
 })
 
-// October: ₹10,000 of ₹15,750 paid. September: paid in full over two payments.
-const payments = [
-  makePayment({ id: 'oct-1', entryId: 'oct', amount: 10000, paidDate: '2026-10-02' }),
-  makePayment({ id: 'sep-1', entryId: 'sep', amount: 10000, paidDate: '2026-09-05' }),
-  makePayment({ id: 'sep-2', entryId: 'sep', amount: 5750, paidDate: '2026-09-10' }),
-]
-
-function storeEntries(...entries: ReturnType<typeof makeEntry>[]) {
-  const ids = new Set(entries.map((entry) => entry.id))
-  storeLedger(
-    entries,
-    payments.filter((payment) => ids.has(payment.entryId)),
-  )
+// A year and a bit of monthly bills, to fill more than one page of 12.
+function months(count: number) {
+  return Array.from({ length: count }, (_, i) => {
+    const date = new Date(2026, 9 - i, 1)
+    const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+    return makeEntry({ id: `m${i}`, billingMonth: month })
+  })
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 9, 5, 12, 0))
   resetTenantService()
   resetAuthService()
   resetAccessService()
+  resetRentEntryService()
   localStorage.clear()
   sessionStorage.clear()
 })
@@ -86,61 +80,69 @@ afterEach(() => {
   view?.unmount()
   view = undefined
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe('RentEntryHistoryView', () => {
-  it('shows only this tenant’s entries, newest billing month first, after a refresh', async () => {
-    // Saved out of order, mixed with another tenant's entry.
-    storeEntries(august, otherTenant, october, lastYear, september)
+  it('loads this tenant’s bills from the API, newest billing month first', async () => {
+    fakeEntries.entries = [september, otherTenant, october, lastYear]
     await openHistory()
 
+    expect(getEntries).toHaveBeenCalledWith(expect.any(String), 'tenant-001', {
+      year: undefined,
+      page: 1,
+    })
     expect(view!.get('[data-testid="tenant-chip"]').text()).toBe('Shaik Zahid Ali · Flat 202')
-    expect(rows().map((row) => row[0])).toEqual([
-      'October 2026',
-      'September 2026',
-      'August 2026',
-      'December 2025',
-    ])
-    expect(rows()[0]).toEqual([
-      'October 2026',
-      '₹15,750',
-      '₹10,000',
-      '₹5,750',
-      'Partially paid',
-      'View Summary  Download Receipt',
+    expect(rows()).toEqual([
+      ['October 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
+      ['September 2026', '₹15,450', '₹0', '₹15,450', 'Unpaid', 'View Summary'],
+      ['December 2025', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
     ])
     expect(view!.text()).not.toContain('July 2026')
   })
 
-  it('totals every entry when no filter is set', async () => {
-    storeEntries(october, september, august)
+  it('labels the totals as this page’s', async () => {
+    fakeEntries.entries = [october, september]
     await openHistory()
 
     expect(totals()).toEqual({
-      'Total billed': '₹47,250',
-      'Total paid': '₹25,750',
-      Outstanding: '₹21,500',
-    })
-  })
-
-  it('filters by status, and the totals cover only the displayed entries', async () => {
-    storeEntries(october, september, august, lastYear)
-    await openHistory()
-
-    await view!.get('#filter-status').setValue('unpaid')
-
-    expect(rows().map((row) => row[0])).toEqual(['August 2026', 'December 2025'])
-    expect(totals()).toEqual({
-      'Total billed': '₹31,500',
+      heading: 'Totals for this page',
+      'Total billed': '₹31,200',
       'Total paid': '₹0',
-      Outstanding: '₹31,500',
+      Outstanding: '₹31,200',
     })
   })
 
-  it('filters by the years present in the tenant’s entries', async () => {
-    storeEntries(october, lastYear, otherTenant)
+  it('pages through the bills, totalling only the page shown', async () => {
+    fakeEntries.entries = months(14)
     await openHistory()
 
+    expect(rows()).toHaveLength(12)
+    expect(view!.get('[data-testid="page-position"]').text()).toBe('Page 1 of 2 · 14 entries')
+    expect(totals()['Total billed']).toBe('₹1,89,000')
+    expect(button('Newer').attributes('disabled')).toBeDefined()
+
+    await button('Older').trigger('click')
+    await flushPromises()
+
+    expect(rows().map((row) => row[0])).toEqual(['October 2025', 'September 2025'])
+    expect(view!.get('[data-testid="page-position"]').text()).toBe('Page 2 of 2 · 14 entries')
+    expect(totals()['Total billed']).toBe('₹31,500')
+    expect(button('Older').attributes('disabled')).toBeDefined()
+  })
+
+  it('offers no paging when everything fits on one page', async () => {
+    fakeEntries.entries = [october]
+    await openHistory()
+
+    expect(view!.find('nav[aria-label="Pages"]').exists()).toBe(false)
+  })
+
+  it('offers the years of the tenancy and filters on the server', async () => {
+    fakeEntries.entries = [october, september, lastYear]
+    await openHistory()
+
+    // The test tenancy started in April 2025 and continues to today (2026).
     expect(view!.findAll('#filter-year option').map((o) => o.text())).toEqual([
       'All years',
       '2026',
@@ -148,130 +150,76 @@ describe('RentEntryHistoryView', () => {
     ])
 
     await view!.get('#filter-year').setValue('2025')
+    await flushPromises()
 
+    expect(getEntries).toHaveBeenLastCalledWith(expect.any(String), 'tenant-001', {
+      year: '2025',
+      page: 1,
+    })
     expect(rows().map((row) => row[0])).toEqual(['December 2025'])
   })
 
-  it('shows a no-match message with Clear filters when filters match nothing', async () => {
-    storeEntries(september)
+  it('shows a no-match message with Clear filters when a year has no bills', async () => {
+    fakeEntries.entries = [october]
     await openHistory()
 
-    await view!.get('#filter-status').setValue('unpaid')
+    await view!.get('#filter-year').setValue('2025')
+    await flushPromises()
 
-    expect(view!.text()).toContain('No entries match these filters.')
-    expect(view!.find('section[aria-labelledby="entry-totals-heading"]').exists()).toBe(false)
+    expect(view!.text()).toContain('No entries in 2025.')
+    expect(view!.find('[data-testid="history-row"]').exists()).toBe(false)
 
     await view!
       .findAll('button')
-      .filter((b) => b.text() === 'Clear filters')[1]!
+      .filter((b) => b.text().trim() === 'Clear filters')
+      .slice(-1)[0]!
       .trigger('click')
+    await flushPromises()
 
-    expect(rows().map((row) => row[0])).toEqual(['September 2026'])
+    expect(rows().map((row) => row[0])).toEqual(['October 2026'])
   })
 
-  it('shows the first-entry empty state when the tenant has no entries', async () => {
-    storeEntries(otherTenant)
+  it('shows the first-entry empty state when the tenant has no bills', async () => {
     await openHistory()
 
-    expect(view!.text()).toContain('No rent entries yet. Add the first entry for this tenant.')
+    expect(view!.text()).toContain('No rent entries yet.')
     expect(view!.find('section[aria-labelledby="entry-totals-heading"]').exists()).toBe(false)
 
-    await view!
-      .findAll('button')
-      .filter((b) => b.text() === 'Add New Entry')[1]!
-      .trigger('click')
+    await button('Add New Entry').trigger('click')
+
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-new'))
-    expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
   })
 
-  it('shows a load error and no zero-balance summary when stored data can’t load, then retries', async () => {
-    localStorage.setItem(RENT_LEDGER_STORAGE_KEY, '{not json')
+  it('shows a load error, not an empty history or zero totals, then retries', async () => {
+    fakeEntries.entries = [october]
+    getEntries.mockRejectedValueOnce(new ApiError('unknown'))
     await openHistory()
 
-    expect(view!.get('[role="alert"]').text()).toContain(LOAD_ERROR_MESSAGE)
-    expect(view!.text()).not.toContain('No rent entries yet')
-    expect(view!.text()).not.toContain('₹0')
+    expect(view!.get('[role="alert"]').text()).toContain(ENTRIES_LOAD_ERROR_MESSAGE)
+    expect(view!.text()).not.toContain('No rent entries yet.')
     expect(view!.find('section[aria-labelledby="entry-totals-heading"]').exists()).toBe(false)
 
-    storeEntries(september)
     await button('Retry').trigger('click')
     await flushPromises()
 
-    expect(view!.text()).not.toContain(LOAD_ERROR_MESSAGE)
-    expect(rows().map((row) => row[0])).toEqual(['September 2026'])
+    expect(rows().map((row) => row[0])).toEqual(['October 2026'])
   })
 
   it('shows Tenant not found for an unknown tenant', async () => {
-    storeEntries(september)
-    await openHistory('tenant-999')
+    await openHistory('nope')
 
-    expect(view!.get('[role="alert"]').text()).toContain('Tenant not found')
-    expect(view!.text()).not.toContain('September 2026')
+    expect(view!.text()).toContain('Tenant not found')
+    expect(view!.find('[data-testid="history-row"]').exists()).toBe(false)
   })
 
   it('opens an entry’s summary', async () => {
-    storeEntries(september)
+    fakeEntries.entries = [october]
     await openHistory()
 
-    await view!.get('[aria-label="View summary for September 2026"]').trigger('click')
-
+    await view!.get('[aria-label="View summary for October 2026"]').trigger('click')
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
-    expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
-  })
 
-  it('downloads the receipt for the bill’s latest payment, staying on the list', async () => {
-    const download = vi.mocked(downloadReceiptPdf)
-    download.mockReset()
-    download.mockResolvedValue()
-    storeEntries(september)
-    await openHistory()
-
-    await view!.get('[aria-label="Download receipt for September 2026"]').trigger('click')
-    await flushPromises()
-
-    const [receipt] = useRentEntryStore().receipts
-    expect(receipt).toMatchObject({
-      paymentId: 'sep-2',
-      reference: 'RCP-202-202609-2',
-      totalPaid: 15750,
-      outstanding: 0,
-    })
-    expect(download).toHaveBeenCalledWith(receipt)
-    expect(router.currentRoute.value.name).toBe('rent-entry-history')
-  })
-
-  it('downloads the same receipt again instead of issuing another', async () => {
-    storeEntries(september)
-    await openHistory()
-    const first = useRentEntryStore().issueReceipt('sep-2')
-
-    await view!.get('[aria-label="Download receipt for September 2026"]').trigger('click')
-    await flushPromises()
-
-    expect(vi.mocked(downloadReceiptPdf)).toHaveBeenLastCalledWith(first)
-    expect(useRentEntryStore().receipts).toHaveLength(1)
-  })
-
-  it('offers no receipt for an unpaid bill', async () => {
-    storeEntries(august)
-    await openHistory()
-
-    expect(view!.find('[aria-label="Download receipt for August 2026"]').exists()).toBe(false)
-  })
-
-  it('shows an inline error, and stays on the list, when the receipt cannot be saved', async () => {
-    storeEntries(september)
-    await openHistory()
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('Quota exceeded', 'QuotaExceededError')
-    })
-
-    await view!.get('[aria-label="Download receipt for September 2026"]').trigger('click')
-    await flushPromises()
-
-    expect(view!.get('[data-testid="receipt-error"]').text()).toBe(RECEIPT_SAVE_ERROR_MESSAGE)
-    expect(router.currentRoute.value.name).toBe('rent-entry-history')
-    expect(useRentEntryStore().receipts).toEqual([])
+    expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'oct' })
   })
 
   it('goes back to the dashboard', async () => {
@@ -285,10 +233,11 @@ describe('RentEntryHistoryView', () => {
 })
 
 describe('RentEntryHistoryView when the URL changes in place', () => {
-  it('shows the new tenant’s entries with filters reset', async () => {
-    storeEntries(lastYear, september, otherTenant)
+  it('shows the new tenant’s bills with the filter and page reset', async () => {
+    fakeEntries.entries = [lastYear, september, otherTenant]
     await openHistory()
     await view!.get('#filter-year').setValue('2025')
+    await flushPromises()
 
     await router.push('/tenants/tenant-002/entries')
     await flushPromises()
@@ -301,7 +250,7 @@ describe('RentEntryHistoryView when the URL changes in place', () => {
 
 describe('RentEntryHistoryView when tenants fail to load', () => {
   it('shows the error with Retry instead of Tenant not found, then recovers', async () => {
-    storeEntries(september)
+    fakeEntries.entries = [september]
     view = await openPage('/tenants/tenant-001/entries', () => {
       // The tenancy request fails once; Retry succeeds.
       vi.mocked(tenantService.getTenant).mockRejectedValueOnce(new Error('boom'))
@@ -310,12 +259,10 @@ describe('RentEntryHistoryView when tenants fail to load', () => {
     expect(view.get('[role="alert"]').text()).toContain('Unable to load tenants. Please try again.')
     expect(view.text()).not.toContain('Tenant not found')
 
-    await view
-      .findAll('button')
-      .find((b) => b.text() === 'Retry')!
-      .trigger('click')
+    await button('Retry').trigger('click')
     await flushPromises()
 
     expect(view.get('[data-testid="tenant-chip"]').text()).toBe('Shaik Zahid Ali · Flat 202')
+    expect(rows().map((row) => row[0])).toEqual(['September 2026'])
   })
 })

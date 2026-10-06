@@ -12,6 +12,10 @@ export interface Tenant {
   // E.164, e.g. "+918341413827"
   mobileNumber: string
   depositAmount: number
+  // The occupancy (YYYY-MM-DD, end inclusive; null while it continues). Bills can only be for
+  // months it overlaps.
+  startDate: string
+  endDate: string | null
 }
 
 // One page of tenant search results.

@@ -4,16 +4,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
 import { accessService } from '@/services/access.service'
+import { ApiError } from '@/services/apiError'
+import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
 import { authService } from '@/services/auth.service'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
-import { LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
+import { ENTRIES_LOAD_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
-import { makeEntry, makePayment, storeLedger } from '@/test/rentEntries'
-import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
+import { fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
+import { makeEntry } from '@/test/rentEntries'
 import DashboardView from '@/views/DashboardView.vue'
 import { SEARCH_DEBOUNCE_MS } from '@/components/tenant/TenantSelector.vue'
 import { TENANTS_LOAD_ERROR_MESSAGE } from '@/stores/tenant'
@@ -22,6 +24,7 @@ import { resetTenantService } from '@/test/mocks/tenantService'
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
+vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 
 let view: VueWrapper | undefined
 const body = new DOMWrapper(document.body)
@@ -42,6 +45,7 @@ beforeEach(() => {
   resetTenantService()
   resetAuthService()
   resetAccessService()
+  resetRentEntryService()
   localStorage.clear()
   sessionStorage.clear()
 })
@@ -187,33 +191,22 @@ describe('DashboardView', () => {
         .text()
     }
 
-    function storeEntries(...months: string[]) {
-      localStorage.setItem(
-        RENT_LEDGER_STORAGE_KEY,
-        JSON.stringify({
-          version: 2,
-          payments: [],
-          entries: months.map((billingMonth, index) => ({
-            id: `entry-${index}`,
-            tenantId: 'tenant-001',
-            billingMonth,
-            rentAmount: 15000,
-            electricityUnits: 75,
-            electricityRate: 6,
-            waterAmount: 300,
-            notes: '',
-            createdAt: '2026-10-03T06:00:00.000Z',
-          })),
-        }),
+    function saveEntries(...months: string[]) {
+      fakeEntries.entries = months.map((billingMonth, index) =>
+        makeEntry({ id: `entry-${index}`, billingMonth }),
       )
     }
 
-    it('shows the selected tenant’s saved entry count', async () => {
-      storeEntries('2026-08', '2026-09')
+    it('shows the selected tenant’s bill count from the API', async () => {
+      saveEntries('2026-08', '2026-09')
       await mountView()
 
       useTenantStore().selectTenant('tenant-001')
       await flushPromises()
+      expect(vi.mocked(rentEntryService.getEntries)).toHaveBeenCalledWith(
+        testProperty.id,
+        'tenant-001',
+      )
       expect(previousEntriesText()).toBe('Previous Entries (2)')
 
       useTenantStore().selectTenant('tenant-002')
@@ -221,48 +214,44 @@ describe('DashboardView', () => {
       expect(previousEntriesText()).toBe('Previous Entries (0)')
     })
 
-    it('shows a load error with Retry instead of a count when entries are corrupt', async () => {
-      localStorage.setItem(RENT_LEDGER_STORAGE_KEY, 'corrupt')
+    it('shows a load error with Retry instead of a count or latest entry', async () => {
+      saveEntries('2026-09')
+      vi.mocked(rentEntryService.getEntries).mockRejectedValueOnce(new ApiError('unknown'))
       await mountView()
       useTenantStore().selectTenant('tenant-001')
       await flushPromises()
 
-      expect(view!.text()).toContain(LOAD_ERROR_MESSAGE)
+      expect(view!.get('[data-testid="entries-error"]').text()).toContain(
+        ENTRIES_LOAD_ERROR_MESSAGE,
+      )
       expect(previousEntriesText()).toBe('Previous Entries')
-      expect(localStorage.getItem(RENT_LEDGER_STORAGE_KEY)).toBe('corrupt')
+      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
 
-      storeEntries('2026-09')
       await view!
+        .get('[data-testid="entries-error"]')
         .findAll('button')
         .find((b) => b.text() === 'Retry')!
         .trigger('click')
       await flushPromises()
 
-      expect(view!.text()).not.toContain(LOAD_ERROR_MESSAGE)
+      expect(view!.find('[data-testid="entries-error"]').exists()).toBe(false)
       expect(previousEntriesText()).toBe('Previous Entries (1)')
     })
 
     it('shows the selected tenant’s latest entry below the name', async () => {
-      storeLedger(
-        [
-          makeEntry({ id: 'entry-aug', billingMonth: '2026-08' }),
-          makeEntry({ id: 'entry-oct', billingMonth: '2026-10', waterAmount: 0 }),
-          makeEntry({ id: 'entry-sep', billingMonth: '2026-09' }),
-        ],
-        [
-          makePayment({ id: 'p1', entryId: 'entry-oct', amount: 5000, paidDate: '2026-10-05' }),
-          makePayment({ id: 'p2', entryId: 'entry-oct', amount: 2000, paidDate: '2026-10-08' }),
-        ],
-      )
+      fakeEntries.entries = [
+        makeEntry({ id: 'entry-aug', billingMonth: '2026-08' }),
+        makeEntry({ id: 'entry-oct', billingMonth: '2026-10', waterAmount: 0 }),
+        makeEntry({ id: 'entry-sep', billingMonth: '2026-09' }),
+      ]
       await mountView()
       useTenantStore().selectTenant('tenant-001')
       await flushPromises()
 
       const card = view!.get('[aria-labelledby="latest-entry-heading"]')
       expect(card.get('h3').text()).toBe('October 2026')
-      expect(card.text()).toContain('Total paid (last 8 Oct 2026)')
-      expect(card.text()).toContain('₹7,000')
-      expect(card.text()).toContain('₹8,450')
+      expect(card.text()).toContain('₹15,450')
+      expect(card.text()).toContain('Unpaid')
 
       await card.get('button').trigger('click')
       await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
@@ -274,34 +263,32 @@ describe('DashboardView', () => {
       expect(router.currentRoute.value.query).toEqual({ from: 'dashboard' })
     })
 
-    it('shows no latest entry for a tenant without entries, or when entries fail to load', async () => {
-      storeEntries('2026-09')
+    it('shows no latest entry for a tenant without entries', async () => {
+      saveEntries('2026-09')
       await mountView()
       useTenantStore().selectTenant('tenant-002')
       await flushPromises()
-      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
 
-      view!.unmount()
-      localStorage.setItem(RENT_LEDGER_STORAGE_KEY, 'corrupt')
-      await mountView()
-      useTenantStore().selectTenant('tenant-001')
-      await flushPromises()
       expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
+      expect(previousEntriesText()).toBe('Previous Entries (0)')
     })
 
-    it('keeps saved entries across logout and login', async () => {
-      storeEntries('2026-09')
-      await mountView()
-
-      await view!.get('button[aria-label="Logout"]').trigger('click')
-      await flushPromises()
-      view!.unmount()
-
+    it('reloads the latest entry when returning with a tenant selected', async () => {
       await mountView()
       useTenantStore().selectTenant('tenant-001')
       await flushPromises()
+      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
 
-      expect(previousEntriesText()).toBe('Previous Entries (1)')
+      // Saved elsewhere (e.g. the new-entry page) while away.
+      saveEntries('2026-10')
+      view!.unmount()
+      view = mount(DashboardView, {
+        global: { plugins: [router] },
+        attachTo: document.body,
+      })
+      await flushPromises()
+
+      expect(view.get('[aria-labelledby="latest-entry-heading"] h3').text()).toBe('October 2026')
     })
   })
 
@@ -318,14 +305,17 @@ describe('DashboardView', () => {
     expect(router.currentRoute.value.name).toBe('login')
   })
 
-  it('keeps saved entries on logout (they are not per user yet)', async () => {
-    localStorage.setItem(RENT_LEDGER_STORAGE_KEY, 'kept')
+  it('forgets loaded bills on logout', async () => {
+    fakeEntries.entries = [makeEntry({ billingMonth: '2026-09' })]
     await mountView()
+    useTenantStore().selectTenant('tenant-001')
+    await flushPromises()
+    expect(useRentEntryStore().summaries['tenant-001']).toBeDefined()
 
     await view!.get('button[aria-label="Logout"]').trigger('click')
     await flushPromises()
 
-    expect(localStorage.getItem(RENT_LEDGER_STORAGE_KEY)).toBe('kept')
+    expect(useRentEntryStore().summaries).toEqual({})
   })
 
   describe('property', () => {

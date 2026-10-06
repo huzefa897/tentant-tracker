@@ -8,6 +8,7 @@ from .models import (
     Property,
     PropertyMembership,
     Tenancy,
+    TenancyHasBillsError,
     business_date,
 )
 
@@ -147,9 +148,23 @@ class TenancyAdmin(admin.ModelAdmin):
         ("Technical", {"classes": ("collapse",), "fields": ("id", "created_at", "updated_at")}),
     )
 
+    def get_readonly_fields(self, request, obj=None):
+        # A tenancy with bills keeps its property (Tenancy.save refuses the move).
+        if obj is not None and obj.rent_entries.exists():
+            return ("property", *self.readonly_fields)
+        return self.readonly_fields
+
     def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
         try:
             return super().changeform_view(request, object_id, form_url, extra_context)
+        except TenancyHasBillsError:
+            # A bill was added after this form loaded with the property still editable.
+            self.message_user(
+                request,
+                "Not saved: this tenancy now has bills, so its property can't change.",
+                messages.ERROR,
+            )
+            return HttpResponseRedirect(request.get_full_path())
         except IntegrityError as error:
             # Another admin saved an overlapping tenancy for this flat between validation and
             # saving; the database refused this one, and the save was rolled back.

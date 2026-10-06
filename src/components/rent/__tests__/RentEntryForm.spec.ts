@@ -13,12 +13,21 @@ const tenant: Tenant = {
   electricityRate: 6,
   mobileNumber: '+918341413827',
   depositAmount: 90000,
+  startDate: '2025-04-01',
+  endDate: null,
 }
 
 let wrapper: VueWrapper | undefined
 
-function mountForm(props: { saveError?: string | null } = {}) {
-  wrapper = mount(RentEntryForm, { props: { tenant, ...props }, attachTo: document.body })
+// Payments on by default here, so the payment rules stay covered for when the backend takes
+// payments (BE Phase 5); the 'payments unavailable' tests turn them off.
+function mountForm(
+  props: { saveError?: string | null; saving?: boolean; paymentsEnabled?: boolean } = {},
+) {
+  wrapper = mount(RentEntryForm, {
+    props: { tenant, paymentsEnabled: true, ...props },
+    attachTo: document.body,
+  })
   return wrapper
 }
 
@@ -234,10 +243,29 @@ describe('RentEntryForm', () => {
               electricityRate: 6,
               waterAmount: 300,
               notes: '',
+              useTenancyRent: true,
             },
             initialPayment: null,
           },
         ],
+      ])
+    })
+
+    it('sends an edited rent as an override, and the default as the tenancy’s rent', async () => {
+      mountForm()
+      await fill({ billingMonth: '2026-09', electricityUnits: '75' })
+      await save()
+      await fill({ rentAmount: '14000' })
+      await save()
+      // Typing the default back counts as the default.
+      await fill({ rentAmount: '15000' })
+      await save()
+
+      const entries = wrapper!.emitted<[{ entry: { rentAmount: number } }]>('save')!
+      expect(entries.map(([submission]) => submission.entry)).toMatchObject([
+        { rentAmount: 15000, useTenancyRent: true },
+        { rentAmount: 14000, useTenancyRent: false },
+        { rentAmount: 15000, useTenancyRent: true },
       ])
     })
 
@@ -314,6 +342,77 @@ describe('RentEntryForm', () => {
       await fill({ notes: '' })
 
       expect(wrapper!.emitted('dirtyChange')).toEqual([[true], [false]])
+    })
+  })
+
+  describe('payments unavailable', () => {
+    it('disables the payment inputs and says why', async () => {
+      mountForm({ paymentsEnabled: false })
+
+      expect(wrapper!.get('#paymentAmount').attributes('disabled')).toBeDefined()
+      expect(wrapper!.get('#paidDate').attributes('disabled')).toBeDefined()
+      expect(text('payments-unavailable')).toContain("Payments can't be recorded yet.")
+    })
+
+    it('previews the bill as unpaid and saves it without a payment', async () => {
+      mountForm({ paymentsEnabled: false })
+
+      await fill({ electricityUnits: '75', waterAmount: '300' })
+      expect(text('total-due')).toBe('₹15,750')
+      expect(text('outstanding')).toBe('₹15,750')
+      expect(text('status')).toBe('Unpaid')
+
+      await save()
+
+      expect(wrapper!.emitted('save')).toEqual([
+        [
+          {
+            entry: {
+              tenantId: tenant.id,
+              billingMonth: '2026-10',
+              rentAmount: 15000,
+              electricityUnits: 75,
+              electricityRate: 6,
+              waterAmount: 300,
+              notes: '',
+              useTenancyRent: true,
+            },
+            initialPayment: null,
+          },
+        ],
+      ])
+    })
+  })
+
+  describe('while saving', () => {
+    it('disables every field, so nothing typed during the save is lost', () => {
+      mountForm({ saving: true })
+
+      expect(wrapper!.get('[data-testid="fields"]').attributes('disabled')).toBeDefined()
+      for (const id of ['billingMonth', 'rentAmount', 'electricityUnits', 'waterAmount', 'notes']) {
+        expect(wrapper!.get(`#${id}`).element.matches(':disabled')).toBe(true)
+      }
+    })
+
+    it('enables the fields again once the save has finished', async () => {
+      mountForm({ saving: true })
+      await wrapper!.setProps({ saving: false })
+
+      expect(wrapper!.get('#electricityUnits').element.matches(':disabled')).toBe(false)
+    })
+
+    it('disables Save and ignores another submit', async () => {
+      mountForm({ saving: true })
+      await fill({ electricityUnits: '75' })
+
+      await save()
+
+      const button = wrapper!.get('button[type="submit"]')
+      expect(button.text()).toBe('Saving…')
+      expect(button.attributes('disabled')).toBeDefined()
+      const cancel = wrapper!.findAll('button').find((b) => b.text() === 'Cancel')!
+      expect(cancel.attributes('disabled')).toBeDefined()
+      expect(wrapper!.emitted('save')).toBeUndefined()
     })
   })
 })

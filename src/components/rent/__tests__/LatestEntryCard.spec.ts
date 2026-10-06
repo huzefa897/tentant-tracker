@@ -12,10 +12,8 @@ function rows(wrapper: ReturnType<typeof mount>, testId: string) {
 }
 
 describe('LatestEntryCard', () => {
-  it('shows the bill’s month, charges and amounts', () => {
-    const wrapper = mount(LatestEntryCard, {
-      props: { entry: makeEntry(), totalPaid: 10000, lastPaidDate: '2026-10-03' },
-    })
+  it('shows the bill’s month, charges and figures', () => {
+    const wrapper = mount(LatestEntryCard, { props: { entry: makeEntry({ totalPaid: 10000 }) } })
 
     expect(wrapper.get('h3').text()).toBe('September 2026')
     expect(wrapper.text()).toContain('Partially paid')
@@ -26,24 +24,23 @@ describe('LatestEntryCard', () => {
     ])
     expect(rows(wrapper, 'latest-entry-amounts')).toEqual([
       ['Total due', '₹15,750'],
-      ['Total paid (last 3 Oct 2026)', '₹10,000'],
+      ['Total paid', '₹10,000'],
       ['Outstanding', '₹5,750'],
     ])
   })
 
-  it('leaves out the last paid date when nothing has been paid', () => {
+  it('shows the backend’s figures rather than recalculating them', () => {
     const wrapper = mount(LatestEntryCard, {
-      props: { entry: makeEntry(), totalPaid: 0, lastPaidDate: null },
+      props: { entry: makeEntry({ electricityAmount: 451, totalDue: 15751, outstanding: 15751 }) },
     })
 
+    expect(rows(wrapper, 'latest-entry-charges')[1]![1]).toBe('₹451')
+    expect(rows(wrapper, 'latest-entry-amounts')[0]).toEqual(['Total due', '₹15,751'])
     expect(wrapper.text()).toContain('Unpaid')
-    expect(rows(wrapper, 'latest-entry-amounts')[1]).toEqual(['Total paid', '₹0'])
   })
 
   it('emits view with the entry id', async () => {
-    const wrapper = mount(LatestEntryCard, {
-      props: { entry: makeEntry(), totalPaid: 0, lastPaidDate: null },
-    })
+    const wrapper = mount(LatestEntryCard, { props: { entry: makeEntry() } })
 
     await wrapper.get('button[aria-label="View summary for September 2026"]').trigger('click')
 

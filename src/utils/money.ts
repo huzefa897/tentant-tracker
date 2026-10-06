@@ -10,8 +10,13 @@ export function fromPaise(paise: number): number {
   return paise / 100 + 0
 }
 
-// 10, 10.5 and 10.25 pass; 10.255 doesn't. The tolerance absorbs binary noise such as
-// 0.29 * 100 = 28.999999999999996.
+// hasAtMostDecimals(10.25, 2) passes; 10.255 doesn't. The tolerance absorbs binary noise such
+// as 0.29 * 100 = 28.999999999999996.
+export function hasAtMostDecimals(amount: number, places: number): boolean {
+  const scale = 10 ** places
+  return Number.isFinite(amount) && Math.abs(amount * scale - Math.round(amount * scale)) < 1e-6
+}
+
 export function hasAtMostTwoDecimals(amount: number): boolean {
-  return Number.isFinite(amount) && Math.abs(amount * 100 - Math.round(amount * 100)) < 1e-6
+  return hasAtMostDecimals(amount, 2)
 }

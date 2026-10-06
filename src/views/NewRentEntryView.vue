@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { onBeforeRouteLeave, useRouter, type RouteLocationRaw } from 'vue-router'
-import { ArrowLeft, CircleCheck, Download, User } from '@lucide/vue'
+import { ArrowLeft, ChevronRight, CircleCheck, User } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
@@ -17,14 +17,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
-import { useRentEntryStore } from '@/stores/rentEntry'
+import { EntrySaveError, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
-import { getEntryAmounts } from '@/utils/rentCalculations'
 
 // From the route (`props: true`), so the entry always belongs to the tenant in the URL.
 const props = defineProps<{
@@ -41,52 +39,57 @@ const {
   retry: retryTenants,
 } = useRouteTenant(() => props.tenantId)
 
-// Needed for the duplicate check, even when this URL is opened directly.
-onMounted(() => rentEntryStore.initialize())
-
+const saving = ref(false)
 const savedEntry = ref<RentEntry | null>(null)
 const saveError = ref<string | null>(null)
+// The bill already saved for the month that failed (a duplicate, or a save whose response was
+// lost), so the user can open it rather than submit again.
+const existingEntry = ref<RentEntry | null>(null)
+// The rent and rate the form previewed, to point out when the saved bill used others.
+const previewedRent = ref<number | null>(null)
+const previewedRate = ref<number | null>(null)
 
-// The store writes the bill and any initial payment to storage together first, so the
-// confirmation only appears once both are saved. On failure the form stays open with its values.
-function handleSave(submission: NewRentEntrySubmission) {
+// The backend saves the bill and returns it; only then does the confirmation appear. On failure
+// the form stays open with its values.
+async function handleSave(submission: NewRentEntrySubmission) {
+  if (saving.value) return
+
+  saving.value = true
   saveError.value = null
+  existingEntry.value = null
+  previewedRent.value = submission.entry.rentAmount
+  previewedRate.value = submission.entry.electricityRate
 
   try {
-    savedEntry.value = rentEntryStore.addEntry(submission)
+    savedEntry.value = await rentEntryStore.addEntry(submission)
   } catch (error) {
-    saveError.value =
-      error instanceof Error ? error.message : 'Unable to save the entry. Please try again.'
+    saveError.value = error instanceof Error ? error.message : SAVE_ERROR_MESSAGE
+    existingEntry.value = error instanceof EntrySaveError ? error.existingEntry : null
+  } finally {
+    saving.value = false
   }
 }
 
-function retryLoad() {
-  saveError.value = null
-  rentEntryStore.initialize()
-}
-
+// What the backend saved: its charges and figures, which may differ from the preview.
 const savedSummary = computed(() => {
   const entry = savedEntry.value
   if (!entry) return null
 
   return {
+    entry,
     month: formatMonthValue(entry.billingMonth),
-    ...getEntryAmounts(entry, rentEntryStore.getTotalPaid(entry.id)),
+    rentChanged: previewedRent.value !== null && previewedRent.value !== entry.rentAmount,
+    rateChanged: previewedRate.value !== null && previewedRate.value !== entry.electricityRate,
+    charges: [
+      { label: 'Rent', value: formatINR(entry.rentAmount) },
+      {
+        label: `Electricity (${entry.electricityUnits} units × ${formatINR(entry.electricityRate)})`,
+        value: formatINR(entry.electricityAmount),
+      },
+      { label: 'Water', value: formatINR(entry.waterAmount) },
+    ],
   }
 })
-
-// The payment saved with the bill, if any: the one a receipt can be issued for.
-const initialPayment = computed(() =>
-  savedEntry.value ? (rentEntryStore.getPaymentsForEntry(savedEntry.value.id)[0] ?? null) : null,
-)
-
-// Issues (or reuses) the receipt and downloads it as a PDF. A failure shows here; the entry and
-// payment are already saved.
-const { downloadingPaymentId, error: receiptError, downloadReceipt } = useReceiptDownload()
-
-function downloadInitialReceipt() {
-  if (initialPayment.value) downloadReceipt(initialPayment.value.id)
-}
 
 // Leaving with unsaved changes (Cancel, or any in-app navigation) asks first.
 const isDirty = ref(false)
@@ -95,6 +98,9 @@ let pendingRoute: RouteLocationRaw | null = null
 let discardConfirmed = false
 
 onBeforeRouteLeave((to) => {
+  // While a save is in flight the page stays: leaving (or discarding) then would still create
+  // the bill. Signing out is the exception, since the session has already ended.
+  if (saving.value) return Boolean(to.meta.guestOnly)
   if (!isDirty.value || savedEntry.value || discardConfirmed) return true
 
   pendingRoute = to.fullPath
@@ -106,21 +112,31 @@ function goToDashboard() {
   router.push({ name: 'dashboard' })
 }
 
+function viewEntry(entryId: string) {
+  router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
+}
+
 function discardChanges() {
   discardConfirmed = true
   router.push(pendingRoute ?? { name: 'dashboard' })
 }
 
+// The pending route is kept when the dialog closes: Discard closes it before its click
+// handler runs, and the leave guard sets a new one each time the dialog opens.
 function handleDialogOpenChange(open: boolean) {
   discardDialogOpen.value = open
-  if (!open) pendingRoute = null
 }
 </script>
 
 <template>
   <AppLayout>
     <template #header-actions>
-      <Button variant="ghost" class="h-11 text-muted-foreground" @click="goToDashboard">
+      <Button
+        variant="ghost"
+        class="h-11 text-muted-foreground"
+        :disabled="saving"
+        @click="goToDashboard"
+      >
         <ArrowLeft aria-hidden="true" />
         Dashboard
       </Button>
@@ -167,54 +183,73 @@ function handleDialogOpenChange(open: boolean) {
           recorded.
         </p>
 
-        <dl class="mt-6 w-full space-y-2 rounded-xl border bg-muted/40 p-4 text-left text-sm">
+        <p
+          v-if="savedSummary.rentChanged"
+          class="mt-4 w-full rounded-lg bg-secondary px-4 py-3 text-left text-sm text-secondary-foreground"
+          data-testid="rent-changed"
+        >
+          The tenant's rent changed while you were filling in the form. The bill uses the current
+          rent, {{ formatINR(savedSummary.entry.rentAmount) }}.
+        </p>
+
+        <p
+          v-if="savedSummary.rateChanged"
+          class="mt-4 w-full rounded-lg bg-secondary px-4 py-3 text-left text-sm text-secondary-foreground"
+          data-testid="rate-changed"
+        >
+          The electricity rate changed while you were filling in the form. The bill uses the current
+          rate, {{ formatINR(savedSummary.entry.electricityRate) }} per unit.
+        </p>
+
+        <dl
+          class="mt-6 w-full space-y-2 rounded-xl border bg-muted/40 p-4 text-left text-sm"
+          data-testid="saved-summary"
+        >
           <div class="flex justify-between gap-4">
             <dt class="text-muted-foreground">Billing month</dt>
             <dd class="font-medium">{{ savedSummary.month }}</dd>
           </div>
-          <div class="flex justify-between gap-4">
+          <div
+            v-for="item in savedSummary.charges"
+            :key="item.label"
+            class="flex justify-between gap-4"
+          >
+            <dt class="text-muted-foreground">{{ item.label }}</dt>
+            <dd class="font-medium tabular-nums">{{ item.value }}</dd>
+          </div>
+          <div class="flex justify-between gap-4 border-t pt-2">
             <dt class="text-muted-foreground">Total due</dt>
-            <dd class="font-medium tabular-nums">{{ formatINR(savedSummary.totalDue) }}</dd>
+            <dd class="font-medium tabular-nums">
+              {{ formatINR(savedSummary.entry.totalDue) }}
+            </dd>
           </div>
           <div class="flex justify-between gap-4">
             <dt class="text-muted-foreground">Total paid</dt>
-            <dd class="font-medium tabular-nums">{{ formatINR(savedSummary.totalPaid) }}</dd>
+            <dd class="font-medium tabular-nums">
+              {{ formatINR(savedSummary.entry.totalPaid) }}
+            </dd>
           </div>
           <div class="flex justify-between gap-4 border-t pt-2 text-base">
             <dt class="font-semibold">Outstanding</dt>
-            <dd class="font-semibold tabular-nums">{{ formatINR(savedSummary.outstanding) }}</dd>
+            <dd class="font-semibold tabular-nums">
+              {{ formatINR(savedSummary.entry.outstanding) }}
+            </dd>
           </div>
           <div class="flex items-center justify-between gap-4">
             <dt class="text-muted-foreground">Status</dt>
-            <dd><PaymentStatusBadge :status="savedSummary.status" /></dd>
+            <dd><PaymentStatusBadge :status="savedSummary.entry.status" /></dd>
           </div>
         </dl>
 
-        <p
-          v-if="receiptError"
-          class="mt-6 w-full rounded-lg bg-destructive/10 px-4 py-3 text-left text-sm text-destructive"
-          role="alert"
-          data-testid="receipt-error"
-        >
-          {{ receiptError }}
-        </p>
-
         <Button
-          v-if="initialPayment"
           variant="outline"
           class="mt-6 h-12 w-full text-base"
-          :disabled="!!downloadingPaymentId"
-          @click="downloadInitialReceipt"
+          @click="viewEntry(savedSummary.entry.id)"
         >
-          <Download aria-hidden="true" />
-          {{ downloadingPaymentId ? 'Preparing…' : 'Download Receipt' }}
+          View Entry
+          <ChevronRight aria-hidden="true" />
         </Button>
-
-        <Button
-          class="h-12 w-full text-base"
-          :class="initialPayment ? 'mt-3' : 'mt-6'"
-          @click="goToDashboard"
-        >
+        <Button class="mt-3 h-12 w-full text-base" @click="goToDashboard">
           Back to Dashboard
         </Button>
       </section>
@@ -232,17 +267,28 @@ function handleDialogOpenChange(open: boolean) {
           </p>
         </header>
 
-        <RentEntriesLoadError
-          v-if="rentEntryStore.loadError"
-          class="mb-6"
-          :message="rentEntryStore.loadError"
-          @retry="retryLoad"
-        />
+        <div
+          v-if="existingEntry"
+          class="mb-6 flex flex-col gap-3 rounded-xl border bg-muted/40 p-4 sm:flex-row sm:items-center"
+          data-testid="existing-entry"
+        >
+          <p class="flex-1 text-sm">
+            {{ formatMonthValue(existingEntry.billingMonth) }} already has a saved entry for
+            {{ tenant.name }}.
+          </p>
+          <Button variant="outline" class="h-10 shrink-0" @click="viewEntry(existingEntry.id)">
+            Open saved entry
+            <ChevronRight aria-hidden="true" />
+          </Button>
+        </div>
 
+        <!-- Payments are disabled until the backend records them (BE Phase 5). -->
         <RentEntryForm
           :key="tenant.id"
           :tenant="tenant"
           :save-error="saveError"
+          :saving="saving"
+          :payments-enabled="false"
           @save="handleSave"
           @cancel="goToDashboard"
           @dirty-change="isDirty = $event"

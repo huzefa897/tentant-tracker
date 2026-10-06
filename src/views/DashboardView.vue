@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeftRight, LogOut, Users } from '@lucide/vue'
 
@@ -13,8 +13,6 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
 import { useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
-import type { RentEntry } from '@/types/rentEntry'
-import { sortPaymentsNewestFirst } from '@/utils/rentCalculations'
 
 const accessStore = useAccessStore()
 const tenantStore = useTenantStore()
@@ -25,42 +23,34 @@ const handleLogout = useLogout()
 onMounted(() => {
   // The full list: the selector's search box starts empty.
   tenantStore.searchTenants('')
-  rentEntryStore.initialize()
 })
 
-// null hides the count rather than showing a wrong 0 when entries didn't load.
-const selectedTenantEntryCount = computed(() => {
+// The selected tenant's newest bill and bill count, from the backend, each time a tenant is
+// selected (and when returning here with one selected).
+watch(
+  () => tenantStore.selectedTenantId,
+  (tenantId) => {
+    if (tenantId) rentEntryStore.loadSummary(tenantId)
+  },
+  { immediate: true },
+)
+
+const summary = computed(() => {
   const tenantId = tenantStore.selectedTenantId
-
-  if (!tenantId || !rentEntryStore.initialized) return null
-
-  return rentEntryStore.getEntriesForTenant(tenantId).length
+  return tenantId ? (rentEntryStore.summaries[tenantId] ?? null) : null
 })
 
-// The selected tenant's most recent bill (by billing month), with what's been paid against it.
-// null until entries load, and when the tenant has none.
-const latestBill = computed(() => {
-  const tenantId = tenantStore.selectedTenantId
+// null hides the count rather than showing a wrong 0 while loading or after a failure.
+const selectedTenantEntryCount = computed(() =>
+  summary.value?.status === 'ready' ? summary.value.count : null,
+)
 
-  if (!tenantId || !rentEntryStore.initialized) return null
+// The newest bill by billing month; null while loading, on failure and when there's none.
+const latestBill = computed(() => (summary.value?.status === 'ready' ? summary.value.latest : null))
 
-  const entry = rentEntryStore
-    .getEntriesForTenant(tenantId)
-    .reduce<RentEntry | null>(
-      (latest, item) => (!latest || item.billingMonth > latest.billingMonth ? item : latest),
-      null,
-    )
-
-  if (!entry) return null
-
-  const payments = sortPaymentsNewestFirst(rentEntryStore.getPaymentsForEntry(entry.id))
-
-  return {
-    entry,
-    totalPaid: rentEntryStore.getTotalPaid(entry.id),
-    lastPaidDate: payments[0]?.paidDate ?? null,
-  }
-})
+function retrySummary() {
+  if (tenantStore.selectedTenantId) rentEntryStore.loadSummary(tenantStore.selectedTenantId)
+}
 
 function switchProperty() {
   router.push({ name: 'property-select' })
@@ -158,10 +148,11 @@ function openHistory() {
     />
 
     <RentEntriesLoadError
-      v-if="rentEntryStore.loadError"
+      v-if="summary?.status === 'error'"
       class="mb-6"
-      :message="rentEntryStore.loadError"
-      @retry="rentEntryStore.initialize"
+      data-testid="entries-error"
+      :message="summary.error ?? ''"
+      @retry="retrySummary"
     />
 
     <!-- Keyed, so switching tenants plays the rise-in again. -->
@@ -175,12 +166,7 @@ function openHistory() {
       @view-entries="openHistory"
     >
       <template v-if="latestBill" #latest-entry>
-        <LatestEntryCard
-          :entry="latestBill.entry"
-          :total-paid="latestBill.totalPaid"
-          :last-paid-date="latestBill.lastPaidDate"
-          @view="openEntry"
-        />
+        <LatestEntryCard :entry="latestBill" @view="openEntry" />
       </template>
     </TenantDetails>
 

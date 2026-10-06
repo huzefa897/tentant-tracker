@@ -18,6 +18,8 @@ export const testTenants: Tenant[] = [
     electricityRate: 6,
     mobileNumber: '+918341413827',
     depositAmount: 90000,
+    startDate: '2025-04-01',
+    endDate: null,
   },
   {
     id: 'tenant-002',
@@ -28,6 +30,8 @@ export const testTenants: Tenant[] = [
     electricityRate: 6,
     mobileNumber: '+919876543210',
     depositAmount: 100000,
+    startDate: '2026-02-15',
+    endDate: null,
   },
   {
     id: 'tenant-003',
@@ -38,6 +42,8 @@ export const testTenants: Tenant[] = [
     electricityRate: 6,
     mobileNumber: '+919123456789',
     depositAmount: 80000,
+    startDate: '2024-06-01',
+    endDate: null,
   },
 ]
 
