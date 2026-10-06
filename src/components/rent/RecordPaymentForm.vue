@@ -131,82 +131,85 @@ const inputClass = 'h-11 bg-background'
       </div>
     </dl>
 
-    <div class="space-y-2">
-      <Label for="payment-amount">Amount received (₹)</Label>
-      <div class="relative">
-        <IndianRupee
-          class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-          aria-hidden="true"
-        />
+    <!-- Locked while saving, so what's shown is what the request (and its key) carries. -->
+    <fieldset class="min-w-0 space-y-5" :disabled="saving" data-testid="fields">
+      <div class="space-y-2">
+        <Label for="payment-amount">Amount received (₹)</Label>
+        <div class="relative">
+          <IndianRupee
+            class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <Input
+            id="payment-amount"
+            v-model.number="amount"
+            type="number"
+            inputmode="decimal"
+            min="0.01"
+            step="0.01"
+            required
+            :class="[inputClass, 'pl-9']"
+            v-bind="fieldAttrs('amount')"
+          />
+        </div>
+        <p
+          v-if="errorFor('amount')"
+          id="payment-amount-error"
+          class="text-sm text-destructive"
+          role="alert"
+        >
+          {{ errorFor('amount') }}
+        </p>
+      </div>
+
+      <div class="space-y-2">
+        <Label for="payment-paidDate">Paid date</Label>
         <Input
-          id="payment-amount"
-          v-model.number="amount"
-          type="number"
-          inputmode="decimal"
-          min="0.01"
-          step="0.01"
+          id="payment-paidDate"
+          v-model="paidDate"
+          type="date"
+          :max="today"
           required
-          :class="[inputClass, 'pl-9']"
-          v-bind="fieldAttrs('amount')"
+          :class="inputClass"
+          v-bind="fieldAttrs('paidDate')"
         />
+        <p
+          v-if="errorFor('paidDate')"
+          id="payment-paidDate-error"
+          class="text-sm text-destructive"
+          role="alert"
+        >
+          {{ errorFor('paidDate') }}
+        </p>
       </div>
-      <p
-        v-if="errorFor('amount')"
-        id="payment-amount-error"
-        class="text-sm text-destructive"
-        role="alert"
-      >
-        {{ errorFor('amount') }}
-      </p>
-    </div>
 
-    <div class="space-y-2">
-      <Label for="payment-paidDate">Paid date</Label>
-      <Input
-        id="payment-paidDate"
-        v-model="paidDate"
-        type="date"
-        :max="today"
-        required
-        :class="inputClass"
-        v-bind="fieldAttrs('paidDate')"
-      />
-      <p
-        v-if="errorFor('paidDate')"
-        id="payment-paidDate-error"
-        class="text-sm text-destructive"
-        role="alert"
-      >
-        {{ errorFor('paidDate') }}
-      </p>
-    </div>
-
-    <div class="space-y-2">
-      <div class="flex items-baseline justify-between gap-2">
-        <Label for="payment-notes">
-          Notes <span class="text-muted-foreground">(optional)</span>
-        </Label>
-        <span class="text-xs text-muted-foreground">
-          {{ notes.length }}/{{ NOTES_MAX_LENGTH }}
-        </span>
+      <div class="space-y-2">
+        <div class="flex items-baseline justify-between gap-2">
+          <Label for="payment-notes">
+            Notes <span class="text-muted-foreground">(optional)</span>
+          </Label>
+          <span class="text-xs text-muted-foreground">
+            {{ notes.length }}/{{ NOTES_MAX_LENGTH }}
+          </span>
+        </div>
+        <Textarea
+          id="payment-notes"
+          v-model="notes"
+          :maxlength="NOTES_MAX_LENGTH"
+          placeholder="e.g. Bank transfer"
+          class="bg-background"
+          v-bind="fieldAttrs('notes')"
+        />
+        <p
+          v-if="errorFor('notes')"
+          id="payment-notes-error"
+          class="text-sm text-destructive"
+          role="alert"
+        >
+          {{ errorFor('notes') }}
+        </p>
       </div>
-      <Textarea
-        id="payment-notes"
-        v-model="notes"
-        :maxlength="NOTES_MAX_LENGTH"
-        placeholder="e.g. Bank transfer"
-        class="bg-background"
-        v-bind="fieldAttrs('notes')"
-      />
-      <p
-        v-if="errorFor('notes')"
-        id="payment-notes-error"
-        class="text-sm text-destructive"
-        role="alert"
-      >
-        {{ errorFor('notes') }}
-      </p>
-    </div>
+    </fieldset>
 
     <dl class="space-y-1.5 text-sm" data-testid="payment-preview">
       <div class="flex justify-between gap-4">

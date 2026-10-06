@@ -192,10 +192,24 @@ describe('RecordPaymentForm', () => {
       expect(wrapper!.emitted('save')).toBeUndefined()
     })
 
-    it('disables Cancel while saving', () => {
-      mountForm({ saving: true })
+    it('disables the fields and Cancel while saving, so the draft matches the request', async () => {
+      mountForm()
+      await fill({ amount: '3000', notes: 'Cash' })
+      await wrapper!.setProps({ saving: true })
 
+      expect(wrapper!.get('[data-testid="fields"]').attributes('disabled')).toBeDefined()
+      for (const field of ['amount', 'paidDate', 'notes']) {
+        expect(
+          wrapper!.get<HTMLInputElement>(`#payment-${field}`).element.matches(':disabled'),
+        ).toBe(true)
+      }
       expect(wrapper!.get('button[type="button"]').attributes('disabled')).toBeDefined()
+
+      await wrapper!.setProps({ saving: false })
+      expect(wrapper!.get<HTMLInputElement>('#payment-amount').element.matches(':disabled')).toBe(
+        false,
+      )
+      expect(wrapper!.get<HTMLInputElement>('#payment-amount').element.value).toBe('3000')
     })
 
     it('shows a save error from the parent and keeps the values', async () => {
