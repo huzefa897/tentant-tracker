@@ -10,9 +10,11 @@ import { useTenantStore } from '@/stores/tenant'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService, testUser } from '@/test/mocks/authService'
 import type { AuthUser } from '@/types/auth'
+import { resetTenantService } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
+vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 
 let notify: (user: AuthUser | null) => void = () => {}
 
@@ -32,6 +34,7 @@ async function openDashboard() {
 }
 
 beforeEach(() => {
+  resetTenantService()
   resetAuthService()
   resetAccessService()
 })

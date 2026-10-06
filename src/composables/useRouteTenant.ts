@@ -1,31 +1,48 @@
-import { computed, onMounted, ref, toValue, type MaybeRefOrGetter } from 'vue'
+import { computed, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 
-import { useTenantStore } from '@/stores/tenant'
+import { tenantErrorMessage, useTenantStore } from '@/stores/tenant'
 
 export type RouteTenantStatus = 'loading' | 'error' | 'missing' | 'ready'
 
-// The tenant named in the URL, for pages that can be opened directly. A failed load shows as
-// 'error' (with retry), never as 'missing', so an outage doesn't read as "tenant not found".
+// The tenant named in the URL, for pages that can be opened directly: loaded through the detail
+// API unless already known, so it never depends on visiting the dashboard first. A failed load
+// shows as 'error' (with retry), never as 'missing', so an outage doesn't read as "not found".
 export function useRouteTenant(tenantId: MaybeRefOrGetter<string>) {
   const tenantStore = useTenantStore()
-  const loaded = ref(tenantStore.tenants.length > 0)
+  const loadState = ref<'loading' | 'done' | 'error'>('loading')
+  const error = ref<string | null>(null)
 
-  const tenant = computed(() => tenantStore.tenants.find((t) => t.id === toValue(tenantId)) ?? null)
+  // From the store, so it follows a reset (e.g. switching property) immediately.
+  const tenant = computed(() => tenantStore.getTenant(toValue(tenantId)))
 
   const status = computed<RouteTenantStatus>(() => {
-    if (tenantStore.error) return 'error'
-    if (!loaded.value) return 'loading'
-    return tenant.value ? 'ready' : 'missing'
+    if (tenant.value) return 'ready'
+    if (loadState.value === 'error') return 'error'
+    if (loadState.value === 'loading') return 'loading'
+    return 'missing'
   })
+
+  // Only the latest load (for the current id) may change state.
+  let loadSeq = 0
 
   async function load() {
-    await tenantStore.loadTenants()
-    loaded.value = tenantStore.error === null
+    const seq = ++loadSeq
+    loadState.value = 'loading'
+    error.value = null
+
+    try {
+      await tenantStore.loadTenant(toValue(tenantId))
+      if (seq === loadSeq) loadState.value = 'done'
+    } catch (err) {
+      if (seq !== loadSeq) return
+      error.value = tenantErrorMessage(err)
+      loadState.value = 'error'
+    }
   }
 
-  onMounted(() => {
-    if (!loaded.value) load()
-  })
+  // The router reuses the page when only the id changes, so load again then. Synchronously, so
+  // the new id never shows as 'missing' before its load starts.
+  watch(() => toValue(tenantId), load, { immediate: true, flush: 'sync' })
 
-  return { tenant, status, error: computed(() => tenantStore.error), retry: load }
+  return { tenant, status, error: computed(() => error.value), retry: load }
 }

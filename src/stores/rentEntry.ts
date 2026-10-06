@@ -232,7 +232,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       throw new Error('This entry no longer exists.')
     }
 
-    const tenant = useTenantStore().tenants.find((item) => item.id === entry.tenantId)
+    const tenant = useTenantStore().getTenant(entry.tenantId)
     if (!tenant) {
       throw new Error('Tenant details are unavailable, so no receipt was issued. Please try again.')
     }

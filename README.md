@@ -35,10 +35,15 @@ Signing in only proves who you are. The app then asks the backend
 it shows "Your account has no property access". Grant access in Django admin by
 adding a membership for your user (see "Granting access" in the backend README).
 
-## Mock data
+## Tenants
 
-The dashboard lists three mock tenants from `src/data/tenants.mock.ts`. Search
-by name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
+The dashboard lists the selected property's current tenancies from the
+backend. Add them in Django admin (**Tenancies**), or add three fictional ones
+for development with `create_dev_tenancies` (see the backend README). Search by
+name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
+
+Rent entries are still saved in this browser only, and entries saved before
+tenants came from the backend don't appear under them.
 
 ## Scripts
 

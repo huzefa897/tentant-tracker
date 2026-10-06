@@ -1,13 +1,17 @@
+<script lang="ts">
+// How long typing must pause before searching, so each keystroke isn't a request.
+export const SEARCH_DEBOUNCE_MS = 300
+</script>
+
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Check, ChevronDown, Search } from '@lucide/vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
+import { Check, ChevronDown, LoaderCircle, Search } from '@lucide/vue'
 import type { AcceptableValue } from 'reka-ui'
 
 import { Button } from '@/components/ui/button'
 import {
   Combobox,
   ComboboxAnchor,
-  ComboboxEmpty,
   ComboboxInput,
   ComboboxItem,
   ComboboxItemIndicator,
@@ -15,40 +19,74 @@ import {
   ComboboxTrigger,
   ComboboxViewport,
 } from '@/components/ui/combobox'
+import type { TenantListStatus } from '@/stores/tenant'
 import type { Tenant } from '@/types/tenant'
 
 const props = defineProps<{
+  // The current results, searched by the parent (the API matches name or flat number).
   tenants: Tenant[]
-  selectedTenantId: string | null
+  // Passed in rather than found in `tenants`: a search can leave it out of the results.
+  selectedTenant: Tenant | null
+  // The query `tenants` answers, which decides the empty message.
+  query: string
+  status: TenantListStatus
+  error?: string | null
+  hasMore?: boolean
+  loadingMore?: boolean
   disabled?: boolean
 }>()
 
 const emit = defineEmits<{
   select: [tenantId: string]
+  search: [query: string]
+  'load-more': []
 }>()
 
 const search = ref('')
+// The last query asked for, so the same search (or the reset) is never asked twice.
+let requested = props.query
+let timer: ReturnType<typeof setTimeout> | undefined
 
-const selectedTenant = computed(
-  () => props.tenants.find((tenant) => tenant.id === props.selectedTenantId) ?? null,
+watch(
+  () => props.query,
+  (query) => (requested = query),
 )
 
-// Match on tenant name or flat number.
-const filteredTenants = computed(() => {
-  const query = search.value.trim().toLowerCase()
+function requestSearch(query: string) {
+  if (query === requested) return
+  requested = query
+  emit('search', query)
+}
 
-  if (!query) return props.tenants
+function cancelPendingSearch() {
+  clearTimeout(timer)
+  timer = undefined
+}
 
-  return props.tenants.filter(
-    (tenant) =>
-      tenant.name.toLowerCase().includes(query) || tenant.flatNumber.toLowerCase().includes(query),
-  )
+watch(search, (value) => {
+  cancelPendingSearch()
+  timer = setTimeout(() => {
+    timer = undefined
+    requestSearch(value.trim())
+  }, SEARCH_DEBOUNCE_MS)
 })
 
-// Start each open from the full list rather than the last filter.
-function handleSelect(value: AcceptableValue) {
+onBeforeUnmount(cancelPendingSearch)
+
+// Start each open from the full list rather than the last search.
+function resetSearch() {
   search.value = ''
+  cancelPendingSearch()
+  requestSearch('')
+}
+
+function handleSelect(value: AcceptableValue) {
+  resetSearch()
   if (typeof value === 'string') emit('select', value)
+}
+
+function handleOpen(open: boolean) {
+  if (!open) resetSearch()
 }
 
 // Reka also resets the input after a selection; without this it would show the tenant id.
@@ -57,10 +95,11 @@ const emptySearch = () => ''
 
 <template>
   <Combobox
-    :model-value="selectedTenantId ?? undefined"
+    :model-value="selectedTenant?.id ?? undefined"
     :disabled="disabled"
     ignore-filter
     @update:model-value="handleSelect"
+    @update:open="handleOpen"
   >
     <ComboboxAnchor as-child>
       <ComboboxTrigger as-child>
@@ -87,11 +126,34 @@ const emptySearch = () => ''
         placeholder="Search by name or flat..."
         aria-label="Search tenants"
       />
-      <ComboboxEmpty>No tenants found.</ComboboxEmpty>
 
-      <ComboboxViewport>
+      <div
+        v-if="status === 'loading'"
+        class="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground"
+        role="status"
+        data-testid="tenants-loading"
+      >
+        <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+        Loading tenants…
+      </div>
+      <p
+        v-else-if="status === 'error'"
+        class="px-3 py-3 text-center text-sm text-destructive"
+        role="alert"
+      >
+        {{ error }}
+      </p>
+      <p
+        v-else-if="status === 'ready' && tenants.length === 0"
+        class="py-3 text-center text-sm text-muted-foreground"
+        data-testid="tenants-empty"
+      >
+        {{ query ? 'No matching tenants.' : 'No current tenants found.' }}
+      </p>
+
+      <ComboboxViewport v-if="status === 'ready' && tenants.length > 0">
         <ComboboxItem
-          v-for="tenant in filteredTenants"
+          v-for="tenant in tenants"
           :key="tenant.id"
           :value="tenant.id"
           class="py-2 pl-2"
@@ -105,6 +167,27 @@ const emptySearch = () => ''
           </ComboboxItemIndicator>
         </ComboboxItem>
       </ComboboxViewport>
+
+      <!-- Load more failed: the results shown stay, and it can be tried again. -->
+      <p
+        v-if="status === 'ready' && error"
+        class="border-t px-3 py-2 text-center text-sm text-destructive"
+        role="alert"
+      >
+        {{ error }}
+      </p>
+      <div v-if="status === 'ready' && hasMore" class="border-t p-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          class="w-full"
+          :disabled="loadingMore"
+          @click="emit('load-more')"
+        >
+          <LoaderCircle v-if="loadingMore" class="animate-spin" aria-hidden="true" />
+          {{ loadingMore ? 'Loading…' : 'Load more' }}
+        </Button>
+      </div>
     </ComboboxList>
   </Combobox>
 </template>

@@ -3,9 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { RECEIPT_PDF_ERROR_MESSAGE, useReceiptDownload } from '@/composables/useReceiptDownload'
 import { RECEIPT_SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
-import { useTenantStore } from '@/stores/tenant'
 import { makeEntry, makePayment, storeLedger } from '@/test/rentEntries'
 import { downloadReceiptPdf } from '@/utils/receiptDownload'
+import { resetAccessService } from '@/test/mocks/accessService'
+import { resetAuthService } from '@/test/mocks/authService'
+import { resetTenantService } from '@/test/mocks/tenantService'
+import { loadTestTenants } from '@/test/tenants'
+
+vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
+vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
+vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 
 vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
@@ -13,13 +20,16 @@ const download = vi.mocked(downloadReceiptPdf)
 
 async function setup() {
   storeLedger([makeEntry()], [makePayment()])
-  await useTenantStore().loadTenants()
+  await loadTestTenants()
   const store = useRentEntryStore()
   store.initialize()
   return { store, ...useReceiptDownload() }
 }
 
 beforeEach(() => {
+  resetAuthService()
+  resetAccessService()
+  resetTenantService()
   localStorage.clear()
   setActivePinia(createPinia())
   download.mockReset()
