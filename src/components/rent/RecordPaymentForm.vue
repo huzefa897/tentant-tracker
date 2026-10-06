@@ -229,7 +229,13 @@ const inputClass = 'h-11 bg-background'
       <Button type="submit" class="h-11 sm:order-last" :disabled="saving">
         {{ saving ? 'Saving…' : 'Save Payment' }}
       </Button>
-      <Button type="button" variant="secondary" class="h-11" @click="emit('cancel')">
+      <Button
+        type="button"
+        variant="secondary"
+        class="h-11"
+        :disabled="saving"
+        @click="emit('cancel')"
+      >
         Cancel
       </Button>
     </div>

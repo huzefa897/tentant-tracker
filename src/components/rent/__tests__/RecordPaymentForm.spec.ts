@@ -192,6 +192,12 @@ describe('RecordPaymentForm', () => {
       expect(wrapper!.emitted('save')).toBeUndefined()
     })
 
+    it('disables Cancel while saving', () => {
+      mountForm({ saving: true })
+
+      expect(wrapper!.get('button[type="button"]').attributes('disabled')).toBeDefined()
+    })
+
     it('shows a save error from the parent and keeps the values', async () => {
       mountForm()
       await fill({ amount: '3000' })

@@ -400,6 +400,69 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       expect(fakeEntries.payments).toHaveLength(2)
     })
 
+    it('stays on this entry, with the dialog open, while a payment save is in flight', async () => {
+      fakeEntries.entries = [entry, makeEntry({ id: 'aug', billingMonth: '2026-08' })]
+      // Recorded on the server, but the response is lost after the user tried to leave.
+      const record = recordPaymentApi.getMockImplementation()!
+      let fail!: () => void
+      recordPaymentApi.mockImplementationOnce(async (...args) => {
+        await record(...args)
+        await new Promise<void>((resolve) => (fail = resolve))
+        throw new ApiError('network')
+      })
+      await openDetails('tenant-001', 'sep')
+      await openDialog()
+      await dialog().get('#payment-amount').setValue('3000')
+      await dialog().get('form').trigger('submit')
+      await flushPromises()
+
+      expect(button('Back to Previous Entries').attributes('disabled')).toBeDefined()
+      await router.push('/tenants/tenant-001/entries/aug')
+      await router.push('/tenants/tenant-001/entries')
+      await flushPromises()
+      expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
+
+      await dialog().get('button[data-slot="dialog-close"]').trigger('click')
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+      await flushPromises()
+      expect(body.find('[role="dialog"]').exists()).toBe(true)
+
+      fail()
+      await flushPromises()
+      expect(dialog().get('[role="alert"]').text()).toBe(PAYMENT_UNCONFIRMED_MESSAGE)
+      expect(button('Back to Previous Entries').attributes('disabled')).toBeUndefined()
+
+      await dialog().get('form').trigger('submit')
+      await flushPromises()
+
+      const [first, retry] = recordPaymentApi.mock.calls
+      expect(retry![3]).toBe(first![3])
+      expect(fakeEntries.payments).toHaveLength(2)
+    })
+
+    it('keeps the key for an uncertain save after leaving the page and coming back', async () => {
+      const record = recordPaymentApi.getMockImplementation()!
+      recordPaymentApi.mockImplementationOnce(async (...args) => {
+        await record(...args)
+        throw new ApiError('network')
+      })
+      await openDetails('tenant-001', 'sep')
+      await recordPayment('1000')
+      expect(dialog().get('[role="alert"]').text()).toBe(PAYMENT_UNCONFIRMED_MESSAGE)
+
+      await router.push('/tenants/tenant-001/entries')
+      await flushPromises()
+      expect(router.currentRoute.value.name).toBe('rent-entry-history')
+      await router.push('/tenants/tenant-001/entries/sep')
+      await flushPromises()
+      await recordPayment('1000')
+
+      const [first, retry] = recordPaymentApi.mock.calls
+      expect(retry![3]).toBe(first![3])
+      expect(fakeEntries.payments).toHaveLength(2)
+      expect(view!.get('[role="status"]').text()).toBe('Payment of ₹1,000 was already recorded.')
+    })
+
     it('starts a new payment after a definite rejection', async () => {
       recordPaymentApi.mockRejectedValueOnce(
         new ApiError('invalid-request', 'Bad', null, { notes: 'Too long.' }),

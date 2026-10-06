@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
 import { ArrowLeft, CircleCheck, Plus, User } from '@lucide/vue'
 
 import PaymentHistory from '@/components/rent/PaymentHistory.vue'
@@ -65,16 +65,24 @@ const paymentDialogOpen = ref(false)
 const savingPayment = ref(false)
 const paymentError = ref<string | null>(null)
 const confirmation = ref<string | null>(null)
-// One per intended payment. Kept after an uncertain failure (no response), even if the dialog
-// is closed and reopened, so the next attempt is a retry the backend recognises and never
-// records the money twice. Replaced after a success or a definite rejection.
-let paymentKey: string | null = null
 
 function openPaymentDialog() {
   paymentError.value = null
   confirmation.value = null
   paymentDialogOpen.value = true
 }
+
+// The dialog stays open while a save is in flight, so its result (and any error) is seen.
+function setPaymentDialogOpen(open: boolean) {
+  if (!open && savingPayment.value) return
+  paymentDialogOpen.value = open
+}
+
+// While a payment save is in flight the page stays, on this entry: the save's outcome decides
+// whether its key is kept for a retry. Signing out is the exception, since the session has
+// already ended (and the store forgets the keys).
+onBeforeRouteLeave((to) => !savingPayment.value || Boolean(to.meta.guestOnly))
+onBeforeRouteUpdate((to) => !savingPayment.value || Boolean(to.meta.guestOnly))
 
 // The backend records the payment and returns the bill's new balance; only then does the
 // confirmation appear. On failure the dialog stays open with the entered values.
@@ -83,17 +91,24 @@ async function handleSavePayment(input: PaymentInput) {
 
   savingPayment.value = true
   paymentError.value = null
-  paymentKey ??= crypto.randomUUID()
+  // One per intended payment, kept by the store after an uncertain failure (no response), even
+  // if the dialog is closed or the page left, so the next attempt is a retry the backend
+  // recognises and never records the money twice. Replaced after a success or a definite
+  // rejection.
+  const entryId = input.entryId
+  const key = rentEntryStore.paymentKeyFor(entryId)
 
   try {
-    const { payment, replayed } = await rentEntryStore.addPayment(props.tenantId, input, paymentKey)
-    paymentKey = null
+    const { payment, replayed } = await rentEntryStore.addPayment(props.tenantId, input, key)
+    rentEntryStore.forgetPaymentKey(entryId)
     paymentDialogOpen.value = false
     confirmation.value = replayed
       ? `Payment of ${formatINR(payment.amount)} was already recorded.`
       : `Payment of ${formatINR(payment.amount)} recorded.`
   } catch (error) {
-    if (!(error instanceof PaymentSaveError && error.uncertain)) paymentKey = null
+    if (!(error instanceof PaymentSaveError && error.uncertain)) {
+      rentEntryStore.forgetPaymentKey(entryId)
+    }
     paymentError.value = error instanceof Error ? error.message : PAYMENT_SAVE_ERROR_MESSAGE
   } finally {
     savingPayment.value = false
@@ -108,7 +123,6 @@ watch(
     paymentDialogOpen.value = false
     paymentError.value = null
     confirmation.value = null
-    paymentKey = null
     loadPayments()
   },
   { immediate: true },
@@ -153,12 +167,19 @@ function goToHistory() {
         v-if="tenant && from !== 'dashboard'"
         variant="ghost"
         class="h-11 text-muted-foreground"
+        :disabled="savingPayment"
         @click="goToHistory"
       >
         <ArrowLeft aria-hidden="true" />
         Back to Previous Entries
       </Button>
-      <Button v-else variant="ghost" class="h-11 text-muted-foreground" @click="backToDashboard">
+      <Button
+        v-else
+        variant="ghost"
+        class="h-11 text-muted-foreground"
+        :disabled="savingPayment"
+        @click="backToDashboard"
+      >
         <ArrowLeft aria-hidden="true" />
         Back to Dashboard
       </Button>
@@ -319,7 +340,7 @@ function goToHistory() {
         </section>
       </div>
 
-      <Dialog v-model:open="paymentDialogOpen">
+      <Dialog :open="paymentDialogOpen" @update:open="setPaymentDialogOpen">
         <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Record Payment</DialogTitle>
@@ -333,7 +354,7 @@ function goToHistory() {
             :saving="savingPayment"
             :save-error="paymentError"
             @save="handleSavePayment"
-            @cancel="paymentDialogOpen = false"
+            @cancel="setPaymentDialogOpen(false)"
           />
         </DialogContent>
       </Dialog>
