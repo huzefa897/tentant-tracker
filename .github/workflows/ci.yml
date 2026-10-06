@@ -70,6 +70,13 @@ jobs:
       # --deploy fails if Pipfile.lock is out of date with Pipfile.
       - run: pipenv install --deploy
       - run: pipenv run check
+      # Production-like settings must pass Django's deployment checks (docs/security.md).
+      - run: pipenv run python manage.py check --deploy --fail-level WARNING
+        env:
+          DJANGO_SECRET_KEY: ci-deploy-check-only-not-a-real-secret-0123456789-abcdefghij
+          DJANGO_SECURE_SSL_REDIRECT: 'True'
+          DJANGO_SECURE_HSTS_SECONDS: '31536000'
+          DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS: 'True'
       # Fails if a model change has no migration.
       - run: pipenv run python manage.py makemigrations --check --dry-run
       - run: pipenv run test

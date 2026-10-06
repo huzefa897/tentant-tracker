@@ -23,11 +23,46 @@ def env_list(name: str, default: str = "") -> list[str]:
     ]
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    return default if value is None else value.strip().lower() == "true"
+
+
+def env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    return default if value is None or not value.strip() else int(value)
+
+
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
+
+# HTTPS. Off by default for plain-http development and tests; production turns them on in its
+# environment (`manage.py check --deploy` lists what's missing). Behind a proxy that ends TLS,
+# DJANGO_BEHIND_HTTPS_PROXY trusts its X-Forwarded-Proto, so redirects don't loop.
+SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT")
+if env_bool("DJANGO_BEHIND_HTTPS_PROXY"):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_HSTS_SECONDS = env_int("DJANGO_SECURE_HSTS_SECONDS", 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS")
+# HSTS preload is a decision for the whole domain and slow to undo, so it isn't made here.
+SILENCED_SYSTEM_CHECKS = ["security.W021"]
+# Admin's session and CSRF cookies only travel over HTTPS unless DEBUG (local http) is on.
+SESSION_COOKIE_SECURE = env_bool("DJANGO_SECURE_COOKIES", not DEBUG)
+CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
+CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
+# Django's defaults, stated so they aren't loosened by accident: no framing, no MIME sniffing,
+# same-origin referrers and opener.
+X_FRAME_OPTIONS = "DENY"
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+
+# Where Django admin is served. Set another path in production so it isn't at the default
+# address bots try; its logins are throttled either way (config/middleware.py).
+ADMIN_PATH = os.getenv("DJANGO_ADMIN_PATH", "admin/").strip("/") + "/"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -48,12 +83,15 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     # Before CommonMiddleware so CORS headers are added to every response.
     "corsheaders.middleware.CorsMiddleware",
+    # After CORS, so a 429 still carries CORS headers and the app can read it.
+    "config.throttling.ApiRateLimitMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "config.middleware.AdminLoginThrottleMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -104,14 +142,57 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# The app sends no email yet. Development prints it; production uses SMTP unless set.
 MAILERS = {
     "default": {
-        "BACKEND": "django.core.mail.backends.console.EmailBackend",
+        "BACKEND": os.getenv(
+            "DJANGO_EMAIL_BACKEND",
+            "django.core.mail.backends.console.EmailBackend"
+            if DEBUG
+            else "django.core.mail.backends.smtp.EmailBackend",
+        ),
     },
 }
 
-# CORS only controls which browser origins may call the API. It is not authentication.
+# CORS only controls which browser origins may call the API. It is not authentication. Only the
+# API sends CORS headers (admin is same-origin only), to the origins listed, without cookies:
+# the API uses bearer tokens.
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
+CORS_URLS_REGEX = r"^/api/.*$"
+CORS_ALLOW_CREDENTIALS = False
+
+# Throttle counts live in the cache. Production with more than one process needs a shared cache
+# (REDIS_URL, which needs the `redis` package); local memory is per process.
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+CACHES = {
+    "default": (
+        {"BACKEND": "django.core.cache.backends.redis.RedisCache", "LOCATION": REDIS_URL}
+        if REDIS_URL
+        else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
+    ),
+}
+
+# Plain console logs; the host collects them. Never log tokens, Authorization headers, OTPs,
+# passwords, request bodies or phone numbers (docs/security.md). No mail_admins handler, which
+# would email request details.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "plain": {"format": "{asctime} {levelname} {name}: {message}", "style": "{"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "plain"},
+    },
+    "root": {"handlers": ["console"], "level": os.getenv("DJANGO_LOG_LEVEL", "INFO")},
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": os.getenv("DJANGO_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+    },
+}
 
 REST_FRAMEWORK = {
     # Endpoints require a signed-in user unless they opt out explicitly.
@@ -122,7 +203,27 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "accounts.authentication.FirebaseAuthentication",
     ],
+    # Every API request is rate limited (config/throttling.py): per address before
+    # authentication (ApiRateLimitMiddleware, "address"), then per signed-in person, with writes
+    # limited more strictly. Over a limit is 429 with Retry-After.
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.UserRateThrottle",
+        "config.throttling.WriteRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        # Generous: behind a proxy without DJANGO_NUM_PROXIES, every client shares one address.
+        "address": os.getenv("DJANGO_THROTTLE_ADDRESS", "300/minute"),
+        "user": os.getenv("DJANGO_THROTTLE_USER", "300/minute"),
+        "writes": os.getenv("DJANGO_THROTTLE_WRITES", "30/minute"),
+    },
+    # How many proxies sit in front of Django, so a client's address is read from
+    # X-Forwarded-For rather than the proxy's. Unset: REMOTE_ADDR.
+    "NUM_PROXIES": env_int("DJANGO_NUM_PROXIES", 0) or None,
 }
+
+# The test runner turns throttling off (a dummy cache), so tests don't share counts; the
+# throttle tests turn it back on.
+TEST_RUNNER = "config.test_runner.TestRunner"
 
 # The Firebase project the Vue app signs in with. Its service-account credentials come
 # from GOOGLE_APPLICATION_CREDENTIALS: a path to a JSON key kept outside the repository.
