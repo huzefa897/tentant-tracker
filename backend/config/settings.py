@@ -127,6 +127,15 @@ DATABASES = {
 # Set before the first migration: swapping the user model later is painful.
 AUTH_USER_MODEL = "accounts.User"
 
+# Staff passwords for Django admin (the app itself has none: phone sign-in). Argon2 first;
+# the others only check older hashes, which are upgraded at the next login.
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+    "django.contrib.auth.hashers.ScryptPasswordHasher",
+]
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

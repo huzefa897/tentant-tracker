@@ -205,5 +205,11 @@ class SecuritySettingsTests(TestCase):
         self.assertEqual(response.headers["Cross-Origin-Opener-Policy"], "same-origin")
         self.assertEqual(response.headers["X-Frame-Options"], "DENY")
 
+    def test_staff_passwords_are_hashed_with_argon2(self):
+        user = get_user_model().objects.create_superuser(username="admin", password="pass-123")
+
+        self.assertTrue(user.password.startswith("argon2"))
+        self.assertTrue(user.check_password("pass-123"))
+
     def test_admin_is_served_at_the_configured_path(self):
         self.assertEqual(reverse("admin:index"), f"/{settings.ADMIN_PATH}")

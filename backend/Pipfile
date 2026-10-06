@@ -10,6 +10,7 @@ django-cors-headers = "*"
 psycopg = {extras = ["binary"], version = "*"}
 python-dotenv = "*"
 firebase-admin = "*"
+argon2-cffi = "*"
 
 [dev-packages]
 
