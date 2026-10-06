@@ -22,13 +22,15 @@ api.interceptors.request.use(async (config) => {
 })
 
 // DRF validation errors: {"field": ["message", ...]}. Keeps the first message of each field.
-function fieldErrorsOf(data: unknown): Record<string, string> {
+// A nested object's fields are named with a dot, e.g. "initialPayment.paidDate".
+function fieldErrorsOf(data: unknown, prefix = ''): Record<string, string> {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) return {}
 
   const errors: Record<string, string> = {}
   for (const [field, messages] of Object.entries(data)) {
     const first: unknown = Array.isArray(messages) ? messages[0] : messages
-    if (typeof first === 'string') errors[field] = first
+    if (typeof first === 'string') errors[`${prefix}${field}`] = first
+    else if (!prefix) Object.assign(errors, fieldErrorsOf(messages, `${field}.`))
   }
   return errors
 }
@@ -55,7 +57,10 @@ export function toApiError(error: unknown): ApiError {
   if (status === 401) return new ApiError('unauthorized', error.message, code)
   if (status === 403) return new ApiError('forbidden', error.message, code)
   if (status === 404) return new ApiError('not-found', error.message, code)
-  if (status === 409) return new ApiError('conflict', error.message, code)
+  if (status === 409) {
+    const details = typeof data === 'object' && data !== null && !Array.isArray(data) ? data : {}
+    return new ApiError('conflict', error.message, code, {}, details as Record<string, unknown>)
+  }
   if (status >= 500) return new ApiError('unavailable', error.message, code)
   return new ApiError('unknown', error.message, code)
 }

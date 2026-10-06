@@ -80,7 +80,24 @@ describe('toApiError', () => {
 
     expect(error.fieldErrors).toEqual({ rentAmount: 'Too many digits.', notes: 'Too long.' })
     expect(toApiError(axiosError(400, ['not an object'])).fieldErrors).toEqual({})
+    expect(
+      toApiError(axiosError(400, { initialPayment: { paidDate: ['In the future.'] } })).fieldErrors,
+    ).toEqual({ 'initialPayment.paidDate': 'In the future.' })
     expect(toApiError(axiosError(403)).fieldErrors).toEqual({})
+  })
+
+  it('keeps a 409’s body as its details', () => {
+    const error = toApiError(
+      axiosError(409, { code: 'payment_exceeds_outstanding', outstandingAmount: '2750.00' }),
+    )
+
+    expect(error).toMatchObject({ kind: 'conflict', code: 'payment_exceeds_outstanding' })
+    expect(error.details).toEqual({
+      code: 'payment_exceeds_outstanding',
+      outstandingAmount: '2750.00',
+    })
+    expect(toApiError(axiosError(409, 'Conflict')).details).toEqual({})
+    expect(toApiError(axiosError(400, { a: 'b' })).details).toEqual({})
   })
 
   it('treats no response as a network failure', () => {
