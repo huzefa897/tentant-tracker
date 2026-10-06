@@ -11,6 +11,9 @@
 # the base; for other branches, merge them locally and run the checks.
 #
 # Usage: scripts/check-merge-conflicts.sh [--base origin/main] [--self <branch>] [--strict] [--no-fetch]
+#
+# Runs on macOS's bash 3.2 as well as CI's bash 5: no mapfile, ${var^^} or empty arrays under
+# set -u, and no quotes inside comments in $(...) or <(...), which bash 3.2 misparses.
 
 set -euo pipefail
 
@@ -45,7 +48,7 @@ report() {
   if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
     echo "::${level}::${message}"
   else
-    echo "${level^^}: ${message}"
+    echo "$(tr '[:lower:]' '[:upper:]' <<<"$level"): ${message}"
   fi
 }
 
@@ -83,15 +86,17 @@ else
   candidates="$(git branch --remotes --no-merged "$base" --format='%(refname:short)')"
 fi
 
-mapfile -t others < <(
-  grep -v -x -e '' -e "$base" -e "origin/$self" -e 'origin/HEAD' -e 'origin' <<<"$candidates" |
-    while read -r ref; do
-      # Skip PRs from forks: their branch isn't on origin.
-      if git rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then echo "$ref"; fi
-    done
-)
+# Skip PRs from forks: their branches aren't on origin.
+others=''
+while read -r ref; do
+  if git rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
+    others="${others}${ref}"$'\n'
+  fi
+done < <(grep -v -x -e '' -e "$base" -e "origin/$self" -e 'origin/HEAD' -e 'origin' <<<"$candidates" || true)
 
-for ref in "${others[@]}"; do
+# Read from fd 3, so nothing in the loop can consume the list.
+while read -r ref <&3; do
+  [[ -n "$ref" ]] || continue
   echo "Checking $self against $ref"
   if files="$(check_against "$ref")"; then
     echo "  clean"
@@ -100,7 +105,7 @@ for ref in "${others[@]}"; do
     echo "$files"
     warned=true
   fi
-done
+done 3<<<"$others"
 
 if $failed || { $strict && $warned; }; then
   exit 1
