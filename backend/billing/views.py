@@ -17,7 +17,8 @@ from .services import (
     create_rent_entry,
 )
 
-YEAR_PATTERN = re.compile(r"^\d{4}$")
+# 0001–9999: Django builds a date from the year, and there is no year 0.
+YEAR_PATTERN = re.compile(r"^(?!0000)\d{4}$")
 
 
 class DuplicateBillingMonth(exceptions.APIException):

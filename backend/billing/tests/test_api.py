@@ -378,7 +378,13 @@ class ListRentEntryTests(RentEntryApiTestCase):
         )
 
     def test_rejects_malformed_filters(self):
-        for params in [{"year": "26"}, {"year": "abcd"}, {"billing_month": "2026-13"}]:
+        for params in [
+            {"year": "26"},
+            {"year": "abcd"},
+            {"year": "0000"},
+            {"billing_month": "2026-13"},
+            {"billing_month": "0000-01"},
+        ]:
             with self.subTest(params=params):
                 response = self.client.get(self.url, params)
 
