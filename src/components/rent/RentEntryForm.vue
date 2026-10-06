@@ -37,11 +37,8 @@ const props = withDefaults(
     // request, nothing typed afterwards is lost when the confirmation replaces the form, and the
     // bill can't be discarded while it's being created.
     saving?: boolean
-    // Whether a payment can be saved with the bill. Off while bills are saved on the backend
-    // and payments aren't (BE Phase 5): the inputs are disabled so nothing typed is lost.
-    paymentsEnabled?: boolean
   }>(),
-  { saveError: null, saving: false, paymentsEnabled: false },
+  { saveError: null, saving: false },
 )
 
 const emit = defineEmits<{
@@ -100,7 +97,6 @@ watch(isDirty, (dirty) => emit('dirtyChange', dirty))
 
 // Live summary. Anything that can't be calculated yet shows "—" rather than a wrong amount.
 const paidAmount = computed(() => {
-  if (!props.paymentsEnabled) return 0
   const amount = toAmount(paymentAmount.value)
   return amount !== null && amount >= 0 ? amount : null
 })
@@ -153,13 +149,11 @@ type Field = keyof RentEntryDraft | 'paymentAmount' | 'paidDate' | 'paymentNotes
 // and checked once the charges are valid.
 const entryErrors = computed(() => validateRentEntryDraft(draft.value))
 const paymentErrors = computed(() =>
-  props.paymentsEnabled
-    ? validatePaymentDraft(paymentDraft.value, {
-        today,
-        outstanding: totalDue.value ?? undefined,
-        allowZero: true,
-      })
-    : {},
+  validatePaymentDraft(paymentDraft.value, {
+    today,
+    outstanding: totalDue.value ?? undefined,
+    allowZero: true,
+  }),
 )
 
 const errors = computed<Partial<Record<Field, string>>>(() => ({
@@ -204,7 +198,7 @@ async function handleSubmit() {
   }
 
   // Validation guarantees a finite, non-negative amount; 0 means no payment.
-  const amount = props.paymentsEnabled ? (paymentAmount.value as number) : 0
+  const amount = paymentAmount.value as number
 
   emit('save', {
     entry: { ...entry.input, useTenancyRent: rentAmount.value === props.tenant.rentAmount },
@@ -386,13 +380,9 @@ const lockedClass =
       <section :class="sectionClass" aria-labelledby="payment-heading">
         <div>
           <h2 id="payment-heading" class="font-semibold">Payment</h2>
-          <p v-if="paymentsEnabled" class="text-sm text-muted-foreground">
+          <p class="text-sm text-muted-foreground">
             Record a payment received with this bill, or leave it at 0 if nothing has been paid yet.
             Later payments can be added from the entry's details.
-          </p>
-          <p v-else class="text-sm text-muted-foreground" data-testid="payments-unavailable">
-            Payments can't be recorded yet. Save the bill now; payments are coming in the next
-            update.
           </p>
         </div>
 
@@ -411,8 +401,7 @@ const lockedClass =
                 inputmode="decimal"
                 min="0"
                 step="0.01"
-                :required="paymentsEnabled"
-                :disabled="!paymentsEnabled"
+                required
                 :class="[inputClass, 'pl-9']"
                 v-bind="fieldAttrs('paymentAmount')"
               />
@@ -449,10 +438,7 @@ const lockedClass =
             >
               {{ errorFor('paidDate') }}
             </p>
-            <p
-              v-else-if="paymentsEnabled && !paymentRecorded"
-              class="text-xs text-muted-foreground"
-            >
+            <p v-else-if="!paymentRecorded" class="text-xs text-muted-foreground">
               Enter an amount paid to set the date.
             </p>
           </div>

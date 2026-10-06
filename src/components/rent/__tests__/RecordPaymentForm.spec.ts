@@ -160,35 +160,26 @@ describe('RecordPaymentForm', () => {
   })
 
   describe('saving', () => {
-    it('emits the payment with an id', async () => {
+    it('emits the payment, with trimmed notes', async () => {
       mountForm()
       await fill({ amount: '3000', paidDate: '2026-10-02', notes: ' Bank transfer ' })
       await save()
 
+      // The page adds the idempotency key: it keeps it across a retry.
       expect(wrapper!.emitted('save')).toEqual([
-        [
-          {
-            id: expect.any(String),
-            input: {
-              entryId: 'entry-1',
-              amount: 3000,
-              paidDate: '2026-10-02',
-              notes: 'Bank transfer',
-            },
-          },
-        ],
+        [{ entryId: 'entry-1', amount: 3000, paidDate: '2026-10-02', notes: 'Bank transfer' }],
       ])
     })
 
-    it('reuses the same id when saving is retried', async () => {
+    it('keeps the entered values after a failed save', async () => {
       mountForm()
-      await fill({ amount: '3000' })
+      await fill({ amount: '3000', notes: 'Cash' })
       await save()
-      await wrapper!.setProps({ saveError: 'Unable to save on this device.' })
-      await save()
+      await wrapper!.setProps({ saveError: 'Unable to save the payment.' })
 
-      const [first, second] = wrapper!.emitted<[{ id: string }]>('save')!
-      expect(first![0].id).toBe(second![0].id)
+      expect(wrapper!.get('[role="alert"]').text()).toBe('Unable to save the payment.')
+      expect((wrapper!.get('#payment-amount').element as HTMLInputElement).value).toBe('3000')
+      expect((wrapper!.get('#payment-notes').element as HTMLTextAreaElement).value).toBe('Cash')
     })
 
     it('disables Save and ignores submits while saving', async () => {

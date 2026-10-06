@@ -23,14 +23,16 @@ const props = defineProps<{
   tenant: Tenant
   entryId: string
   billingMonth: string
-  // Current outstanding for the bill. Only a preview: the store checks again when saving.
+  // Current outstanding for the bill, from the backend. Only a preview: the backend checks
+  // again, with the bill locked, when saving.
   outstanding: number
   saving?: boolean
   saveError?: string | null
 }>()
 
+// The page sends the payment with its idempotency key (it keeps the key across a retry).
 const emit = defineEmits<{
-  save: [payment: { id: string; input: PaymentInput }]
+  save: [input: PaymentInput]
   cancel: []
 }>()
 
@@ -38,10 +40,6 @@ const PLACEHOLDER = '—'
 
 // Local calendar date (not UTC), read once: the default and the "future" limit.
 const today = toDateValue(new Date())
-
-// One id per form: a retry after an uncertain save reuses it, so the store can reject a payment
-// that was in fact already recorded.
-const paymentId = crypto.randomUUID()
 
 // The draft stays local; the store only receives it once Save is clicked and it's valid.
 const amount = ref<NumberInputValue>('')
@@ -110,7 +108,7 @@ async function handleSubmit() {
     return
   }
 
-  emit('save', { id: paymentId, input: result.input })
+  emit('save', result.input)
 }
 
 const inputClass = 'h-11 bg-background'

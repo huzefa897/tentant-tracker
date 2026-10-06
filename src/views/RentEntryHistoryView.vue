@@ -11,7 +11,8 @@ import { Button } from '@/components/ui/button'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
-import { sumEntryAmounts } from '@/utils/rentCalculations'
+import type { PaymentStatus } from '@/types/rentEntry'
+import { formatPaymentStatus, sumEntryAmounts } from '@/utils/rentCalculations'
 
 // The URL is the source of truth, never the dashboard's selected tenant, so a saved link
 // always shows the tenant it names.
@@ -33,12 +34,16 @@ const {
 const PAGE_SIZE = 12
 
 const selectedYear = ref('all')
+const selectedStatus = ref<PaymentStatus | 'all'>('all')
 const page = ref(1)
 
-// The backend filters and pages; this page asks for what's shown.
+const filtered = computed(() => selectedYear.value !== 'all' || selectedStatus.value !== 'all')
+
+// The backend filters (before paging) and pages; this page asks for what's shown.
 function load() {
   rentEntryStore.loadHistory(props.tenantId, {
     year: selectedYear.value === 'all' ? null : selectedYear.value,
+    paymentStatus: selectedStatus.value === 'all' ? null : selectedStatus.value,
     page: page.value,
   })
 }
@@ -49,13 +54,15 @@ watch(
   () => props.tenantId,
   () => {
     selectedYear.value = 'all'
+    selectedStatus.value = 'all'
     page.value = 1
     load()
   },
   { immediate: true },
 )
 
-watch(selectedYear, () => {
+// Both filters change together on Clear filters: one reload, not two.
+watch([selectedYear, selectedStatus], () => {
   page.value = 1
   load()
 })
@@ -82,8 +89,19 @@ const years = computed(() => {
 // This page's bills only: a tenant's other pages aren't loaded, so this is never their balance.
 const totals = computed(() => sumEntryAmounts(entries.value))
 
+// What the empty result is for, e.g. "No paid entries in 2026."
+const noMatchesMessage = computed(() => {
+  const status =
+    selectedStatus.value === 'all'
+      ? ''
+      : `${formatPaymentStatus(selectedStatus.value).toLowerCase()} `
+  const year = selectedYear.value === 'all' ? '' : ` in ${selectedYear.value}`
+  return `No ${status}entries${year}.`
+})
+
 function clearFilters() {
   selectedYear.value = 'all'
+  selectedStatus.value = 'all'
 }
 
 function goToDashboard() {
@@ -158,7 +176,7 @@ function viewEntry(entryId: string) {
       </p>
 
       <div
-        v-else-if="history.count === 0 && selectedYear === 'all'"
+        v-else-if="history.count === 0 && !filtered"
         class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
       >
         <div
@@ -179,7 +197,11 @@ function viewEntry(entryId: string) {
       <div v-else class="space-y-6">
         <!-- Wide screens: filters and totals share a row, so the table starts higher. -->
         <div class="grid gap-6 xl:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] xl:items-end">
-          <RentEntryFilters v-model:year="selectedYear" :years="years" />
+          <RentEntryFilters
+            v-model:year="selectedYear"
+            v-model:status="selectedStatus"
+            :years="years"
+          />
           <RentEntryTotals v-if="entries.length > 0" :totals="totals" />
         </div>
 
@@ -219,7 +241,7 @@ function viewEntry(entryId: string) {
           v-else
           class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-10 text-center"
         >
-          <p class="text-muted-foreground">No entries in {{ selectedYear }}.</p>
+          <p class="text-muted-foreground">{{ noMatchesMessage }}</p>
           <Button variant="outline" class="mt-4 h-11 px-6" @click="clearFilters">
             Clear filters
           </Button>

@@ -6,9 +6,11 @@ import type { Payment } from '@/types/payment'
 import { formatINR } from '@/utils/currency'
 import { formatDateValue } from '@/utils/date'
 
-// Shown in the given order; the page sorts them.
+// Shown in the given order (the backend's: newest paid date first).
 defineProps<{
   payments: Payment[]
+  // Whether to offer receipt downloads. Off until receipts move to the backend (BE Phase 6).
+  receipts?: boolean
   // The payment whose receipt is being prepared; every button waits until it's done.
   downloadingPaymentId?: string | null
 }>()
@@ -31,7 +33,7 @@ const emit = defineEmits<{
           <th scope="col" class="py-2 pr-4 font-medium">Paid date</th>
           <th scope="col" class="py-2 pr-4 text-right font-medium">Amount</th>
           <th scope="col" class="w-full py-2 pr-4 font-medium">Notes</th>
-          <th scope="col" class="py-2 text-right font-medium">Receipt</th>
+          <th v-if="receipts" scope="col" class="py-2 text-right font-medium">Receipt</th>
         </tr>
       </thead>
       <tbody>
@@ -49,7 +51,7 @@ const emit = defineEmits<{
           <td class="py-2.5 pr-4 break-words whitespace-pre-wrap text-muted-foreground">
             {{ payment.notes.trim() ? payment.notes : '—' }}
           </td>
-          <td class="py-1.5 text-right whitespace-nowrap">
+          <td v-if="receipts" class="py-1.5 text-right whitespace-nowrap">
             <Button
               variant="outline"
               size="sm"

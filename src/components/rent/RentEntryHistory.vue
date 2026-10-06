@@ -8,8 +8,8 @@ import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
 
-// Shown in the given order, with the figures the backend calculated. Receipts come back with
-// payments (BE Phase 5).
+// Shown in the given order, with the figures the backend calculated. Receipts come back in
+// BE Phase 6.
 const props = defineProps<{
   entries: RentEntry[]
 }>()

@@ -1,24 +1,32 @@
-import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
 import { ApiError } from '@/services/apiError'
+import { paymentService } from '@/services/payment.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
-import { ENTRIES_LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
+import {
+  ENTRIES_LOAD_ERROR_MESSAGE,
+  PAYMENT_SAVE_ERROR_MESSAGE,
+  PAYMENT_UNCONFIRMED_MESSAGE,
+} from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
-import { makeEntry, openPage } from '@/test/rentEntries'
+import { makeEntry, makePayment, openPage } from '@/test/rentEntries'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService } from '@/test/mocks/authService'
-import { fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
+import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { resetTenantService, testTenants } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
+vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
 
 const getEntry = vi.mocked(rentEntryService.getEntry)
+const recordPaymentApi = vi.mocked(paymentService.recordPayment)
+const getPayments = vi.mocked(paymentService.getPayments)
 
 let view: VueWrapper | undefined
 
@@ -107,15 +115,6 @@ describe('RentEntryDetailsView', () => {
     expect(view!.text()).toContain('Unpaid')
   })
 
-  it('says payments can’t be recorded yet, with no Record Payment button', async () => {
-    await openDetails('tenant-001', 'sep')
-
-    expect(view!.get('[data-testid="payments-unavailable"]').text()).toContain(
-      "Payments can't be recorded yet.",
-    )
-    expect(view!.findAll('button').some((b) => b.text().includes('Record Payment'))).toBe(false)
-  })
-
   it('shows Fully paid for a paid bill', async () => {
     fakeEntries.entries = [
       makeEntry({ ...entry, totalPaid: 14712.5, outstanding: 0, status: 'paid' }),
@@ -123,7 +122,7 @@ describe('RentEntryDetailsView', () => {
     await openDetails('tenant-001', 'sep')
 
     expect(view!.get('[data-testid="fully-paid"]').text()).toBe('Fully paid')
-    expect(view!.find('[data-testid="payments-unavailable"]').exists()).toBe(false)
+    expect(view!.findAll('button').some((b) => b.text() === 'Record Payment')).toBe(false)
   })
 
   it('renders notes as text, and shows when the entry was created', async () => {
@@ -241,5 +240,201 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
     await flushPromises()
 
     expect(view.get('h1').text()).toBe('September 2026')
+  })
+
+  describe('payments', () => {
+    // September: ₹14,712.50 due (₹14,000 + 75 × ₹5.50 + ₹300), ₹10,000 paid, ₹4,712.50 left.
+    beforeEach(() => {
+      addFakePayment(
+        makePayment({ id: 'p-1', entryId: 'sep', amount: 10000, notes: 'Initial payment' }),
+      )
+    })
+
+    const body = new DOMWrapper(document.body)
+
+    function dialog() {
+      return body.get('[role="dialog"]')
+    }
+
+    function paymentRows() {
+      return view!
+        .findAll('[data-testid="payment-row"]')
+        .map((row) => row.findAll('td').map((cell) => cell.text()))
+    }
+
+    async function openDialog() {
+      await button('Record Payment').trigger('click')
+      await flushPromises()
+    }
+
+    async function submitPayment(amount: string, notes = '') {
+      await dialog().get('#payment-amount').setValue(amount)
+      await dialog().get('#payment-notes').setValue(notes)
+      await dialog().get('form').trigger('submit')
+      await flushPromises()
+    }
+
+    async function recordPayment(amount: string, notes = '') {
+      await openDialog()
+      await submitPayment(amount, notes)
+    }
+
+    it('lists the bill’s payments from the API, with no receipt buttons yet', async () => {
+      await openDetails('tenant-001', 'sep')
+
+      expect(getPayments).toHaveBeenCalledWith(expect.any(String), 'tenant-001', 'sep')
+      expect(paymentRows()).toEqual([['3 Oct 2026', '₹10,000', 'Initial payment']])
+      expect(view!.find('[data-testid="download-receipt"]').exists()).toBe(false)
+    })
+
+    it('shows a failed payment load as an error with Retry, never as no payments', async () => {
+      getPayments.mockRejectedValueOnce(new ApiError('network'))
+      await openDetails('tenant-001', 'sep')
+
+      expect(view!.text()).not.toContain('No payments recorded')
+      expect(view!.text()).toContain("Couldn't reach the server.")
+
+      await button('Retry').trigger('click')
+      await flushPromises()
+
+      expect(paymentRows()).toHaveLength(1)
+    })
+
+    it('shows the bill and its outstanding amount in the dialog', async () => {
+      await openDetails('tenant-001', 'sep')
+      await openDialog()
+
+      expect(dialog().get('[data-testid="payment-bill"]').text()).toContain('September 2026')
+      expect(dialog().get('[data-testid="payment-bill"]').text()).toContain('₹4,712.50')
+    })
+
+    it('records a payment through the API and shows the backend’s new balance', async () => {
+      await openDetails('tenant-001', 'sep')
+
+      await recordPayment('3000', 'Bank transfer')
+
+      expect(recordPaymentApi).toHaveBeenCalledWith(
+        expect.any(String),
+        'tenant-001',
+        { entryId: 'sep', amount: 3000, paidDate: expect.any(String), notes: 'Bank transfer' },
+        expect.stringMatching(/^[0-9a-f-]{36}$/),
+      )
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(view!.get('[role="status"]').text()).toBe('Payment of ₹3,000 recorded.')
+      expect(section('payment')).toEqual({
+        'Total due': '₹14,712.50',
+        'Total paid': '₹13,000',
+        Outstanding: '₹1,712.50',
+      })
+      expect(paymentRows().map((row) => row[1])).toEqual(['₹3,000', '₹10,000'])
+    })
+
+    it('settles the bill with the outstanding amount', async () => {
+      await openDetails('tenant-001', 'sep')
+
+      await recordPayment('4712.50')
+
+      expect(view!.get('[data-testid="fully-paid"]').text()).toBe('Fully paid')
+      expect(view!.text()).toContain('Paid')
+    })
+
+    it('uses a new key for each new payment', async () => {
+      await openDetails('tenant-001', 'sep')
+
+      await recordPayment('1000')
+      await recordPayment('1000')
+
+      const keys = recordPaymentApi.mock.calls.map((call) => call[3])
+      expect(keys).toHaveLength(2)
+      expect(keys[0]).not.toBe(keys[1])
+      expect(fakeEntries.payments).toHaveLength(3)
+    })
+
+    it('keeps the dialog and values, without confirming, when saving fails', async () => {
+      recordPaymentApi.mockRejectedValueOnce(new ApiError('forbidden'))
+      await openDetails('tenant-001', 'sep')
+
+      await recordPayment('3000', 'Cash')
+
+      expect(dialog().get('[role="alert"]').text()).toBe(
+        "You don't have permission to record payments for this property.",
+      )
+      expect(dialog().get<HTMLInputElement>('#payment-amount').element.value).toBe('3000')
+      expect(view!.find('[role="status"]').exists()).toBe(false)
+      expect(fakeEntries.payments).toHaveLength(1)
+    })
+
+    it('retries an uncertain save with the same key, so the money is recorded once', async () => {
+      // Recorded on the server, but the response was lost.
+      const record = recordPaymentApi.getMockImplementation()!
+      recordPaymentApi.mockImplementationOnce(async (...args) => {
+        await record(...args)
+        throw new ApiError('network')
+      })
+      await openDetails('tenant-001', 'sep')
+
+      await recordPayment('3000')
+      expect(dialog().get('[role="alert"]').text()).toBe(PAYMENT_UNCONFIRMED_MESSAGE)
+
+      await dialog().get('form').trigger('submit')
+      await flushPromises()
+
+      const [first, retry] = recordPaymentApi.mock.calls
+      expect(retry![3]).toBe(first![3])
+      expect(fakeEntries.payments).toHaveLength(2)
+      expect(view!.get('[role="status"]').text()).toBe('Payment of ₹3,000 was already recorded.')
+      expect(section('payment')['Total paid']).toBe('₹13,000')
+    })
+
+    it('keeps the key for an uncertain save even if the dialog is closed and reopened', async () => {
+      recordPaymentApi.mockRejectedValueOnce(new ApiError('unavailable'))
+      await openDetails('tenant-001', 'sep')
+      await recordPayment('3000')
+
+      await dialog().get('button[type="button"]').trigger('click')
+      await flushPromises()
+      await recordPayment('3000')
+
+      const [first, retry] = recordPaymentApi.mock.calls
+      expect(retry![3]).toBe(first![3])
+      expect(fakeEntries.payments).toHaveLength(2)
+    })
+
+    it('starts a new payment after a definite rejection', async () => {
+      recordPaymentApi.mockRejectedValueOnce(
+        new ApiError('invalid-request', 'Bad', null, { notes: 'Too long.' }),
+      )
+      await openDetails('tenant-001', 'sep')
+
+      await recordPayment('3000')
+      expect(dialog().get('[role="alert"]').text()).toBe('Too long.')
+      await submitPayment('3000')
+
+      const [first, second] = recordPaymentApi.mock.calls
+      expect(second![3]).not.toBe(first![3])
+    })
+
+    it('refreshes the balance when someone else paid meanwhile', async () => {
+      await openDetails('tenant-001', 'sep')
+      // Another device records ₹3,000: ₹1,712.50 is left.
+      addFakePayment(makePayment({ id: 'p-other', entryId: 'sep', amount: 3000 }))
+
+      await recordPayment('4712.50')
+
+      expect(dialog().get('[role="alert"]').text()).toBe(
+        'Amount cannot exceed the outstanding ₹1,712.50.',
+      )
+      expect(dialog().get('[data-testid="payment-bill"]').text()).toContain('₹1,712.50')
+      expect(paymentRows()).toHaveLength(2)
+    })
+
+    it('says so when the save fails for an unknown reason', async () => {
+      recordPaymentApi.mockRejectedValueOnce(new ApiError('conflict', 'x', 'something_else'))
+      await openDetails('tenant-001', 'sep')
+
+      await recordPayment('3000')
+
+      expect(dialog().get('[role="alert"]').text()).toBe(PAYMENT_SAVE_ERROR_MESSAGE)
+    })
   })
 })

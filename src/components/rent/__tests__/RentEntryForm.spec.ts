@@ -19,13 +19,9 @@ const tenant: Tenant = {
 
 let wrapper: VueWrapper | undefined
 
-// Payments on by default here, so the payment rules stay covered for when the backend takes
-// payments (BE Phase 5); the 'payments unavailable' tests turn them off.
-function mountForm(
-  props: { saveError?: string | null; saving?: boolean; paymentsEnabled?: boolean } = {},
-) {
+function mountForm(props: { saveError?: string | null; saving?: boolean } = {}) {
   wrapper = mount(RentEntryForm, {
-    props: { tenant, paymentsEnabled: true, ...props },
+    props: { tenant, ...props },
     attachTo: document.body,
   })
   return wrapper
@@ -342,45 +338,6 @@ describe('RentEntryForm', () => {
       await fill({ notes: '' })
 
       expect(wrapper!.emitted('dirtyChange')).toEqual([[true], [false]])
-    })
-  })
-
-  describe('payments unavailable', () => {
-    it('disables the payment inputs and says why', async () => {
-      mountForm({ paymentsEnabled: false })
-
-      expect(wrapper!.get('#paymentAmount').attributes('disabled')).toBeDefined()
-      expect(wrapper!.get('#paidDate').attributes('disabled')).toBeDefined()
-      expect(text('payments-unavailable')).toContain("Payments can't be recorded yet.")
-    })
-
-    it('previews the bill as unpaid and saves it without a payment', async () => {
-      mountForm({ paymentsEnabled: false })
-
-      await fill({ electricityUnits: '75', waterAmount: '300' })
-      expect(text('total-due')).toBe('₹15,750')
-      expect(text('outstanding')).toBe('₹15,750')
-      expect(text('status')).toBe('Unpaid')
-
-      await save()
-
-      expect(wrapper!.emitted('save')).toEqual([
-        [
-          {
-            entry: {
-              tenantId: tenant.id,
-              billingMonth: '2026-10',
-              rentAmount: 15000,
-              electricityUnits: 75,
-              electricityRate: 6,
-              waterAmount: 300,
-              notes: '',
-              useTenancyRent: true,
-            },
-            initialPayment: null,
-          },
-        ],
-      ])
     })
   })
 
