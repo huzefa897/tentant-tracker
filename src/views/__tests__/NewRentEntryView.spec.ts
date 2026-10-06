@@ -8,6 +8,7 @@ import router from '@/router'
 import { ApiError } from '@/services/apiError'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
+import { useAuthStore } from '@/stores/auth'
 import { SAVE_ERROR_MESSAGE } from '@/stores/rentEntry'
 import { makeEntry, openPage } from '@/test/rentEntries'
 import { resetAccessService } from '@/test/mocks/accessService'
@@ -228,6 +229,45 @@ describe('NewRentEntryView', () => {
     finish()
     await flushPromises()
     expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+  })
+
+  it('stays on the page while the save is in flight, with no way to discard it', async () => {
+    let finish!: () => void
+    createEntry.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve(makeEntry({ id: 'slow', billingMonth: '2026-09' }))
+        }),
+    )
+    await openEntryPage()
+    await fill(validEntry)
+    await app!.get('form').trigger('submit')
+
+    expect(button('Cancel').attributes('disabled')).toBeDefined()
+    expect(button('Dashboard').attributes('disabled')).toBeDefined()
+    // Any other navigation (a link, Back) is refused without offering to discard.
+    await router.push('/dashboard')
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('rent-entry-new')
+    expect(body.find('[role="alertdialog"]').exists()).toBe(false)
+
+    finish()
+    await flushPromises()
+    expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+    expect(button('Back to Dashboard').attributes('disabled')).toBeUndefined()
+  })
+
+  it('still lets signing out leave while a save is in flight', async () => {
+    createEntry.mockImplementationOnce(() => new Promise(() => {}))
+    await openEntryPage()
+    await fill(validEntry)
+    await app!.get('form').trigger('submit')
+
+    await useAuthStore().logout()
+    await router.replace({ name: 'login' })
+    await flushPromises()
+
+    expect(router.currentRoute.value.name).not.toBe('rent-entry-new')
   })
 
   it('keeps the form and its values when the save fails, with no confirmation', async () => {

@@ -33,8 +33,9 @@ const props = withDefaults(
     tenant: Tenant
     // Shown above the actions, e.g. a duplicate-entry error from the store.
     saveError?: string | null
-    // While the page saves: every field and Save are disabled, so one click sends one request
-    // and nothing typed afterwards is lost when the confirmation replaces the form.
+    // While the page saves: every field, Save and Cancel are disabled, so one click sends one
+    // request, nothing typed afterwards is lost when the confirmation replaces the form, and the
+    // bill can't be discarded while it's being created.
     saving?: boolean
     // Whether a payment can be saved with the bill. Off while bills are saved on the backend
     // and payments aren't (BE Phase 5): the inputs are disabled so nothing typed is lost.
@@ -557,7 +558,13 @@ const lockedClass =
         <Button type="submit" class="h-12 text-base sm:order-last lg:order-none" :disabled="saving">
           {{ saving ? 'Saving…' : 'Save Entry' }}
         </Button>
-        <Button type="button" variant="secondary" class="h-12 text-base" @click="emit('cancel')">
+        <Button
+          type="button"
+          variant="secondary"
+          class="h-12 text-base"
+          :disabled="saving"
+          @click="emit('cancel')"
+        >
           Cancel
         </Button>
       </div>

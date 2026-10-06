@@ -98,6 +98,9 @@ let pendingRoute: RouteLocationRaw | null = null
 let discardConfirmed = false
 
 onBeforeRouteLeave((to) => {
+  // While a save is in flight the page stays: leaving (or discarding) then would still create
+  // the bill. Signing out is the exception, since the session has already ended.
+  if (saving.value) return Boolean(to.meta.guestOnly)
   if (!isDirty.value || savedEntry.value || discardConfirmed) return true
 
   pendingRoute = to.fullPath
@@ -128,7 +131,12 @@ function handleDialogOpenChange(open: boolean) {
 <template>
   <AppLayout>
     <template #header-actions>
-      <Button variant="ghost" class="h-11 text-muted-foreground" @click="goToDashboard">
+      <Button
+        variant="ghost"
+        class="h-11 text-muted-foreground"
+        :disabled="saving"
+        @click="goToDashboard"
+      >
         <ArrowLeft aria-hidden="true" />
         Dashboard
       </Button>

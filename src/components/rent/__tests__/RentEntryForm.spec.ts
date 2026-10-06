@@ -410,6 +410,8 @@ describe('RentEntryForm', () => {
       const button = wrapper!.get('button[type="submit"]')
       expect(button.text()).toBe('Saving…')
       expect(button.attributes('disabled')).toBeDefined()
+      const cancel = wrapper!.findAll('button').find((b) => b.text() === 'Cancel')!
+      expect(cancel.attributes('disabled')).toBeDefined()
       expect(wrapper!.emitted('save')).toBeUndefined()
     })
   })
