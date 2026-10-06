@@ -7,7 +7,7 @@ from django.contrib.postgres.constraints import ExclusionConstraint
 from django.contrib.postgres.fields import DateRangeField, RangeOperators
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Func, Q, Value
 from django.utils import timezone
 
@@ -130,6 +130,15 @@ class TenancyQuerySet(models.QuerySet):
         if status == "all":
             return self
         return getattr(self, status)(today)
+
+
+TENANCY_PROPERTY_LOCKED_MESSAGE = (
+    "This tenancy has bills, so it can't move to another property: its bills belong to this one."
+)
+
+
+class TenancyHasBillsError(ValidationError):
+    """A tenancy with bills was saved with another property (two admins at once)."""
 
 
 class Tenancy(models.Model):
@@ -266,6 +275,32 @@ class Tenancy(models.Model):
         if self.end_date and self.start_date and self.end_date < self.start_date:
             raise ValidationError({"end_date": "The end date can't be before the start date."})
         self._check_no_overlap()
+        if self.moves_property_with_bills():
+            raise ValidationError({"property": TENANCY_PROPERTY_LOCKED_MESSAGE})
+
+    def save(self, *args, **kwargs):
+        # Bills are scoped through their tenancy's property, so moving a tenancy that has bills
+        # would show them to the new property's members and hide them from the old one's. The
+        # row is locked first, like create_rent_entry does, so a bill can't be added between
+        # this check and the save.
+        with transaction.atomic():
+            if self.moves_property_with_bills(lock=True):
+                raise TenancyHasBillsError({"property": TENANCY_PROPERTY_LOCKED_MESSAGE})
+            super().save(*args, **kwargs)
+
+    def moves_property_with_bills(self, *, lock=False) -> bool:
+        """Whether this saved tenancy has bills and now names another property."""
+        if self._state.adding:
+            return False
+        stored = Tenancy.objects.filter(pk=self.pk)
+        if lock:
+            stored = stored.select_for_update()
+        stored_property_id = stored.values_list("property_id", flat=True).first()
+        return (
+            stored_property_id is not None
+            and stored_property_id != self.property_id
+            and self.rent_entries.exists()
+        )
 
     def _check_no_overlap(self):
         """A flat has one occupant at a time. Both end dates are inclusive, so a tenancy can
