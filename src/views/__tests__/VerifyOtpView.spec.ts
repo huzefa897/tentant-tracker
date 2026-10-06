@@ -9,9 +9,11 @@ import { useAuthStore } from '@/stores/auth'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService, testUser } from '@/test/mocks/authService'
 import VerifyOtpView from '@/views/VerifyOtpView.vue'
+import { resetTenantService } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
+vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 
 const phoneNumber = '+918341413827'
 let view: VueWrapper | undefined
@@ -40,6 +42,7 @@ function resendButton() {
 }
 
 beforeEach(() => {
+  resetTenantService()
   resetAuthService()
   resetAccessService()
   vi.useFakeTimers()

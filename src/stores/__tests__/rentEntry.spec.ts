@@ -15,6 +15,14 @@ import type { PaymentInput } from '@/types/payment'
 import type { NewRentEntrySubmission, RentEntryInput } from '@/types/rentEntry'
 import { RENT_LEDGER_STORAGE_KEY, saveRentLedger } from '@/utils/rentLedgerStorage'
 import { toDateValue } from '@/utils/date'
+import { resetAccessService } from '@/test/mocks/accessService'
+import { resetAuthService } from '@/test/mocks/authService'
+import { fakeTenancies, resetTenantService, testTenants } from '@/test/mocks/tenantService'
+import { loadTestTenants } from '@/test/tenants'
+
+vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
+vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
+vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 
 // Total due: 15000 + 75 × 6 + 300 = 15750
 const input: RentEntryInput = {
@@ -55,6 +63,9 @@ function failWrites() {
 }
 
 beforeEach(() => {
+  resetAuthService()
+  resetAccessService()
+  resetTenantService()
   localStorage.clear()
   setActivePinia(createPinia())
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -479,7 +490,7 @@ describe('useRentEntryStore', () => {
   describe('issueReceipt', () => {
     // A ₹15,750 bill with a ₹10,000 initial payment, and the tenants loaded as on the page.
     async function storeWithPayment() {
-      await useTenantStore().loadTenants()
+      await loadTestTenants()
       const store = useRentEntryStore()
       store.initialize()
       const entry = store.addEntry(submission())
@@ -602,7 +613,7 @@ describe('useRentEntryStore', () => {
     it('returns a receipt another tab already issued', async () => {
       const { store, payment } = await storeWithPayment()
       const otherTab = refresh()
-      await useTenantStore().loadTenants()
+      await loadTestTenants()
       const issued = otherTab.issueReceipt(payment.id)
 
       expect(store.issueReceipt(payment.id)).toEqual(issued)
@@ -631,7 +642,8 @@ describe('useRentEntryStore', () => {
       const { store, payment } = await storeWithPayment()
       const receipt = store.issueReceipt(payment.id)
 
-      useTenantStore().tenants[0]!.name = 'Renamed Tenant'
+      fakeTenancies.tenants = [{ ...testTenants[0]!, name: 'Renamed Tenant' }]
+      await useTenantStore().loadTenants()
       vi.spyOn(issuerConfig, 'receiptIssuer', 'get').mockReturnValue({
         name: 'New Name',
         managerName: 'New Manager',
@@ -653,7 +665,7 @@ describe('useRentEntryStore', () => {
 
     it('rejects issuing when the tenant is unknown', async () => {
       const { store, payment } = await storeWithPayment()
-      useTenantStore().tenants = []
+      useTenantStore().reset()
 
       expect(() => store.issueReceipt(payment.id)).toThrow(/Tenant details are unavailable/)
       expect(store.receipts).toEqual([])

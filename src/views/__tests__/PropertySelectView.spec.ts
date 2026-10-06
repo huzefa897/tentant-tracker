@@ -11,9 +11,11 @@ import { authService } from '@/services/auth.service'
 import { useAccessStore } from '@/stores/access'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
+import { resetTenantService } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
+vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 
 const annex = {
   id: '6f1c2a4e-0000-4000-8000-000000000002',
@@ -36,6 +38,7 @@ async function open(path = '/properties', query: Record<string, string> = {}) {
 }
 
 beforeEach(() => {
+  resetTenantService()
   resetAuthService()
   resetAccessService()
 })

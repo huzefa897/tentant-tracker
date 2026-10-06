@@ -8,9 +8,11 @@ import { AuthError } from '@/services/authErrors'
 import { useAuthStore } from '@/stores/auth'
 import { resetAuthService } from '@/test/mocks/authService'
 import LoginView from '@/views/LoginView.vue'
+import { resetTenantService } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
+vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 
 async function mountView() {
   const pinia = createPinia()
@@ -26,6 +28,7 @@ async function submit(view: Awaited<ReturnType<typeof mountView>>, digits = '834
 }
 
 beforeEach(() => {
+  resetTenantService()
   resetAuthService()
 })
 

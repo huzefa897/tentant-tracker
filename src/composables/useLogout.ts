@@ -13,7 +13,7 @@ export function useLogout() {
   const router = useRouter()
 
   return async function logout() {
-    tenantStore.clearSelectedTenant()
+    tenantStore.reset()
     accessStore.clear()
     await authStore.logout()
     await router.replace({ name: 'login' })

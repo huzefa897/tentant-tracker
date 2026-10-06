@@ -19,7 +19,7 @@ watch(
   (userId, previousUserId) => {
     if (previousUserId && userId !== previousUserId) {
       accessStore.clear()
-      tenantStore.clearSelectedTenant()
+      tenantStore.reset()
     }
 
     if (!userId && (route.meta.requiresAuth || route.meta.requiresProperty)) {

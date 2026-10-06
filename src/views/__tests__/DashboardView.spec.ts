@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
 import { accessService } from '@/services/access.service'
+import { tenantService } from '@/services/tenant.service'
 import { authService } from '@/services/auth.service'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
@@ -14,9 +15,13 @@ import { resetAuthService, signInAs } from '@/test/mocks/authService'
 import { makeEntry, makePayment, storeLedger } from '@/test/rentEntries'
 import { RENT_LEDGER_STORAGE_KEY } from '@/utils/rentLedgerStorage'
 import DashboardView from '@/views/DashboardView.vue'
+import { SEARCH_DEBOUNCE_MS } from '@/components/tenant/TenantSelector.vue'
+import { TENANTS_LOAD_ERROR_MESSAGE } from '@/stores/tenant'
+import { resetTenantService } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
+vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 
 let view: VueWrapper | undefined
 const body = new DOMWrapper(document.body)
@@ -34,6 +39,7 @@ async function mountView(beforeOpen?: () => Promise<void>) {
 }
 
 beforeEach(() => {
+  resetTenantService()
   resetAuthService()
   resetAccessService()
   localStorage.clear()
@@ -43,13 +49,14 @@ beforeEach(() => {
 afterEach(() => {
   view?.unmount()
   view = undefined
+  vi.useRealTimers()
 })
 
 describe('DashboardView', () => {
   it('loads tenants but shows the empty state until one is selected', async () => {
     await mountView()
 
-    expect(useTenantStore().tenants).toHaveLength(3)
+    expect(useTenantStore().results).toHaveLength(3)
     expect(view!.text()).toContain('Select a tenant')
     expect(view!.find('#tenant-name').exists()).toBe(false)
   })
@@ -92,6 +99,84 @@ describe('DashboardView', () => {
 
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
     expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
+  })
+
+  describe('tenants from the backend', () => {
+    async function openSelector() {
+      await view!.get('button[aria-label="Select tenant"]').trigger('click')
+      await flushPromises()
+    }
+
+    async function typeSearch(query: string) {
+      await body.get('input[aria-label="Search tenants"]').setValue(query)
+      vi.advanceTimersByTime(SEARCH_DEBOUNCE_MS)
+      await flushPromises()
+    }
+
+    function optionNames() {
+      return body.findAll('[role="option"]').map((option) => option.get('p').text())
+    }
+
+    it('loads the selected property’s tenants', async () => {
+      await mountView()
+
+      expect(tenantService.getTenants).toHaveBeenCalledWith(testProperty.id, { search: '' })
+    })
+
+    it('searches through the API as the user types', async () => {
+      await mountView()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await openSelector()
+
+      await typeSearch('zahid')
+
+      expect(tenantService.getTenants).toHaveBeenLastCalledWith(testProperty.id, {
+        search: 'zahid',
+      })
+      expect(optionNames()).toEqual(['Shaik Zahid Ali'])
+    })
+
+    it('keeps the selected tenant’s details while searching for another', async () => {
+      await mountView()
+      useTenantStore().selectTenant('tenant-001')
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await openSelector()
+
+      await typeSearch('yusuf')
+
+      expect(optionNames()).toEqual(['Mohammed Yusuf'])
+      expect(view!.get('#tenant-name').text()).toBe('Shaik Zahid Ali')
+    })
+
+    it('starts from the full list when the dashboard opens again', async () => {
+      await mountView(async () => {
+        await useAuthStore().init()
+        await useAccessStore().load()
+        await useTenantStore().searchTenants('zahid')
+      })
+
+      expect(useTenantStore().query).toBe('')
+      expect(useTenantStore().results).toHaveLength(3)
+    })
+
+    it('shows a failed load with Retry, then the tenants', async () => {
+      vi.mocked(tenantService.getTenants).mockRejectedValueOnce(new Error('boom'))
+      await mountView()
+
+      expect(view!.get('[data-testid="tenants-error"]').text()).toContain(
+        TENANTS_LOAD_ERROR_MESSAGE,
+      )
+
+      await view!
+        .get('[data-testid="tenants-error"]')
+        .findAll('button')
+        .find((b) => b.text() === 'Retry')!
+        .trigger('click')
+      await flushPromises()
+
+      expect(view!.find('[data-testid="tenants-error"]').exists()).toBe(false)
+      expect(useTenantStore().results).toHaveLength(3)
+    })
   })
 
   describe('saved entries', () => {
@@ -275,6 +360,25 @@ describe('DashboardView', () => {
       await view!.get('button[aria-label="Switch property"]').trigger('click')
 
       await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('property-select'))
+    })
+
+    it('clears the selected tenant when the property changes', async () => {
+      vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty, annex]))
+      await mountView(async () => {
+        await useAuthStore().init()
+        await useAccessStore().load()
+        useAccessStore().selectProperty(testProperty.id)
+      })
+      useTenantStore().selectTenant('tenant-001')
+      await flushPromises()
+      expect(view!.find('#tenant-name').exists()).toBe(true)
+
+      useAccessStore().selectProperty(annex.id)
+      await flushPromises()
+
+      expect(useTenantStore().selectedTenant).toBeNull()
+      expect(view!.find('#tenant-name').exists()).toBe(false)
+      expect(view!.text()).toContain('Select a tenant')
     })
   })
 })

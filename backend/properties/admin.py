@@ -1,7 +1,15 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.db import IntegrityError
+from django.http import HttpResponseRedirect
 from django.db.models import Count, Prefetch, Q
 
-from .models import Property, PropertyMembership
+from .models import (
+    TENANCY_OVERLAP_CONSTRAINT,
+    Property,
+    PropertyMembership,
+    Tenancy,
+    business_date,
+)
 
 
 class GrantedByMixin:
@@ -94,3 +102,69 @@ class PropertyMembershipAdmin(admin.ModelAdmin):
         if not change:
             obj.granted_by = request.user
         super().save_model(request, obj, form, change)
+
+
+class TenancyStatusFilter(admin.SimpleListFilter):
+    title = "status"
+    parameter_name = "status"
+
+    def lookups(self, request, model_admin):
+        return Tenancy.Status.choices
+
+    def queryset(self, request, queryset):
+        if self.value() in Tenancy.Status.values:
+            return queryset.with_status(self.value(), business_date())
+        return queryset
+
+
+@admin.register(Tenancy)
+class TenancyAdmin(admin.ModelAdmin):
+    """Tenancies are entered here for now; the app only reads them."""
+
+    list_display = (
+        "name",
+        "property",
+        "flat_number",
+        "rent_amount",
+        "start_date",
+        "end_date",
+        "status",
+    )
+    list_filter = ("property", TenancyStatusFilter)
+    list_select_related = ("property",)
+    search_fields = ("name", "flat_number", "mobile_number")
+    readonly_fields = ("status", "id", "created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("property", "name", "flat_number", "mobile_number")}),
+        ("Rent", {"fields": ("rent_amount", "rent_due_day", "electricity_rate", "deposit_amount")}),
+        (
+            "Occupancy",
+            {
+                "fields": ("start_date", "end_date", "status"),
+                "description": "A flat can have one tenancy at a time; end dates are inclusive.",
+            },
+        ),
+        ("Technical", {"classes": ("collapse",), "fields": ("id", "created_at", "updated_at")}),
+    )
+
+    def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except IntegrityError as error:
+            # Another admin saved an overlapping tenancy for this flat between validation and
+            # saving; the database refused this one, and the save was rolled back.
+            if TENANCY_OVERLAP_CONSTRAINT not in str(error):
+                raise
+            self.message_user(
+                request,
+                "Not saved: this flat already has a tenancy in this period "
+                "(someone saved one just now). Check the flat's tenancies and try again.",
+                messages.ERROR,
+            )
+            return HttpResponseRedirect(request.get_full_path())
+
+    @admin.display(description="Status")
+    def status(self, obj):
+        if obj.pk is None or obj.start_date is None:
+            return "—"
+        return obj.get_status_display_on(business_date())

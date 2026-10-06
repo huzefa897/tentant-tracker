@@ -23,7 +23,8 @@ const router = useRouter()
 const handleLogout = useLogout()
 
 onMounted(() => {
-  tenantStore.loadTenants()
+  // The full list: the selector's search box starts empty.
+  tenantStore.searchTenants('')
   rentEntryStore.initialize()
 })
 
@@ -98,10 +99,16 @@ function openHistory() {
       <div class="flex w-full items-center gap-2 sm:w-auto">
         <div class="min-w-0 flex-1 sm:w-80">
           <TenantSelector
-            :tenants="tenantStore.tenants"
-            :selected-tenant-id="tenantStore.selectedTenantId"
-            :disabled="tenantStore.loading"
+            :tenants="tenantStore.results"
+            :selected-tenant="tenantStore.selectedTenant"
+            :query="tenantStore.query"
+            :status="tenantStore.status"
+            :error="tenantStore.error"
+            :has-more="tenantStore.hasMore"
+            :loading-more="tenantStore.loadingMore"
             @select="tenantStore.selectTenant"
+            @search="tenantStore.searchTenants"
+            @load-more="tenantStore.loadMore"
           />
         </div>
         <Button
@@ -142,9 +149,13 @@ function openHistory() {
       </p>
     </header>
 
-    <p v-if="tenantStore.error" class="mb-6 text-sm text-destructive" role="alert">
-      {{ tenantStore.error }}
-    </p>
+    <RentEntriesLoadError
+      v-if="tenantStore.status === 'error' && tenantStore.error"
+      class="mb-6"
+      data-testid="tenants-error"
+      :message="tenantStore.error"
+      @retry="tenantStore.loadTenants"
+    />
 
     <RentEntriesLoadError
       v-if="rentEntryStore.loadError"
