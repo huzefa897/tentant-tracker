@@ -10,7 +10,7 @@ import {
   toCreateRentEntryDto,
   toRentEntry,
 } from '@/services/rentEntry.service'
-import type { RentEntryInput } from '@/types/rentEntry'
+import type { NewRentEntrySubmission, RentEntryInput } from '@/types/rentEntry'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 
@@ -44,6 +44,9 @@ const input: RentEntryInput = {
   waterAmount: 300.5,
   notes: 'October charges',
 }
+
+const submission: NewRentEntrySubmission = { entry: input, initialPayment: null }
+const KEY = '2c4e6a8b-0000-4000-8000-000000000301'
 
 function page(results: unknown[], next: string | null = null, previous: string | null = null) {
   return { count: results.length, next, previous, results }
@@ -123,6 +126,15 @@ describe('toCreateRentEntryDto', () => {
       '15000.00',
     )
   })
+
+  it('sends a payment received with the bill as initialPayment', () => {
+    expect(
+      toCreateRentEntryDto(input, { amount: 10000.5, paidDate: '2026-10-05', notes: 'Cash' }),
+    ).toMatchObject({
+      initialPayment: { amount: '10000.50', paidDate: '2026-10-05', notes: 'Cash' },
+    })
+    expect(toCreateRentEntryDto(input, null)).not.toHaveProperty('initialPayment')
+  })
 })
 
 describe('parseRentEntryPage', () => {
@@ -143,12 +155,14 @@ describe('parseRentEntryPage', () => {
 })
 
 describe('rentEntryService', () => {
-  it('creates a bill under its property and tenancy', async () => {
+  it('creates a bill under its property and tenancy, with its idempotency key', async () => {
     const post = vi.spyOn(api, 'post').mockResolvedValue({ data: dto })
 
-    const entry = await rentEntryService.createEntry(PROPERTY_ID, TENANCY_ID, input)
+    const entry = await rentEntryService.createEntry(PROPERTY_ID, TENANCY_ID, submission, KEY)
 
-    expect(post).toHaveBeenCalledWith(ENTRIES_URL, toCreateRentEntryDto(input))
+    expect(post).toHaveBeenCalledWith(ENTRIES_URL, toCreateRentEntryDto(input), {
+      headers: { 'Idempotency-Key': KEY },
+    })
     expect(entry.totalDue).toBe(15750)
   })
 
@@ -158,7 +172,7 @@ describe('rentEntryService', () => {
     )
 
     await expect(
-      rentEntryService.createEntry(PROPERTY_ID, TENANCY_ID, input),
+      rentEntryService.createEntry(PROPERTY_ID, TENANCY_ID, submission, KEY),
     ).rejects.toMatchObject({ kind: 'conflict', code: 'duplicate_billing_month' })
   })
 
@@ -168,26 +182,32 @@ describe('rentEntryService', () => {
     )
 
     await expect(
-      rentEntryService.createEntry(PROPERTY_ID, TENANCY_ID, input),
+      rentEntryService.createEntry(PROPERTY_ID, TENANCY_ID, submission, KEY),
     ).rejects.toMatchObject({
       kind: 'invalid-request',
       fieldErrors: { billingMonth: 'This month is outside the tenancy’s occupancy period.' },
     })
   })
 
-  it('lists bills with the year, month and page filters', async () => {
+  it('lists bills with the year, month, status and page filters', async () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue({ data: page([dto]) })
 
     await rentEntryService.getEntries(PROPERTY_ID, TENANCY_ID)
     const result = await rentEntryService.getEntries(PROPERTY_ID, TENANCY_ID, {
       year: '2026',
       billingMonth: '2026-10',
+      paymentStatus: 'partially_paid',
       page: 2,
     })
 
     expect(get).toHaveBeenNthCalledWith(1, ENTRIES_URL, { params: {} })
     expect(get).toHaveBeenNthCalledWith(2, ENTRIES_URL, {
-      params: { year: '2026', billing_month: '2026-10', page: 2 },
+      params: {
+        year: '2026',
+        billing_month: '2026-10',
+        payment_status: 'partially_paid',
+        page: 2,
+      },
     })
     expect(result.page).toBe(2)
     expect(result.entries.map((entry) => entry.billingMonth)).toEqual(['2026-10'])
