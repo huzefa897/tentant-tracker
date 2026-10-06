@@ -162,6 +162,10 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
   let historySeq = 0
   const summarySeq = new Map<string, number>()
   const paymentsSeq = new Map<string, number>()
+  // The idempotency key of each bill's pending payment, kept here rather than on the page so
+  // leaving the page after an uncertain save (no response) never loses it: the next attempt,
+  // whenever it comes, is a retry the backend recognises.
+  const paymentKeys = new Map<string, string>()
 
   function nextSummarySeq(tenantId: string): number {
     const seq = (summarySeq.get(tenantId) ?? 0) + 1
@@ -517,6 +521,22 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     }
   }
 
+  // The key for the next attempt at a payment against this bill: the pending one if the last
+  // attempt was uncertain, otherwise a new one.
+  function paymentKeyFor(entryId: string): string {
+    let key = paymentKeys.get(entryId)
+    if (!key) {
+      key = crypto.randomUUID()
+      paymentKeys.set(entryId, key)
+    }
+    return key
+  }
+
+  // After a success or a definite rejection: the next payment is a new one.
+  function forgetPaymentKey(entryId: string) {
+    paymentKeys.delete(entryId)
+  }
+
   async function refreshAfterConflict(tenantId: string, entryId: string, gen: number) {
     if (gen !== generation) return
     await Promise.allSettled([
@@ -531,6 +551,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     historySeq++
     summarySeq.clear()
     paymentsSeq.clear()
+    paymentKeys.clear()
     entriesById.value = {}
     history.value = emptyHistory()
     summaries.value = {}
@@ -557,6 +578,8 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     addEntry,
     loadPayments,
     addPayment,
+    paymentKeyFor,
+    forgetPaymentKey,
     reset,
   }
 })

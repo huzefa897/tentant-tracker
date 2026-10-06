@@ -624,6 +624,27 @@ describe('payments', () => {
 
     expect(store.payments).toEqual({})
   })
+
+  it('keeps one pending payment key per bill until it is forgotten', async () => {
+    const store = await withProperty()
+
+    const key = store.paymentKeyFor('sep')
+    expect(key).toMatch(/^[0-9a-f-]{36}$/)
+    expect(store.paymentKeyFor('sep')).toBe(key)
+    expect(store.paymentKeyFor('oct')).not.toBe(key)
+
+    store.forgetPaymentKey('sep')
+    expect(store.paymentKeyFor('sep')).not.toBe(key)
+  })
+
+  it('forgets pending payment keys when the property changes', async () => {
+    const store = await withProperty([testProperty, annex])
+    const key = store.paymentKeyFor('sep')
+
+    useAccessStore().selectProperty(annex.id)
+
+    expect(store.paymentKeyFor('sep')).not.toBe(key)
+  })
 })
 
 describe('switching property and logging out', () => {
