@@ -33,7 +33,8 @@ const props = withDefaults(
     tenant: Tenant
     // Shown above the actions, e.g. a duplicate-entry error from the store.
     saveError?: string | null
-    // While the page saves: Save is disabled, so one click sends one request.
+    // While the page saves: every field and Save are disabled, so one click sends one request
+    // and nothing typed afterwards is lost when the confirmation replaces the form.
     saving?: boolean
     // Whether a payment can be saved with the bill. Off while bills are saved on the backend
     // and payments aren't (BE Phase 5): the inputs are disabled so nothing typed is lost.
@@ -205,7 +206,7 @@ async function handleSubmit() {
   const amount = props.paymentsEnabled ? (paymentAmount.value as number) : 0
 
   emit('save', {
-    entry: entry.input,
+    entry: { ...entry.input, useTenancyRent: rentAmount.value === props.tenant.rentAmount },
     initialPayment:
       amount > 0 ? { amount, paidDate: paidDate.value, notes: paymentNotes.value.trim() } : null,
   })
@@ -224,7 +225,7 @@ const lockedClass =
     novalidate
     @submit.prevent="handleSubmit"
   >
-    <div class="space-y-5">
+    <fieldset class="min-w-0 space-y-5" :disabled="saving" data-testid="fields">
       <section :class="sectionClass" aria-labelledby="rent-details-heading">
         <div>
           <h2 id="rent-details-heading" class="font-semibold">Rent details</h2>
@@ -507,7 +508,7 @@ const lockedClass =
           {{ errorFor('notes') }}
         </p>
       </section>
-    </div>
+    </fieldset>
 
     <div class="space-y-4 lg:sticky lg:top-6 lg:self-start">
       <section

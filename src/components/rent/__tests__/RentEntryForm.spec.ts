@@ -243,10 +243,29 @@ describe('RentEntryForm', () => {
               electricityRate: 6,
               waterAmount: 300,
               notes: '',
+              useTenancyRent: true,
             },
             initialPayment: null,
           },
         ],
+      ])
+    })
+
+    it('sends an edited rent as an override, and the default as the tenancy’s rent', async () => {
+      mountForm()
+      await fill({ billingMonth: '2026-09', electricityUnits: '75' })
+      await save()
+      await fill({ rentAmount: '14000' })
+      await save()
+      // Typing the default back counts as the default.
+      await fill({ rentAmount: '15000' })
+      await save()
+
+      const entries = wrapper!.emitted<[{ entry: { rentAmount: number } }]>('save')!
+      expect(entries.map(([submission]) => submission.entry)).toMatchObject([
+        { rentAmount: 15000, useTenancyRent: true },
+        { rentAmount: 14000, useTenancyRent: false },
+        { rentAmount: 15000, useTenancyRent: true },
       ])
     })
 
@@ -356,6 +375,7 @@ describe('RentEntryForm', () => {
               electricityRate: 6,
               waterAmount: 300,
               notes: '',
+              useTenancyRent: true,
             },
             initialPayment: null,
           },
@@ -365,6 +385,22 @@ describe('RentEntryForm', () => {
   })
 
   describe('while saving', () => {
+    it('disables every field, so nothing typed during the save is lost', () => {
+      mountForm({ saving: true })
+
+      expect(wrapper!.get('[data-testid="fields"]').attributes('disabled')).toBeDefined()
+      for (const id of ['billingMonth', 'rentAmount', 'electricityUnits', 'waterAmount', 'notes']) {
+        expect(wrapper!.get(`#${id}`).element.matches(':disabled')).toBe(true)
+      }
+    })
+
+    it('enables the fields again once the save has finished', async () => {
+      mountForm({ saving: true })
+      await wrapper!.setProps({ saving: false })
+
+      expect(wrapper!.get('#electricityUnits').element.matches(':disabled')).toBe(false)
+    })
+
     it('disables Save and ignores another submit', async () => {
       mountForm({ saving: true })
       await fill({ electricityUnits: '75' })
