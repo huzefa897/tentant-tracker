@@ -9,7 +9,7 @@
 - The API (`/api/v1/properties/{id}/tenancies/{id}/entries/`, list/create, and `.../{entryId}/`) is scoped through `properties_for_user` then the tenancy, so others' bills 404; there's no update or delete.
 - Creation goes through `billing/services.py` `create_rent_entry`, which locks the tenancy, rechecks that the month overlaps the occupancy (no proration), and assigns the rate, tenancy and creator itself. The rent is optional and defaults to the tenancy's. The serializer refuses unknown, server-assigned and payment fields rather than ignoring them.
 - A duplicate month is 409 `duplicate_billing_month`, including when the unique constraint catches a race (only that constraint, matched by name, outside the failed transaction).
-- Lists are newest month first, 12 per page, with `?year=` and `?billing_month=`.
+- Lists are newest month first, 12 per page, with `?year=` (0001–9999) and `?billing_month=`; a malformed filter is a 400, never a 500.
 - Concurrency tests (`billing/tests/test_concurrency.py`) need PostgreSQL.
 
 ## App: service and store
@@ -22,7 +22,7 @@
 
 `addEntry` adds a bill to state only after the backend returns it; on any failure nothing changes, the form keeps its values and no confirmation shows. It throws `EntrySaveError` with the message to show and, when that month now has a bill (a 409 duplicate, or a timeout/5xx after which it checks with `?billing_month=`), that `existingEntry`, so `NewRentEntryView` links to it instead of inviting another submission.
 
-- The form (fields and Save) is disabled while in flight, so nothing typed during a save is lost.
+- The form (fields, Save and Cancel) is disabled while in flight, so nothing typed during a save is lost. The page also refuses to leave until the save settles (no discard dialog; signing out still leaves), so a bill can't be created after the user chose to discard it.
 - An unedited rent is sent as no rent (`useTenancyRent`), so the backend charges the tenancy's rent as it is now rather than the one the form loaded; an edited rent is an override.
 - The confirmation shows the **returned** charges and figures, and says so when the rent or rate differed from the preview.
 

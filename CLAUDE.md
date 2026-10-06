@@ -29,15 +29,16 @@ Before calling backend work done: `pipenv run check && pipenv run python manage.
 
 The details of each part of the app live in `docs/`, one file per area. **Before working on an area, read its doc** (and every doc your change touches), and keep it up to date in the same change. Add new detail there, not here.
 
-| Doc                                                                    | Covers                                                                                                                                                               |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [docs/backend.md](docs/backend.md)                                     | Backend setup and conventions: env, apps, camelCase API, auth by default, `properties_for_user` scoping, roles; how the app calls it (`services/api.ts`, `ApiError`) |
-| [docs/auth-and-access.md](docs/auth-and-access.md)                     | Firebase phone sign-in, invite-only people, property memberships and selection, `/me`, route guards, logout                                                          |
-| [docs/tenants.md](docs/tenants.md)                                     | Tenancies (model, overlap and property rules, API), the tenant store and selector, the dashboard                                                                     |
-| [docs/rent-entries.md](docs/rent-entries.md)                           | Bills: model, calculations, create/list API, the store, saving, history and details pages, the old local ledger                                                      |
-| [docs/payments-and-receipts.md](docs/payments-and-receipts.md)         | Payments and receipts (paused until BE Phase 5) and the modules kept for them                                                                                        |
-| [docs/testing.md](docs/testing.md)                                     | The shared service fakes and fixtures for tests                                                                                                                      |
-| [docs/google-sheets-integration.md](docs/google-sheets-integration.md) | The owners' Google Sheet and its Apps Script (`google-api/`): layout, data problems, what the app needs from it; read before any Sheets work                         |
+| Doc                                                                    | Covers                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [docs/backend.md](docs/backend.md)                                     | Backend setup and conventions: env, apps, camelCase API, auth by default, `properties_for_user` scoping, roles; how the app calls it (`services/api.ts`, `ApiError`)                                                                   |
+| [docs/auth-and-access.md](docs/auth-and-access.md)                     | Firebase phone sign-in, invite-only people, property memberships and selection, `/me`, route guards, logout                                                                                                                            |
+| [docs/tenants.md](docs/tenants.md)                                     | Tenancies (model, overlap and property rules, API), the tenant store and selector, the dashboard                                                                                                                                       |
+| [docs/rent-entries.md](docs/rent-entries.md)                           | Bills: model, calculations, create/list API, the store, saving, history and details pages, the old local ledger                                                                                                                        |
+| [docs/payments-and-receipts.md](docs/payments-and-receipts.md)         | Payments and receipts (paused until BE Phase 5) and the modules kept for them                                                                                                                                                          |
+| [docs/security.md](docs/security.md)                                   | Security rules and the hardening checklist (admin, access, RLS, tokens, secrets, logs, SQL, input, XSS, uploads, rate limits, CORS, production settings, dependencies); **read it before any backend, auth, API or dependency change** |
+| [docs/testing.md](docs/testing.md)                                     | The shared service fakes and fixtures for tests                                                                                                                                                                                        |
+| [docs/google-sheets-integration.md](docs/google-sheets-integration.md) | The owners' Google Sheet and its Apps Script (`google-api/`): layout, data problems, what the app needs from it; read before any Sheets work                                                                                           |
 
 ## Architecture
 
@@ -72,6 +73,7 @@ Skills are task guides in `.claude/skills/<name>/SKILL.md`. Claude Code loads th
   - Writes validate, then update state only after the backend confirms; a failed load is an error, never an empty list or a zero balance. The backend calculates and validates money; it never trusts totals, rates or ids from the request.
   - Money is `Decimal` in Django and summed and compared in paise in the app; saved figures come from the backend; receipts are snapshots, never re-derived.
   - Nothing private committed: tenant data, phone numbers, emails, sheet or script IDs.
+  - Security: the rules in [docs/security.md](docs/security.md) hold (server-side access, no stored tokens, no secrets in `VITE_*` or logs, ORM only, no `v-html` with user data).
 - **UI design** — `impeccable`, installed per user (`~/.claude/skills/impeccable/`), not in this repo: designing, critiquing or polishing screens, layout, typography, colour, accessibility. Use it for UI work when it's available.
 
 ## Conventions
