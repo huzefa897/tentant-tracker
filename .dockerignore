@@ -1,0 +1,16 @@
+# For deploy/web/Dockerfile (context: the repository root). Only what the Vue build needs, so
+# .env.local, backend secrets, dumps and data exports never reach an image.
+*
+!package.json
+!package-lock.json
+!index.html
+!public/
+!src/
+!env.d.ts
+!vite.config.ts
+!vitest.config.ts
+!eslint.config.ts
+!components.json
+!tsconfig*.json
+!deploy/web/Caddyfile
+**/.DS_Store

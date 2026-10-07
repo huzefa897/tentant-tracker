@@ -1,0 +1,43 @@
+# The site: HTTPS (Caddy gets and renews the certificate for SITE_ADDRESS), the Vue app, and
+# Django behind it on the same origin, so the app needs no CORS and no VITE_API_BASE_URL.
+# SITE_ADDRESS is the domain (e.g. rent.example.com); `http://localhost:8080` for a local trial.
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Django: the API, admin (at DJANGO_ADMIN_PATH) and admin's static files. Caddy passes the
+	# client's address in X-Forwarded-For (replacing any the client sent) and the scheme in
+	# X-Forwarded-Proto: Django trusts them with DJANGO_NUM_PROXIES=1 and DJANGO_BEHIND_HTTPS_PROXY.
+	@django path /api/* /static/* /{$DJANGO_ADMIN_PATH}*
+	handle @django {
+		reverse_proxy backend:8000
+	}
+
+	# The Vue app. Its routes (/tenants/…) aren't files, so they get index.html and the router
+	# takes over; real files are served as they are.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+
+		# Built assets have content hashes in their names: cache them for good. Everything else
+		# (index.html above all) is checked on every visit, so a release shows up at once.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@notAssets not path /assets/*
+		header @notAssets Cache-Control "no-cache"
+
+		header {
+			Strict-Transport-Security "max-age=31536000"
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "same-origin"
+			X-Frame-Options "DENY"
+			# Report-only until phone sign-in has been checked against it in the browser (no
+			# violations in the console); then rename the header to Content-Security-Policy
+			# (docs/deployment.md).
+			Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' https://www.google.com https://www.gstatic.com https://apis.google.com; frame-src https://www.google.com https://{$FIREBASE_AUTH_DOMAIN}; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+		}
+	}
+
+	header -Server
+}
