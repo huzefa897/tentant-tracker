@@ -112,8 +112,14 @@ class _Importer:
         tenancies = self.lock_tenancies()
         if tenancies is None:
             return
-        for tenant, bill in self.ledger.bills():
-            self.import_bill(tenancies[tenant.source_id], bill)
+        # Each tenancy's months oldest first, whatever order the file lists them in: a receipt's
+        # previous_month_outstanding reads last month's bill and payments, so they must be here.
+        bills = sorted(
+            ((tenancies[tenant.source_id], bill) for tenant, bill in self.ledger.bills()),
+            key=lambda pair: (pair[0].pk, pair[1].billing_month),
+        )
+        for tenancy, bill in bills:
+            self.import_bill(tenancy, bill)
         if not self.report.rejected:
             self.reconcile()
 
@@ -268,7 +274,6 @@ class _Importer:
             self.reject(f"{label}: {problem}")
             return
         created = Receipt.objects.create(
-            id=uuid.uuid4(),
             property=prop,
             # The original reference, never a new one: it's the receipt already handed out.
             reference=receipt.reference,

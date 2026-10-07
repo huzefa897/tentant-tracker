@@ -198,6 +198,27 @@ class ImportLedgerTests(TestCase):
         self.assertEqual(receipt.issuer_name, "Saleem Towers")
         self.assertEqual(receipt.property, self.property)
 
+    def part_paid_august(self):
+        data = ledger_data()
+        data["tenants"][0]["bills"][0]["payments"][0]["amount"] = "10000.00"
+        return data
+
+    def test_snapshots_what_last_month_still_owed(self):
+        self.run_import(self.part_paid_august())
+
+        receipt = Receipt.objects.get(reference="RCP-202-202609")
+        # ₹15,750 billed for August, ₹10,000 paid by 20 September.
+        self.assertEqual(receipt.previous_month_outstanding, Decimal("5750.00"))
+
+    def test_snapshots_last_month_whatever_order_the_file_lists_the_bills_in(self):
+        data = self.part_paid_august()
+        data["tenants"][0]["bills"].reverse()
+
+        self.run_import(data)
+
+        receipt = Receipt.objects.get(reference="RCP-202-202609")
+        self.assertEqual(receipt.previous_month_outstanding, Decimal("5750.00"))
+
     def test_reconciles_the_source_with_the_database(self):
         report = self.run_import()
 
