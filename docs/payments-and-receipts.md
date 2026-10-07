@@ -24,6 +24,24 @@ Pages own the idempotency key: `NewRentEntryView` one per bill; for payments the
 
 ## Receipts
 
-**Paused until BE Phase 6.** `PaymentHistory` shows no receipt buttons (its `receipts` prop is off), and the receipt modules (`types/receipt.ts`, `utils/receipt*.ts`, `config/receiptIssuer.ts`) are kept, tested but unused, for Phase 6 to reconnect with backend payments. A receipt is a snapshot of one payment, never re-derived, downloaded as a PDF with jsPDF and Poppins; issuer details come from `VITE_RECEIPT_ISSUER_*` in `.env.local`.
+A receipt confirms **one payment**: a ₹3,000 payment against a ₹15,750 bill gets a ₹3,000 receipt, which also shows the bill as it stood right after that payment, so it never implies the bill is paid.
+
+### Backend
+
+`billing.Receipt` is a snapshot, in explicit columns, of everything printed on the receipt: the issuer (the property's name, address and contact number, and the issuing person's name as "received by"), the tenancy (name, flat, mobile, deposit, rent due day), the bill's charges and electricity amount, its total due, paid **up to and including this payment** (payments recorded before it, plus it) and outstanding after it, what the previous month's bill still owed when it was issued, and the payment's amount, date and notes. It's never rebuilt from today's records: later payments or changed tenancy or property details never change it.
+
+- **One per payment**, enforced by the database (`payment` is a unique one-to-one, `PROTECT`ed). The reference is `RCT-<receipt id>`, set once when it's created: unique without a counter that could collide.
+- **Every receipt is created by `billing/services.py` `issue_payment_receipt`**, inside a transaction that locks the payment (`select_for_update`), rechecks access (`ISSUE_RECEIPTS`), returns the payment's existing receipt **before** validating today's details (so an issued receipt reopens even if the address was cleared since), then requires the property's name and address and the tenant's name and flat (400 `receipt_configuration_incomplete`, its `detail` saying what to set) and copies the snapshot. The unique column is the last guard: only that constraint (`billing_receipt_payment_id_key`, matched by name) is mapped, outside the failed transaction. A failure saves nothing and leaves the payment as it was.
+- API: `.../payments/{paymentId}/receipt/`. POST (empty body) issues it (201) or returns the one already issued (200), so no idempotency key is needed; GET returns it, or 404 if none was issued (it never issues one). The property, tenancy, bill and payment are each looked up only within the one before (`ScopedLookupMixin` in `billing/views.py`, shared with the bill and payment views), so another bill's payment is 404.
+- Payments carry `receipt: {id, reference}` or `null`, loaded in the list's own query.
+- No update or delete; receipts are view-only in admin (searchable by reference, tenant and flat). That isn't database-level immutability: keep receipt writes in the service. Corrections and voiding need their own workflow.
+
+### App
+
+`services/receipt.service.ts` (`issueReceipt`, `getReceipt`; validated `ReceiptDto`s mapped to `types/receipt.ts` `PaymentReceipt`, money as numbers). On the details page `PaymentHistory` (its `receipts` prop on) offers **Issue receipt** for a payment without one and **Download receipt** once it has one. Either way `stores/rentEntry.ts` `getReceipt(tenantId, payment)` gets the snapshot (GET when the payment has a receipt, otherwise POST; issued receipts are cached by payment id, since they never change) and marks the payment as having one, then the page downloads it as a PDF (`utils/receiptDownload.ts`: jsPDF and Poppins, laid out by `utils/receiptPdf.ts` from `utils/receiptContent.ts`, which reads only the snapshot and recalculates nothing).
+
+- Every receipt button is disabled while one is being prepared ("Preparing…").
+- A failure throws `ReceiptError` and never touches the payment. A lost response is `uncertain`: trying again is safe, since the backend returns the receipt it already issued. A refusal shows the backend's reason (e.g. the property's address isn't set). If only the PDF fails, the page says the receipt is issued and to try again.
+- Nothing claims the file was saved: the browser decides that.
 
 The owners' current receipts come from the Google Sheet's Apps Script ([google-sheets-integration.md](google-sheets-integration.md)).
