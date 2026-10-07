@@ -1,6 +1,6 @@
 import hashlib
 import json
-import uuid
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -20,6 +20,9 @@ PAYMENT_KEY_CONSTRAINT = "unique_payment_idempotency_key"
 CREATION_KEY_CONSTRAINT = "unique_rent_entry_creation_key"
 # The unique column behind Receipt.payment (PostgreSQL's name for it).
 RECEIPT_PAYMENT_CONSTRAINT = "billing_receipt_payment_id_key"
+RECEIPT_REFERENCE_CONSTRAINT = "billing_receipt_reference_key"
+# Retries when another bill's receipt took the same reference at the same moment.
+REFERENCE_ATTEMPTS = 3
 
 
 class DuplicateBillingMonthError(Exception):
@@ -327,6 +330,21 @@ def _previous_month(billing_month):
     return billing_month.replace(month=billing_month.month - 1)
 
 
+def _next_reference(tenancy, entry) -> str:
+    """The bill's first receipt gets the plain reference; later ones _2, _3… Callers hold the
+    bill's lock, so a bill's receipts are numbered one at a time."""
+    base = receipt_reference(tenancy.name, tenancy.flat_number, entry.billing_month)
+    pattern = re.compile(rf"^{re.escape(base)}(?:_(\d+))?$")
+    taken = [
+        pattern.match(reference)
+        for reference in Receipt.objects.filter(reference__startswith=base).values_list(
+            "reference", flat=True
+        )
+    ]
+    numbers = [int(m.group(1) or 1) for m in taken if m]
+    return base if not numbers else f"{base}_{max(numbers) + 1}"
+
+
 def _receipt_problem(payment: Payment) -> str | None:
     """What stops a new receipt from being issued, or None."""
     entry = payment.entry
@@ -348,91 +366,100 @@ def issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
 
     Everything printed on the receipt is copied from the stored records now, so later payments
     or changed details never change it. The payment row is locked, so simultaneous requests
-    issue one receipt; its unique column is the last guard.
+    issue one receipt; its unique column is the last guard. The bill is locked too, so its
+    receipts are numbered one at a time.
     """
-    try:
-        with transaction.atomic():
-            try:
-                payment = (
-                    Payment.objects.select_for_update(of=("self",))
-                    .select_related("entry__tenancy__property")
-                    .get(pk=payment_id)
-                )
-            except Payment.DoesNotExist:
-                raise PaymentNotFoundError() from None
-
-            # Checked again inside the lock: the view's lookup happened before it.
-            _check_can_issue_receipts(actor, payment.entry.tenancy.property_id)
-
-            # Before validating today's details: an issued receipt reopens even if, say, the
-            # property's address has since been cleared.
-            existing = Receipt.objects.filter(payment=payment).first()
-            if existing is not None:
-                return IssuedReceipt(receipt=existing, created=False)
-
-            problem = _receipt_problem(payment)
-            if problem is not None:
-                raise ReceiptConfigurationIncompleteError(problem)
-
-            entry = payment.entry
-            tenancy = entry.tenancy
-            prop = tenancy.property
-
-            # The bill as it stood right after this payment: payments are never edited, and
-            # later ones were recorded after it, so this never changes.
-            paid_through = to_paise(
-                entry.payments.filter(Q(created_at__lt=payment.created_at) | Q(pk=payment.pk))
-                .aggregate(total=Sum("amount"))["total"]
-                or ZERO
+    for attempt in range(REFERENCE_ATTEMPTS):
+        try:
+            return _issue_payment_receipt(payment_id=payment_id, actor=actor)
+        except IntegrityError as error:
+            # The locks make these unlikely; the failed transaction has been rolled back, so
+            # anything is looked up outside it.
+            constraint = _violated_constraint(error)
+            if constraint == RECEIPT_REFERENCE_CONSTRAINT and attempt + 1 < REFERENCE_ATTEMPTS:
+                # Another bill (same name, flat and month) took the reference: number again.
+                continue
+            if constraint != RECEIPT_PAYMENT_CONSTRAINT:
+                raise
+            existing = Receipt.objects.select_related("payment__entry__tenancy").get(
+                payment_id=payment_id
             )
-            amounts = entry_amounts(entry, total_paid=paid_through)
+            _check_can_issue_receipts(actor, existing.payment.entry.tenancy.property_id)
+            return IssuedReceipt(receipt=existing, created=False)
+    raise AssertionError("unreachable")
 
-            previous = RentEntry.objects.filter(
-                tenancy=tenancy, billing_month=_previous_month(entry.billing_month)
-            ).first()
-            previous_outstanding = (
-                max(entry_amounts(previous).outstanding_amount, ZERO) if previous else ZERO
-            )
 
-            receipt_id = uuid.uuid4()
-            receipt = Receipt.objects.create(
-                id=receipt_id,
-                payment=payment,
-                reference=receipt_reference(receipt_id),
-                issued_by=actor,
-                issued_at=timezone.now(),
-                issued_date=business_date(),
-                issuer_name=prop.name.strip(),
-                issuer_address=prop.address.strip(),
-                issuer_contact_number=prop.contact_number,
-                received_by_name=actor.name,
-                tenant_name=tenancy.name,
-                flat_number=tenancy.flat_number,
-                tenant_mobile_number=tenancy.mobile_number,
-                deposit_amount=tenancy.deposit_amount,
-                rent_due_day=tenancy.rent_due_day,
-                billing_month=entry.billing_month,
-                rent_amount=entry.rent_amount,
-                electricity_units=entry.electricity_units,
-                electricity_rate=entry.electricity_rate,
-                electricity_amount=amounts.electricity_amount,
-                water_amount=entry.water_amount,
-                total_due=amounts.total_due,
-                total_paid=amounts.total_paid,
-                outstanding_amount=max(amounts.outstanding_amount, ZERO),
-                previous_month_outstanding=previous_outstanding,
-                payment_amount=payment.amount,
-                paid_date=payment.paid_date,
-                payment_notes=payment.notes,
+def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
+    with transaction.atomic():
+        try:
+            payment = (
+                Payment.objects.select_for_update(of=("self",))
+                .select_related("entry__tenancy__property")
+                .get(pk=payment_id)
             )
-            return IssuedReceipt(receipt=receipt, created=True)
-    except IntegrityError as error:
-        # The lock makes this unlikely; the unique column is the last guard. The failed
-        # transaction has been rolled back, so the winner is looked up outside it.
-        if _violated_constraint(error) != RECEIPT_PAYMENT_CONSTRAINT:
-            raise
-        existing = Receipt.objects.select_related("payment__entry__tenancy").get(
-            payment_id=payment_id
+        except Payment.DoesNotExist:
+            raise PaymentNotFoundError() from None
+
+        # Checked again inside the lock: the view's lookup happened before it.
+        _check_can_issue_receipts(actor, payment.entry.tenancy.property_id)
+
+        # Before validating today's details: an issued receipt reopens even if, say, the
+        # property's address has since been cleared.
+        existing = Receipt.objects.filter(payment=payment).first()
+        if existing is not None:
+            return IssuedReceipt(receipt=existing, created=False)
+
+        problem = _receipt_problem(payment)
+        if problem is not None:
+            raise ReceiptConfigurationIncompleteError(problem)
+
+        entry = RentEntry.objects.select_for_update().get(pk=payment.entry_id)
+        tenancy = payment.entry.tenancy
+        prop = tenancy.property
+
+        # The bill as it stood right after this payment: payments are never edited, and
+        # later ones were recorded after it, so this never changes.
+        paid_through = to_paise(
+            entry.payments.filter(Q(created_at__lt=payment.created_at) | Q(pk=payment.pk))
+            .aggregate(total=Sum("amount"))["total"]
+            or ZERO
         )
-        _check_can_issue_receipts(actor, existing.payment.entry.tenancy.property_id)
-        return IssuedReceipt(receipt=existing, created=False)
+        amounts = entry_amounts(entry, total_paid=paid_through)
+
+        previous = RentEntry.objects.filter(
+            tenancy=tenancy, billing_month=_previous_month(entry.billing_month)
+        ).first()
+        previous_outstanding = (
+            max(entry_amounts(previous).outstanding_amount, ZERO) if previous else ZERO
+        )
+
+        receipt = Receipt.objects.create(
+            payment=payment,
+            reference=_next_reference(tenancy, entry),
+            issued_by=actor,
+            issued_at=timezone.now(),
+            issued_date=business_date(),
+            issuer_name=prop.name.strip(),
+            issuer_address=prop.address.strip(),
+            issuer_contact_number=prop.contact_number,
+            received_by_name=actor.name,
+            tenant_name=tenancy.name,
+            flat_number=tenancy.flat_number,
+            tenant_mobile_number=tenancy.mobile_number,
+            deposit_amount=tenancy.deposit_amount,
+            rent_due_day=tenancy.rent_due_day,
+            billing_month=entry.billing_month,
+            rent_amount=entry.rent_amount,
+            electricity_units=entry.electricity_units,
+            electricity_rate=entry.electricity_rate,
+            electricity_amount=amounts.electricity_amount,
+            water_amount=entry.water_amount,
+            total_due=amounts.total_due,
+            total_paid=amounts.total_paid,
+            outstanding_amount=max(amounts.outstanding_amount, ZERO),
+            previous_month_outstanding=previous_outstanding,
+            payment_amount=payment.amount,
+            paid_date=payment.paid_date,
+            payment_notes=payment.notes,
+        )
+        return IssuedReceipt(receipt=receipt, created=True)

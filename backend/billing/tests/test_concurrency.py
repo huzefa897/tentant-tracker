@@ -239,3 +239,28 @@ class ConcurrentReceiptTests(TransactionTestCase):
 
         self.assertEqual(sorted(o[0] for o in outcomes), ["created", "returned"])
         self.assertEqual(Receipt.objects.count(), 1)
+
+    def test_a_bills_receipts_issued_at_once_get_distinct_references(self):
+        payments = [self.payment] + [
+            record_payment(
+                entry_id=self.payment.entry_id,
+                actor=self.user,
+                idempotency_key=uuid.uuid4(),
+                validated_data={**PAYMENT, "amount": Decimal("1000.00")},
+            ).payment
+            for _ in range(2)
+        ]
+
+        def issue(i):
+            return issue_payment_receipt(payment_id=payments[i].pk, actor=self.user).receipt
+
+        outcomes = run_simultaneously(3, lambda i: issue(i).reference)
+
+        self.assertEqual(
+            sorted(outcomes),
+            [
+                "Shaik_Zahid_Ali_202_Rent_September 2026",
+                "Shaik_Zahid_Ali_202_Rent_September 2026_2",
+                "Shaik_Zahid_Ali_202_Rent_September 2026_3",
+            ],
+        )

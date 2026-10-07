@@ -6,7 +6,7 @@ import { getReceiptContent } from '@/utils/receiptContent'
 
 // A September bill: ₹17,000 rent, 109 units at ₹6, paid in full on 4 Oct.
 const paidInFull: Partial<PaymentReceipt> = {
-  reference: 'RCT-5f0e2c1a-8b3d-4e6f-9a7b-2c4d6e8f0a1b',
+  reference: 'Test_Tenant_102_Rent_September 2026',
   issuedAt: '2026-10-04T06:30:00.000Z',
   issuedDate: '2026-10-04',
   issuer: {
@@ -41,18 +41,14 @@ const paidInFull: Partial<PaymentReceipt> = {
 describe('getReceiptContent', () => {
   it('names the file like the owners’ receipts', () => {
     expect(getReceiptContent(makeReceipt(paidInFull)).fileName).toBe(
-      'Test Tenant 102 Rent September 2026 RCT-5f0e2c1a-8b3d-4e6f-9a7b-2c4d6e8f0a1b.pdf',
+      'Test_Tenant_102_Rent_September 2026.pdf',
     )
   })
 
   it('keeps characters file systems reject out of the file name', () => {
-    const content = getReceiptContent(
-      makeReceipt({ tenant: { ...makeReceipt().tenant, name: 'A/B: "C"?', flatNumber: '1*2' } }),
-    )
+    const content = getReceiptContent(makeReceipt({ reference: 'A/B:_"C"?_1*2_Rent_May 2026' }))
 
-    expect(content.fileName).toBe(
-      'A-B- -C- 1-2 Rent September 2026 RCT-0b7c9e52-4f1a-4d3e-9a8b-1c2d3e4f5a6b.pdf',
-    )
+    expect(content.fileName).toBe('A-B-_-C-_1-2_Rent_May 2026.pdf')
   })
 
   it('gives the receipt number, date and status', () => {
@@ -60,7 +56,7 @@ describe('getReceiptContent', () => {
 
     expect(content).toMatchObject({
       title: 'PAYMENT RECEIPT',
-      receiptNumber: 'RCT-5f0e2c1a-8b3d-4e6f-9a7b-2c4d6e8f0a1b',
+      receiptNumber: 'Test_Tenant_102_Rent_September 2026',
       receiptDate: '04/10/2026',
       paidInFull: true,
       status: 'PAID',

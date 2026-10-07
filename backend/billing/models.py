@@ -1,3 +1,4 @@
+import re
 import uuid
 from calendar import monthrange
 from datetime import date
@@ -192,8 +193,9 @@ class Receipt(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # One receipt per payment, enforced by the database (a unique column).
     payment = models.OneToOneField(Payment, on_delete=models.PROTECT, related_name="receipt")
-    # RCT-<id>: unique without a counter that could collide under simultaneous requests.
-    reference = models.CharField(max_length=50, unique=True, editable=False)
+    # Tenant_Name_Flat_Rent_Month YYYY (receipt_reference), with _2, _3… for a bill's later
+    # receipts. Set once when issued, never regenerated.
+    reference = models.CharField(max_length=255, unique=True, editable=False)
     issued_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -264,5 +266,13 @@ class Receipt(models.Model):
         return self.reference
 
 
-def receipt_reference(receipt_id: uuid.UUID) -> str:
-    return f"RCT-{receipt_id}"
+def receipt_reference(tenant_name: str, flat_number: str, billing_month: date) -> str:
+    """'Shaik Zahid Ali', '202', October 2026 -> 'Shaik_Zahid_Ali_202_Rent_October 2026': the
+    tenant's name and flat (spaces as underscores, characters file names can't hold left out)
+    and the billed month. A bill's later receipts add _2, _3… (billing/services.py)."""
+
+    def part(value: str) -> str:
+        cleaned = re.sub(r'[\\/:*?"<>|]+', "", value)
+        return "_".join(cleaned.split())
+
+    return f"{part(tenant_name)}_{part(flat_number)}_Rent_{billing_month:%B %Y}"

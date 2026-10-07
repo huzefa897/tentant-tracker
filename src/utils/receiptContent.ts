@@ -98,8 +98,8 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
   }
 
   return {
-    // As the owners name their receipts: "Mirza Baig 102 Rent September 2026 …".
-    fileName: `${toFileName(`${tenant.name} ${tenant.flatNumber} Rent ${month} ${receipt.reference}`)}.pdf`,
+    // The reference already reads like the owners' receipt names: "Mirza_Baig_102_Rent_September 2026".
+    fileName: `${toFileName(receipt.reference)}.pdf`,
     title: 'PAYMENT RECEIPT',
     subtitle: 'Rental / Tenant Payment Receipt',
     receiptNumber: receipt.reference,

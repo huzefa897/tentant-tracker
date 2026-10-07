@@ -45,7 +45,7 @@ export function resetReceiptService() {
         const id = nextFakeId('receipt')
         const receipt = makeReceipt({
           id,
-          reference: `RCT-${id}`,
+          reference: `${entry.tenantId}_Rent_${entry.billingMonth}_${id}`,
           paymentId,
           entryId,
           billingMonth: entry.billingMonth,

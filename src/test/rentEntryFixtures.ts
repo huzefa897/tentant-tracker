@@ -62,7 +62,7 @@ export function makePayment(overrides: Partial<Payment> = {}): Payment {
 export function makeReceipt(overrides: Partial<PaymentReceipt> = {}): PaymentReceipt {
   return {
     id: 'receipt-1',
-    reference: 'RCT-0b7c9e52-4f1a-4d3e-9a8b-1c2d3e4f5a6b',
+    reference: 'Shaik_Zahid_Ali_202_Rent_September 2026',
     paymentId: 'payment-1',
     entryId: 'entry-1',
     issuedAt: '2026-10-03T07:00:00.000Z',

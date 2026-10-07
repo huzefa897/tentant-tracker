@@ -22,7 +22,7 @@ const RECEIPT_URL =
 
 const receiptDto = {
   id: '97934f0a-83b2-4da7-8847-e266ac37cbec',
-  reference: 'RCT-97934f0a-83b2-4da7-8847-e266ac37cbec',
+  reference: 'Shaik_Zahid_Ali_202_Rent_September 2026',
   paymentId: PAYMENT_ID,
   entryId: ENTRY_ID,
   issuedAt: '2026-10-06T15:00:00Z',

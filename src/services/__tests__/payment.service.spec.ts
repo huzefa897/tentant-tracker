@@ -83,7 +83,7 @@ describe('parsePayment', () => {
   })
 
   it('maps the receipt issued for it', () => {
-    const receipt = { id: 'r-1', reference: 'RCT-r-1' }
+    const receipt = { id: 'r-1', reference: 'Shaik_Zahid_Ali_202_Rent_October 2026' }
 
     expect(toPayment(parsePayment({ ...paymentDto, receipt })).receipt).toEqual(receipt)
   })

@@ -54,7 +54,7 @@ class IssueReceiptServiceTests(ReceiptTestCase):
 
         self.assertTrue(result.created)
         self.assertEqual(Receipt.objects.count(), 1)
-        self.assertEqual(receipt.reference, f"RCT-{receipt.id}")
+        self.assertEqual(receipt.reference, "Shaik_Zahid_Ali_202_Rent_September 2026")
         self.assertEqual(receipt.issued_by, self.user)
         self.assertEqual(receipt.issued_date, TODAY)
         # A ₹3,000 receipt against a ₹15,750 bill: it never implies the bill is paid.
@@ -89,6 +89,44 @@ class IssueReceiptServiceTests(ReceiptTestCase):
         self.assertEqual(first.outstanding_amount, Decimal("12750.00"))
         self.assertEqual(second.total_paid, Decimal("8000.00"))
         self.assertEqual(second.outstanding_amount, Decimal("7750.00"))
+
+    def test_numbers_a_bills_later_receipts(self):
+        second = make_payment(self.entry, self.user, "5000.00")
+        third = make_payment(self.entry, self.user, "1000.00")
+
+        references = [self.issue(p).receipt.reference for p in (self.payment, second, third)]
+
+        self.assertEqual(
+            references,
+            [
+                "Shaik_Zahid_Ali_202_Rent_September 2026",
+                "Shaik_Zahid_Ali_202_Rent_September 2026_2",
+                "Shaik_Zahid_Ali_202_Rent_September 2026_3",
+            ],
+        )
+
+    def test_each_month_starts_its_own_references(self):
+        october = make_entry(self.tenancy, self.user, month=date(2026, 10, 1))
+
+        reference = self.issue(make_payment(october, self.user, "1000.00")).receipt.reference
+
+        self.assertEqual(reference, "Shaik_Zahid_Ali_202_Rent_October 2026")
+
+    def test_keeps_names_and_flats_readable_in_the_reference(self):
+        self.tenancy.name = "  Mirza   Baig/Khan "
+        self.tenancy.flat_number = "G-01"
+        self.tenancy.save()
+
+        self.assertEqual(self.issue().receipt.reference, "Mirza_BaigKhan_G-01_Rent_September 2026")
+
+    def test_an_issued_reference_never_changes_when_the_tenant_is_renamed(self):
+        issued = self.issue().receipt
+        self.tenancy.name = "Someone Else"
+        self.tenancy.save()
+
+        self.assertEqual(self.issue().receipt.reference, issued.reference)
+        later = self.issue(make_payment(self.entry, self.user, "1000.00")).receipt
+        self.assertEqual(later.reference, "Someone_Else_202_Rent_September 2026")
 
     def test_shows_what_the_previous_month_still_owes(self):
         august = make_entry(self.tenancy, self.user, month=date(2026, 8, 1))
@@ -178,7 +216,7 @@ class ReceiptApiTests(ReceiptTestCase):
             response.json(),
             {
                 "id": str(receipt.id),
-                "reference": f"RCT-{receipt.id}",
+                "reference": "Shaik_Zahid_Ali_202_Rent_September 2026",
                 "paymentId": str(self.payment.id),
                 "entryId": str(self.entry.id),
                 "issuedAt": response.json()["issuedAt"],

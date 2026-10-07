@@ -27,7 +27,7 @@ describe('PaymentHistory', () => {
   })
 
   it('offers to issue a receipt, or download the one already issued, when receipts are on', () => {
-    const issued = { id: 'receipt-1', reference: 'RCT-receipt-1' }
+    const issued = { id: 'receipt-1', reference: 'Shaik_Zahid_Ali_202_Rent_October 2026' }
     const wrapper = mount(PaymentHistory, {
       props: { payments: [{ ...payments[0]!, receipt: issued }, payments[1]!], receipts: true },
     })

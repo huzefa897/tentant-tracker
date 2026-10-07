@@ -12,7 +12,7 @@ export interface ReceiptIssuer {
 // plus this one), so they're the same whenever the receipt was issued.
 export interface PaymentReceipt {
   id: string
-  reference: string // RCT-<id>, shown on the receipt; never regenerated
+  reference: string // e.g. Shaik_Zahid_Ali_202_Rent_October 2026 (_2, _3… for a bill's later receipts); never regenerated
   paymentId: string
   entryId: string
   issuedAt: string // ISO timestamp
