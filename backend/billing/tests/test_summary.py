@@ -55,10 +55,10 @@ class LedgerSummaryTests(TestCase):
         self.assertEqual(before["total paid"], after["total paid"])
 
     def test_moving_money_between_bills_changes_it(self):
-        # The same totals, but on different bills.
+        # The same total paid, but split differently between the bills.
         before = summary()
-        Payment.objects.filter(entry=self.september).update(entry=self.october)
-        Payment.objects.filter(entry=self.october, amount=5000).update(entry=self.september)
+        Payment.objects.filter(entry=self.september).update(amount="5000.00")
+        Payment.objects.filter(entry=self.october).update(amount="15750.00")
 
         after = summary()
 

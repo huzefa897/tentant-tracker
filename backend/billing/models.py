@@ -299,3 +299,36 @@ def receipt_reference(tenant_name: str, flat_number: str, billing_month: date) -
         return "_".join(cleaned.split())
 
     return f"{part(tenant_name)}_{part(flat_number)}_Rent_{billing_month:%B %Y}"
+
+
+class LegacyRecord(models.Model):
+    """A record imported from an old ledger (billing/legacy_import.py): which source record
+    became which bill, payment or receipt, and a fingerprint of what was imported. Rerunning an
+    import finds these, so nothing is created twice, and a source record that has changed since
+    it was imported is refused rather than imported again."""
+
+    class Kind(models.TextChoices):
+        BILL = "bill"
+        PAYMENT = "payment"
+        RECEIPT = "receipt"
+
+    # The source's own id, prefixed by the source (e.g. "google-sheet:Tenant A/2026-08").
+    source_id = models.CharField(max_length=255, unique=True)
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    object_id = models.UUIDField(help_text="The bill, payment or receipt created from it.")
+    fingerprint = models.CharField(max_length=64)
+    imported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    imported_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("imported_at", "source_id")
+        constraints = [
+            models.UniqueConstraint(fields=["kind", "object_id"], name="unique_legacy_object"),
+        ]
+
+    def __str__(self):
+        return self.source_id
