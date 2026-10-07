@@ -17,24 +17,32 @@ FAILURES_PER_ADDRESS = 20
 WINDOW = timedelta(minutes=15)
 
 
+class LimitReached(Exception):
+    pass
+
+
 def reserve_attempt(limits) -> bool:
     """Counts an attempt against every (key, limit) before the password is checked, or returns
     False if any key is already at its limit. Rows are locked in key order, so simultaneous
-    attempts queue rather than all seeing a count below the limit."""
+    attempts queue rather than all seeing a count below the limit. A refused attempt rolls
+    back, so it leaves no rows behind (new usernames from a blocked address add nothing)."""
     now = timezone.now()
-    with transaction.atomic():
-        AdminLoginAttempts.objects.filter(window_ends__lte=now).delete()
-        rows = []
-        for key, limit in sorted(limits):
-            row, _ = AdminLoginAttempts.objects.select_for_update().get_or_create(
-                key=key, defaults={"window_ends": now + WINDOW}
-            )
-            if row.attempts >= limit:
-                return False
-            rows.append(row)
-        for row in rows:
-            row.attempts += 1
-            row.save(update_fields=["attempts"])
+    try:
+        with transaction.atomic():
+            AdminLoginAttempts.objects.filter(window_ends__lte=now).delete()
+            rows = []
+            for key, limit in sorted(limits):
+                row, _ = AdminLoginAttempts.objects.select_for_update().get_or_create(
+                    key=key, defaults={"window_ends": now + WINDOW}
+                )
+                if row.attempts >= limit:
+                    raise LimitReached
+                rows.append(row)
+            for row in rows:
+                row.attempts += 1
+                row.save(update_fields=["attempts"])
+    except LimitReached:
+        return False
     return True
 
 

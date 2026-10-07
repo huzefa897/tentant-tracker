@@ -20,6 +20,8 @@ from rest_framework.response import Response
 from rest_framework.test import APIClient
 from rest_framework.throttling import SimpleRateThrottle
 
+from accounts.models import AdminLoginAttempts
+
 
 @api_view(["GET"])
 def protected_view(request):
@@ -236,6 +238,16 @@ class AdminLoginThrottleTests(TestCase):
 
         for _ in range(4):
             self.assertEqual(self.login("wrong").status_code, 200)
+
+    def test_blocked_attempts_with_new_usernames_add_no_rows(self):
+        for number in range(20):
+            self.login("wrong", username=f"guess-{number}")
+        rows = AdminLoginAttempts.objects.count()
+
+        for number in range(20):
+            self.assertEqual(self.login("wrong", username=f"new-{number}").status_code, 429)
+
+        self.assertEqual(AdminLoginAttempts.objects.count(), rows)
 
     def test_forged_forwarding_headers_do_not_change_the_address(self):
         for number in range(5):
