@@ -18,11 +18,18 @@ import {
 import { useRouteEntry } from '@/composables/useRouteEntry'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
-import { PAYMENT_SAVE_ERROR_MESSAGE, PaymentSaveError, useRentEntryStore } from '@/stores/rentEntry'
+import {
+  PAYMENT_SAVE_ERROR_MESSAGE,
+  PaymentSaveError,
+  RECEIPT_ERROR_MESSAGE,
+  ReceiptError,
+  useRentEntryStore,
+} from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import type { PaymentInput } from '@/types/payment'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue, formatTimestamp } from '@/utils/date'
+import { downloadReceiptPdf } from '@/utils/receiptDownload'
 
 const props = defineProps<{
   tenantId: string
@@ -115,6 +122,38 @@ async function handleSavePayment(input: PaymentInput) {
   }
 }
 
+// The payment whose receipt is being issued or downloaded; every receipt button waits for it.
+const downloadingPaymentId = ref<string | null>(null)
+const receiptError = ref<string | null>(null)
+
+// Issues the payment's receipt in Django if it has none (retrying is safe: a payment has one
+// receipt), then downloads the saved snapshot as a PDF. Never changes the payment, and never
+// claims the file was saved: the browser decides that.
+async function handleDownloadReceipt(paymentId: string) {
+  const payment = entryPayments.value?.payments.find((item) => item.id === paymentId)
+  if (downloadingPaymentId.value || !payment) return
+
+  downloadingPaymentId.value = paymentId
+  receiptError.value = null
+  try {
+    let receipt
+    try {
+      receipt = await rentEntryStore.getReceipt(props.tenantId, payment)
+    } catch (error) {
+      receiptError.value = error instanceof ReceiptError ? error.message : RECEIPT_ERROR_MESSAGE
+      return
+    }
+
+    try {
+      await downloadReceiptPdf(receipt)
+    } catch {
+      receiptError.value = `Receipt ${receipt.reference} is issued, but its PDF couldn't be made. Check your connection and try again.`
+    }
+  } finally {
+    downloadingPaymentId.value = null
+  }
+}
+
 // The router reuses this page when only the ids in the URL change: nothing from one entry
 // should show on another, and its payments load.
 watch(
@@ -123,6 +162,7 @@ watch(
     paymentDialogOpen.value = false
     paymentError.value = null
     confirmation.value = null
+    receiptError.value = null
     loadPayments()
   },
   { immediate: true },
@@ -316,7 +356,17 @@ function goToHistory() {
           >
             Loading payments…
           </p>
-          <PaymentHistory v-else :payments="entryPayments.payments" />
+          <template v-else>
+            <p v-if="receiptError" class="mb-3 text-sm text-destructive" role="alert">
+              {{ receiptError }}
+            </p>
+            <PaymentHistory
+              :payments="entryPayments.payments"
+              receipts
+              :downloading-payment-id="downloadingPaymentId"
+              @download-receipt="handleDownloadReceipt"
+            />
+          </template>
         </section>
 
         <section

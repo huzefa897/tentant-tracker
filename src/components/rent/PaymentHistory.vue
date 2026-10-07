@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Download } from '@lucide/vue'
+import { Download, ReceiptIndianRupee } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import type { Payment } from '@/types/payment'
@@ -9,14 +9,15 @@ import { formatDateValue } from '@/utils/date'
 // Shown in the given order (the backend's: newest paid date first).
 defineProps<{
   payments: Payment[]
-  // Whether to offer receipt downloads. Off until receipts move to the backend (BE Phase 6).
+  // Whether to offer receipts: "Issue receipt" for a payment without one, "Download receipt"
+  // once it has one.
   receipts?: boolean
   // The payment whose receipt is being prepared; every button waits until it's done.
   downloadingPaymentId?: string | null
 }>()
 
 const emit = defineEmits<{
-  // Issues the receipt if needed, then downloads it as a PDF.
+  // Issues the receipt if the payment has none, then downloads it as a PDF.
   'download-receipt': [paymentId: string]
 }>()
 </script>
@@ -60,8 +61,15 @@ const emit = defineEmits<{
               data-testid="download-receipt"
               @click="emit('download-receipt', payment.id)"
             >
-              <Download aria-hidden="true" />
-              {{ downloadingPaymentId === payment.id ? 'Preparing…' : 'Download receipt' }}
+              <Download v-if="payment.receipt" aria-hidden="true" />
+              <ReceiptIndianRupee v-else aria-hidden="true" />
+              {{
+                downloadingPaymentId === payment.id
+                  ? 'Preparing…'
+                  : payment.receipt
+                    ? 'Download receipt'
+                    : 'Issue receipt'
+              }}
             </Button>
           </td>
         </tr>

@@ -4,29 +4,37 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import router from '@/router'
 import { ApiError } from '@/services/apiError'
 import { paymentService } from '@/services/payment.service'
+import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
 import {
   ENTRIES_LOAD_ERROR_MESSAGE,
   PAYMENT_SAVE_ERROR_MESSAGE,
   PAYMENT_UNCONFIRMED_MESSAGE,
+  RECEIPT_UNCONFIRMED_MESSAGE,
 } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import { makeEntry, makePayment, openPage } from '@/test/rentEntries'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService } from '@/test/mocks/authService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
+import { fakeReceipts } from '@/test/mocks/receiptService'
 import { resetTenantService, testTenants } from '@/test/mocks/tenantService'
+import { downloadReceiptPdf } from '@/utils/receiptDownload'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
+vi.mock('@/services/receipt.service', () => import('@/test/mocks/receiptService'))
+vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 const getEntry = vi.mocked(rentEntryService.getEntry)
 const recordPaymentApi = vi.mocked(paymentService.recordPayment)
 const getPayments = vi.mocked(paymentService.getPayments)
+const issueReceipt = vi.mocked(receiptService.issueReceipt)
+const downloadPdf = vi.mocked(downloadReceiptPdf)
 
 let view: VueWrapper | undefined
 
@@ -68,6 +76,7 @@ beforeEach(() => {
   resetAccessService()
   resetRentEntryService()
   fakeEntries.entries = [entry]
+  downloadPdf.mockReset().mockResolvedValue()
   localStorage.clear()
   sessionStorage.clear()
 })
@@ -279,12 +288,11 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       await submitPayment(amount, notes)
     }
 
-    it('lists the bill’s payments from the API, with no receipt buttons yet', async () => {
+    it('lists the bill’s payments from the API, each offering a receipt', async () => {
       await openDetails('tenant-001', 'sep')
 
       expect(getPayments).toHaveBeenCalledWith(expect.any(String), 'tenant-001', 'sep')
-      expect(paymentRows()).toEqual([['3 Oct 2026', '₹10,000', 'Initial payment']])
-      expect(view!.find('[data-testid="download-receipt"]').exists()).toBe(false)
+      expect(paymentRows()).toEqual([['3 Oct 2026', '₹10,000', 'Initial payment', 'Issue receipt']])
     })
 
     it('shows a failed payment load as an error with Retry, never as no payments', async () => {
@@ -489,6 +497,109 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       )
       expect(dialog().get('[data-testid="payment-bill"]').text()).toContain('₹1,712.50')
       expect(paymentRows()).toHaveLength(2)
+    })
+
+    describe('receipts', () => {
+      function receiptButton() {
+        return view!.get('[data-testid="download-receipt"]')
+      }
+
+      async function clickReceipt() {
+        await receiptButton().trigger('click')
+        await flushPromises()
+      }
+
+      it('issues the payment’s receipt in Django, then downloads its snapshot', async () => {
+        await openDetails('tenant-001', 'sep')
+
+        await clickReceipt()
+
+        expect(issueReceipt).toHaveBeenCalledWith(expect.any(String), 'tenant-001', 'sep', 'p-1')
+        expect(downloadPdf).toHaveBeenCalledWith(fakeReceipts.get('p-1'))
+        expect(fakeReceipts.get('p-1')).toMatchObject({ paymentAmount: 10000 })
+        expect(receiptButton().text()).toBe('Download receipt')
+        expect(view!.find('[role="alert"]').exists()).toBe(false)
+      })
+
+      it('downloads the same receipt again without issuing another', async () => {
+        await openDetails('tenant-001', 'sep')
+        await clickReceipt()
+
+        await clickReceipt()
+
+        expect(issueReceipt).toHaveBeenCalledTimes(1)
+        expect(downloadPdf).toHaveBeenCalledTimes(2)
+        expect(downloadPdf.mock.calls[1]![0]).toBe(downloadPdf.mock.calls[0]![0])
+      })
+
+      it('shows Preparing… and disables the buttons while the receipt is issued', async () => {
+        let finish!: () => void
+        const issue = issueReceipt.getMockImplementation()!
+        issueReceipt.mockImplementationOnce(async (...args) => {
+          await new Promise<void>((resolve) => (finish = resolve))
+          return issue(...args)
+        })
+        await openDetails('tenant-001', 'sep')
+
+        await receiptButton().trigger('click')
+        expect(receiptButton().text()).toBe('Preparing…')
+        expect(receiptButton().attributes('disabled')).toBeDefined()
+
+        finish()
+        await flushPromises()
+        expect(receiptButton().text()).toBe('Download receipt')
+      })
+
+      it('says what to configure when the backend refuses, keeping the payment', async () => {
+        issueReceipt.mockRejectedValueOnce(
+          new ApiError('invalid-request', 'x', 'receipt_configuration_incomplete', {
+            detail: 'Configure the property address before issuing receipts.',
+          }),
+        )
+        await openDetails('tenant-001', 'sep')
+
+        await clickReceipt()
+
+        expect(view!.get('[role="alert"]').text()).toBe(
+          'Configure the property address before issuing receipts.',
+        )
+        expect(downloadPdf).not.toHaveBeenCalled()
+        expect(paymentRows()).toEqual([
+          ['3 Oct 2026', '₹10,000', 'Initial payment', 'Issue receipt'],
+        ])
+        expect(fakeEntries.payments).toHaveLength(1)
+      })
+
+      it('retries after a lost response and gets the receipt already issued', async () => {
+        const issue = issueReceipt.getMockImplementation()!
+        issueReceipt.mockImplementationOnce(async (...args) => {
+          await issue(...args)
+          throw new ApiError('network')
+        })
+        await openDetails('tenant-001', 'sep')
+
+        await clickReceipt()
+        expect(view!.get('[role="alert"]').text()).toBe(RECEIPT_UNCONFIRMED_MESSAGE)
+
+        await clickReceipt()
+
+        expect(view!.find('[role="alert"]').exists()).toBe(false)
+        expect(fakeReceipts.size).toBe(1)
+        expect(downloadPdf).toHaveBeenCalledWith(fakeReceipts.get('p-1'))
+      })
+
+      it('says the receipt is issued when only its PDF fails', async () => {
+        downloadPdf.mockRejectedValueOnce(new Error('offline'))
+        await openDetails('tenant-001', 'sep')
+
+        await clickReceipt()
+
+        const reference = fakeReceipts.get('p-1')!.reference
+        expect(view!.get('[role="alert"]').text()).toBe(
+          `Receipt ${reference} is issued, but its PDF couldn't be made. Check your connection and try again.`,
+        )
+        expect(receiptButton().text()).toBe('Download receipt')
+      })
     })
 
     it('says so when the save fails for an unknown reason', async () => {
