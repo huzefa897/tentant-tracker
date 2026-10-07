@@ -347,7 +347,7 @@ def _next_reference(tenancy, entry) -> str:
     return base if not numbers else f"{base}_{max(numbers) + 1}"
 
 
-def _receipt_problem(payment: Payment) -> str | None:
+def receipt_problem(payment: Payment) -> str | None:
     """What stops a new receipt from being issued, or None."""
     entry = payment.entry
     tenancy = entry.tenancy
@@ -361,6 +361,51 @@ def _receipt_problem(payment: Payment) -> str | None:
     if payment.amount <= 0:
         return "Only a recorded payment of more than zero can have a receipt."
     return None
+
+
+def receipt_snapshot(payment: Payment, actor, *, previous_outstanding) -> dict:
+    """Everything a receipt prints, copied from the stored records: the issuer, the tenancy, the
+    bill as it stood right after this payment and the payment. previous_outstanding is what the
+    previous month's bill still owed when the receipt was issued. Callers hold the bill's lock.
+    """
+    entry = payment.entry
+    tenancy = entry.tenancy
+    prop = tenancy.property
+
+    # The bill as it stood right after this payment: payments are never edited, and later ones
+    # get higher sequences under the bill's lock, so this never changes.
+    paid_through = to_paise(
+        entry.payments.filter(sequence__lte=payment.sequence).aggregate(total=Sum("amount"))[
+            "total"
+        ]
+        or ZERO
+    )
+    amounts = entry_amounts(entry, total_paid=paid_through)
+    return {
+        "payment": payment,
+        "issuer_name": prop.name.strip(),
+        "issuer_address": prop.address.strip(),
+        "issuer_contact_number": prop.contact_number,
+        "received_by_name": actor.name,
+        "tenant_name": tenancy.name,
+        "flat_number": tenancy.flat_number,
+        "tenant_mobile_number": tenancy.mobile_number,
+        "deposit_amount": tenancy.deposit_amount,
+        "rent_due_day": tenancy.rent_due_day,
+        "billing_month": entry.billing_month,
+        "rent_amount": entry.rent_amount,
+        "electricity_units": entry.electricity_units,
+        "electricity_rate": entry.electricity_rate,
+        "electricity_amount": amounts.electricity_amount,
+        "water_amount": entry.water_amount,
+        "total_due": amounts.total_due,
+        "total_paid": amounts.total_paid,
+        "outstanding_amount": max(amounts.outstanding_amount, ZERO),
+        "previous_month_outstanding": previous_outstanding,
+        "payment_amount": payment.amount,
+        "paid_date": payment.paid_date,
+        "payment_notes": payment.notes,
+    }
 
 
 def issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
@@ -411,23 +456,12 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
         if existing is not None:
             return IssuedReceipt(receipt=existing, created=False)
 
-        problem = _receipt_problem(payment)
+        problem = receipt_problem(payment)
         if problem is not None:
             raise ReceiptConfigurationIncompleteError(problem)
 
         entry = RentEntry.objects.select_for_update().get(pk=payment.entry_id)
         tenancy = payment.entry.tenancy
-        prop = tenancy.property
-
-        # The bill as it stood right after this payment: payments are never edited, and later
-        # ones get higher sequences under the bill's lock, so this never changes.
-        paid_through = to_paise(
-            entry.payments.filter(sequence__lte=payment.sequence)
-            .aggregate(total=Sum("amount"))["total"]
-            or ZERO
-        )
-        amounts = entry_amounts(entry, total_paid=paid_through)
-
         previous = RentEntry.objects.filter(
             tenancy=tenancy, billing_month=_previous_month(entry.billing_month)
         ).first()
@@ -436,32 +470,10 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
         )
 
         receipt = Receipt.objects.create(
-            payment=payment,
             reference=_next_reference(tenancy, entry),
             issued_by=actor,
             issued_at=timezone.now(),
             issued_date=business_date(),
-            issuer_name=prop.name.strip(),
-            issuer_address=prop.address.strip(),
-            issuer_contact_number=prop.contact_number,
-            received_by_name=actor.name,
-            tenant_name=tenancy.name,
-            flat_number=tenancy.flat_number,
-            tenant_mobile_number=tenancy.mobile_number,
-            deposit_amount=tenancy.deposit_amount,
-            rent_due_day=tenancy.rent_due_day,
-            billing_month=entry.billing_month,
-            rent_amount=entry.rent_amount,
-            electricity_units=entry.electricity_units,
-            electricity_rate=entry.electricity_rate,
-            electricity_amount=amounts.electricity_amount,
-            water_amount=entry.water_amount,
-            total_due=amounts.total_due,
-            total_paid=amounts.total_paid,
-            outstanding_amount=max(amounts.outstanding_amount, ZERO),
-            previous_month_outstanding=previous_outstanding,
-            payment_amount=payment.amount,
-            paid_date=payment.paid_date,
-            payment_notes=payment.notes,
+            **receipt_snapshot(payment, actor, previous_outstanding=previous_outstanding),
         )
         return IssuedReceipt(receipt=receipt, created=True)
