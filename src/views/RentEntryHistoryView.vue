@@ -54,7 +54,7 @@ const {
   downloadingId: downloadingReceiptId,
   error: receiptError,
   downloadLatestReceipt,
-  clearError: clearReceiptError,
+  reset: resetReceiptDownload,
 } = useReceiptDownload()
 
 function downloadReceipt(entryId: string) {
@@ -66,7 +66,7 @@ function downloadReceipt(entryId: string) {
 watch(
   () => props.tenantId,
   () => {
-    clearReceiptError()
+    resetReceiptDownload()
     selectedYear.value = 'all'
     selectedStatus.value = 'all'
     page.value = 1

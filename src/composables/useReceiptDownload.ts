@@ -9,14 +9,21 @@ import { downloadReceiptPdf } from '@/utils/receiptDownload'
 // issued if the payment has none (retrying is safe: a payment has one receipt), otherwise its
 // saved snapshot. Never changes a payment, and never claims the file was saved: the browser
 // decides that. One download at a time: `downloadingId` is the payment's or bill's id while it
-// runs, and `error` says what went wrong (cleared by the next attempt or clearError).
+// runs, and `error` says what went wrong (cleared by the next attempt). reset()
+// when the page moves to another tenant or bill: a download under way still finishes, but its
+// error and busy state no longer show.
 export function useReceiptDownload() {
   const rentEntryStore = useRentEntryStore()
   const downloadingId = ref<string | null>(null)
   const error = ref<string | null>(null)
+  let current = 0
 
   async function run(id: string, getReceipt: () => Promise<PaymentReceipt>) {
     if (downloadingId.value) return
+    const attempt = ++current
+    const fail = (message: string) => {
+      if (attempt === current) error.value = message
+    }
     downloadingId.value = id
     error.value = null
     try {
@@ -24,17 +31,19 @@ export function useReceiptDownload() {
       try {
         receipt = await getReceipt()
       } catch (err) {
-        error.value = err instanceof ReceiptError ? err.message : RECEIPT_ERROR_MESSAGE
+        fail(err instanceof ReceiptError ? err.message : RECEIPT_ERROR_MESSAGE)
         return
       }
 
       try {
         await downloadReceiptPdf(receipt)
       } catch {
-        error.value = `Receipt ${receipt.reference} is issued, but its PDF couldn't be made. Check your connection and try again.`
+        fail(
+          `Receipt ${receipt.reference} is issued, but its PDF couldn't be made. Check your connection and try again.`,
+        )
       }
     } finally {
-      downloadingId.value = null
+      if (attempt === current) downloadingId.value = null
     }
   }
 
@@ -48,9 +57,17 @@ export function useReceiptDownload() {
     return run(entryId, () => rentEntryStore.getLatestReceipt(tenantId, entryId))
   }
 
-  function clearError() {
+  function reset() {
+    current++
+    downloadingId.value = null
     error.value = null
   }
 
-  return { downloadingId, error, downloadPaymentReceipt, downloadLatestReceipt, clearError }
+  return {
+    downloadingId,
+    error,
+    downloadPaymentReceipt,
+    downloadLatestReceipt,
+    reset,
+  }
 }

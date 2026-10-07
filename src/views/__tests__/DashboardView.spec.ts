@@ -316,6 +316,28 @@ describe('DashboardView', () => {
         )
         expect(downloadReceiptPdf).not.toHaveBeenCalled()
       })
+
+      it('never shows an earlier tenant’s receipt error, or makes the next tenant wait', async () => {
+        fakeEntries.entries.push(
+          makeEntry({ id: 'entry-t2', tenantId: 'tenant-002', billingMonth: '2026-10' }),
+        )
+        addFakePayment(makePayment({ id: 'p-t2', entryId: 'entry-t2', paidDate: '2026-10-04' }))
+        let fail!: (error: unknown) => void
+        vi.mocked(receiptService.issueReceipt).mockImplementationOnce(
+          () => new Promise((_, reject) => (fail = reject)),
+        )
+        await receiptButton().trigger('click')
+        await flushPromises()
+
+        useTenantStore().selectTenant('tenant-002')
+        await flushPromises()
+        fail(new ApiError('forbidden'))
+        await flushPromises()
+
+        expect(view!.find('[data-testid="receipt-error"]').exists()).toBe(false)
+        expect(receiptButton().attributes('disabled')).toBeUndefined()
+        expect(receiptButton().text()).toBe('Download receipt')
+      })
     })
 
     it('shows no latest entry for a tenant without entries', async () => {

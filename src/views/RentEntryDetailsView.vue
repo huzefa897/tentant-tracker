@@ -121,7 +121,7 @@ const {
   downloadingId: downloadingPaymentId,
   error: receiptError,
   downloadPaymentReceipt,
-  clearError: clearReceiptError,
+  reset: resetReceiptDownload,
 } = useReceiptDownload()
 
 function handleDownloadReceipt(paymentId: string) {
@@ -137,7 +137,7 @@ watch(
     paymentDialogOpen.value = false
     paymentError.value = null
     confirmation.value = null
-    clearReceiptError()
+    resetReceiptDownload()
     loadPayments()
   },
   { immediate: true },

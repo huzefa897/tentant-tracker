@@ -54,9 +54,10 @@ const {
   downloadingId: downloadingReceiptId,
   error: receiptError,
   downloadLatestReceipt,
-  clearError: clearReceiptError,
+  reset: resetReceiptDownload,
 } = useReceiptDownload()
-watch(() => latestBill.value?.id, clearReceiptError)
+// Another tenant's (or a new) bill: an earlier download's error or wait isn't about this one.
+watch(() => latestBill.value?.id, resetReceiptDownload)
 
 function downloadReceipt(entryId: string) {
   const tenant = tenantStore.selectedTenant
