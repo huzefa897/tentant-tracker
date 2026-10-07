@@ -19,12 +19,17 @@ ping() {
 }
 
 partial=""
-failed() {
+# On any exit: an unfinished dump is removed, and a failure is reported. (An EXIT trap, not
+# ERR, which doesn't fire for failures inside functions such as compose.)
+finish() {
+  local status=$?
   [[ -z "$partial" ]] || rm -f "$partial"
-  echo "Backup FAILED." >&2
-  ping /fail
+  if ((status != 0)); then
+    echo "Backup FAILED." >&2
+    ping /fail
+  fi
 }
-trap failed ERR
+trap finish EXIT
 
 mkdir -p "$backup_dir"
 chmod 700 "$backup_dir"
