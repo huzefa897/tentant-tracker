@@ -14,7 +14,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v5
         with:
@@ -61,7 +61,7 @@ jobs:
       # Tests mock Firebase; no credentials in CI.
       FIREBASE_PROJECT_ID: ci-test-project
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -97,7 +97,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # The PR's own commits (not GitHub's merge commit) and every branch to compare with.
           ref: ${{ github.event.pull_request.head.sha }}
