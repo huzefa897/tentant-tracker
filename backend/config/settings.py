@@ -225,8 +225,9 @@ REST_FRAMEWORK = {
         "writes": os.getenv("DJANGO_THROTTLE_WRITES", "30/minute"),
     },
     # How many proxies sit in front of Django, so a client's address is read from
-    # X-Forwarded-For rather than the proxy's. Unset: REMOTE_ADDR.
-    "NUM_PROXIES": env_int("DJANGO_NUM_PROXIES", 0) or None,
+    # X-Forwarded-For rather than the proxy's. 0 (the default) ignores X-Forwarded-For, which
+    # clients can forge, and uses REMOTE_ADDR. Never None: DRF would trust the whole header.
+    "NUM_PROXIES": env_int("DJANGO_NUM_PROXIES", 0),
 }
 
 # The test runner turns throttling off (a dummy cache), so tests don't share counts; the

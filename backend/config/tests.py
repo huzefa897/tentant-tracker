@@ -1,3 +1,4 @@
+import threading
 from unittest import mock
 
 from django.conf import settings
@@ -5,7 +6,14 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.management import call_command
-from django.test import TestCase, override_settings
+from django.db import connection
+from django.test import (
+    Client,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+    skipUnlessDBFeature,
+)
 from django.urls import path, reverse
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -123,6 +131,26 @@ class RateLimitTests(TestCase):
         self.assertEqual(statuses, [401] * 6 + [429])
         self.assertIn("Retry-After", client.get("/api/protected/").headers)
 
+    def test_forged_forwarding_headers_do_not_change_the_address(self):
+        client = APIClient()
+        statuses = [
+            client.get("/api/protected/", headers={"X-Forwarded-For": f"10.0.0.{n}"}).status_code
+            for n in range(7)
+        ]
+
+        self.assertEqual(statuses, [401] * 6 + [429])
+
+    def test_uses_the_forwarded_address_behind_a_configured_proxy(self):
+        client = APIClient()
+        with override_settings(REST_FRAMEWORK={**settings.REST_FRAMEWORK, "NUM_PROXIES": 1}):
+            for _ in range(6):
+                client.get("/api/protected/", headers={"X-Forwarded-For": "10.0.0.1"})
+            blocked = client.get("/api/protected/", headers={"X-Forwarded-For": "10.0.0.1"})
+            other = client.get("/api/protected/", headers={"X-Forwarded-For": "10.0.0.2"})
+
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(other.status_code, 401)
+
     def test_the_address_limit_only_covers_the_api(self):
         for _ in range(8):
             self.client.get(reverse("admin:login"))
@@ -176,11 +204,8 @@ class SharedCacheRateLimitTests(TestCase):
 
         self.assertEqual(statuses, [401, 401, 429])
 
-@override_settings(CACHES=REAL_CACHE)
 class AdminLoginThrottleTests(TestCase):
     def setUp(self):
-        cache.clear()
-        self.addCleanup(cache.clear)
         get_user_model().objects.create_superuser(username="admin", password="right-pass-123")
         self.url = reverse("admin:login")
 
@@ -212,12 +237,63 @@ class AdminLoginThrottleTests(TestCase):
         for _ in range(4):
             self.assertEqual(self.login("wrong").status_code, 200)
 
+    def test_forged_forwarding_headers_do_not_change_the_address(self):
+        for number in range(5):
+            self.client.post(
+                self.url,
+                {"username": "admin", "password": "wrong"},
+                headers={"X-Forwarded-For": f"10.0.0.{number}"},
+            )
+
+        self.assertEqual(self.login("right-pass-123").status_code, 429)
+
+    def test_a_successful_login_does_not_count_against_the_address(self):
+        for number in range(19):
+            self.login("wrong", username=f"guess-{number}")
+        self.assertEqual(self.login("right-pass-123").status_code, 302)
+        self.client.logout()
+
+        self.assertEqual(self.login("wrong", username="guess-last").status_code, 200)
+        self.assertEqual(self.login("right-pass-123").status_code, 429)
+
     def test_only_admin_login_posts_are_counted(self):
         for _ in range(10):
             self.client.get(self.url)
 
         self.assertEqual(self.login("right-pass-123").status_code, 302)
 
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class ConcurrentAdminLoginThrottleTests(TransactionTestCase):
+    """Real transactions on separate connections (PostgreSQL), as simultaneous requests from
+    several worker processes would be."""
+
+    def test_a_burst_of_guesses_gets_no_more_than_the_limit(self):
+        get_user_model().objects.create_superuser(username="admin", password="right-pass-123")
+        url = reverse("admin:login")
+        barrier = threading.Barrier(10)
+        statuses = []
+        lock = threading.Lock()
+
+        def guess():
+            try:
+                barrier.wait()
+                status = Client().post(url, {"username": "admin", "password": "wrong"}).status_code
+            except Exception as error:  # noqa: BLE001 - reported by the assertion below
+                status = repr(error)
+            finally:
+                connection.close()
+            with lock:
+                statuses.append(status)
+
+        threads = [threading.Thread(target=guess) for _ in range(10)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+
+        self.assertEqual(sorted(statuses, key=str), [200] * 5 + [429] * 5)
 
 class SecuritySettingsTests(TestCase):
     def test_responses_carry_the_security_headers(self):
