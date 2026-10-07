@@ -107,6 +107,28 @@ describe('RentEntryHistoryView', () => {
     expect(view!.text()).not.toContain('July 2026')
   })
 
+  it('shows skeleton rows while the first page loads', async () => {
+    getEntries.mockReturnValueOnce(new Promise(() => {}))
+    await openHistory()
+
+    const loading = view!.get('[data-testid="history-loading"]')
+    expect(loading.text()).toBe('Loading entries…')
+    expect(view!.text()).not.toContain('No rent entries yet.')
+  })
+
+  it('keeps the filters on screen while another filter loads', async () => {
+    fakeEntries.entries = [october, september, lastYear]
+    await openHistory()
+    getEntries.mockReturnValueOnce(new Promise(() => {}))
+
+    await view!.get('#filter-year').setValue('2025')
+    await flushPromises()
+
+    expect(view!.get<HTMLSelectElement>('#filter-year').element.value).toBe('2025')
+    expect(view!.get('[data-testid="history-loading"]').text()).toBe('Loading entries…')
+    expect(view!.find('[data-testid="history-row"]').exists()).toBe(false)
+  })
+
   it('labels the totals as this page’s', async () => {
     fakeEntries.entries = [october, september]
     await openHistory()

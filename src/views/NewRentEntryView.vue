@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { onBeforeRouteLeave, useRouter, type RouteLocationRaw } from 'vue-router'
 import { ArrowLeft, ChevronRight, CircleCheck, User } from '@lucide/vue'
 
+import LoadingRegion from '@/components/common/LoadingRegion.vue'
+import SkeletonLines from '@/components/common/SkeletonLines.vue'
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import RentEntryForm from '@/components/rent/RentEntryForm.vue'
@@ -16,6 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import TenantChipSkeleton from '@/components/tenant/TenantChipSkeleton.vue'
 import { Button } from '@/components/ui/button'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
@@ -148,7 +151,24 @@ function handleDialogOpenChange(open: boolean) {
       </Button>
     </template>
 
-    <p v-if="tenantStatus === 'loading'" class="text-muted-foreground" role="status">Loading…</p>
+    <!-- The form's own shape while the tenant loads, so nothing jumps when it arrives. -->
+    <LoadingRegion
+      v-if="tenantStatus === 'loading'"
+      label="Loading tenant…"
+      data-testid="tenant-loading"
+    >
+      <div class="mb-6">
+        <p class="text-3xl font-bold tracking-tight sm:text-4xl">Add Rent Entry</p>
+        <p class="mt-2 text-muted-foreground">Record monthly rent and utility charges.</p>
+        <TenantChipSkeleton />
+      </div>
+      <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div class="min-w-0 space-y-5">
+          <SkeletonLines v-for="section in 3" :key="section" card heading :lines="2" />
+        </div>
+        <SkeletonLines card heading :lines="5" action class="h-fit" />
+      </div>
+    </LoadingRegion>
 
     <RentEntriesLoadError
       v-else-if="tenantStatus === 'error'"

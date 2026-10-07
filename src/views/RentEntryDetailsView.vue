@@ -3,11 +3,16 @@ import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
 import { ArrowLeft, CircleCheck, Plus, User } from '@lucide/vue'
 
+import LoadingRegion from '@/components/common/LoadingRegion.vue'
+import SkeletonLines from '@/components/common/SkeletonLines.vue'
+import SkeletonRows from '@/components/common/SkeletonRows.vue'
 import PaymentHistory from '@/components/rent/PaymentHistory.vue'
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import RecordPaymentForm from '@/components/rent/RecordPaymentForm.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
+import TenantChipSkeleton from '@/components/tenant/TenantChipSkeleton.vue'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
   DialogContent,
@@ -53,6 +58,14 @@ const {
 } = useRouteEntry(
   () => props.tenantId,
   () => props.entryId,
+)
+
+// The tenant, then the bill: one skeleton for both, so the page doesn't change shape between
+// them. A failed tenant or a missing tenant shows instead.
+const pageLoading = computed(
+  () =>
+    tenantStatus.value === 'loading' ||
+    (tenantStatus.value === 'ready' && !!tenant.value && entryStatus.value === 'loading'),
 )
 
 // The bill's payments, from the backend, newest first.
@@ -200,7 +213,25 @@ function goToHistory() {
       </Button>
     </template>
 
-    <p v-if="tenantStatus === 'loading'" class="text-muted-foreground" role="status">Loading…</p>
+    <!-- The page's own shape while it loads, so nothing jumps when the bill arrives. -->
+    <LoadingRegion v-if="pageLoading" label="Loading entry…" data-testid="entry-loading">
+      <header class="mb-6">
+        <div class="flex flex-wrap items-center gap-3">
+          <Skeleton class="h-9 w-56 sm:h-10" />
+          <Skeleton class="h-6 w-24 rounded-full" />
+        </div>
+        <TenantChipSkeleton />
+      </header>
+      <div class="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
+        <SkeletonLines card heading :lines="5" />
+        <SkeletonLines card heading :lines="3" action />
+        <div class="rounded-xl border p-4 sm:p-6 lg:col-span-2 xl:order-last xl:col-span-3">
+          <Skeleton class="mb-2 h-5 w-36" />
+          <SkeletonRows :rows="2" />
+        </div>
+        <SkeletonLines card heading :lines="2" class="lg:col-span-2 xl:col-span-1" />
+      </div>
+    </LoadingRegion>
 
     <RentEntriesLoadError
       v-else-if="tenantStatus === 'error'"
@@ -225,10 +256,6 @@ function goToHistory() {
       :message="entryError ?? ''"
       @retry="retryEntry"
     />
-
-    <p v-else-if="entryStatus === 'loading'" class="text-muted-foreground" role="status">
-      Loading entry…
-    </p>
 
     <div
       v-else-if="!entry"
@@ -321,16 +348,16 @@ function goToHistory() {
             :message="entryPayments.error ?? ''"
             @retry="loadPayments"
           />
-          <p
+          <LoadingRegion
             v-else-if="
               !entryPayments ||
               (entryPayments.status === 'loading' && entryPayments.payments.length === 0)
             "
-            class="text-sm text-muted-foreground"
-            role="status"
+            label="Loading payments…"
+            data-testid="payments-loading"
           >
-            Loading payments…
-          </p>
+            <SkeletonRows :rows="2" />
+          </LoadingRegion>
           <template v-else>
             <p v-if="receiptError" class="mb-3 text-sm text-destructive" role="alert">
               {{ receiptError }}

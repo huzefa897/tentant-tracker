@@ -318,6 +318,19 @@ describe('DashboardView', () => {
       })
     })
 
+    it('holds the latest entry’s place with a skeleton while bills load', async () => {
+      fakeEntries.entries = [makeEntry({ id: 'entry-oct', billingMonth: '2026-10' })]
+      await mountView()
+      vi.mocked(rentEntryService.getEntries).mockReturnValueOnce(new Promise(() => {}))
+      useTenantStore().selectTenant('tenant-001')
+      await flushPromises()
+
+      expect(view!.get('[data-testid="latest-entry-loading"]').text()).toBe(
+        'Loading the latest entry…',
+      )
+      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
+    })
+
     it('shows no latest entry for a tenant without entries', async () => {
       saveEntries('2026-09')
       await mountView()

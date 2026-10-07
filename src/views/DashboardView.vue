@@ -3,6 +3,8 @@ import { computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeftRight, LogOut, Users } from '@lucide/vue'
 
+import LoadingRegion from '@/components/common/LoadingRegion.vue'
+import SkeletonLines from '@/components/common/SkeletonLines.vue'
 import LatestEntryCard from '@/components/rent/LatestEntryCard.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import TenantDetails from '@/components/tenant/TenantDetails.vue'
@@ -48,6 +50,11 @@ const selectedTenantEntryCount = computed(() =>
 
 // The newest bill by billing month; null while loading, on failure and when there's none.
 const latestBill = computed(() => (summary.value?.status === 'ready' ? summary.value.latest : null))
+
+// Holds the latest entry's place while the selected tenant's bills load.
+const summaryLoading = computed(
+  () => !!tenantStore.selectedTenantId && (!summary.value || summary.value.status === 'loading'),
+)
 
 // The latest bill's receipt (its most recent payment's), from Django, as a PDF.
 const {
@@ -180,7 +187,14 @@ function openHistory() {
       @add-entry="openNewEntry"
       @view-entries="openHistory"
     >
-      <template v-if="latestBill" #latest-entry>
+      <template v-if="summaryLoading" #latest-entry>
+        <LoadingRegion label="Loading the latest entry…" data-testid="latest-entry-loading">
+          <div class="rounded-xl border bg-card p-4 sm:p-5">
+            <SkeletonLines heading :lines="4" />
+          </div>
+        </LoadingRegion>
+      </template>
+      <template v-else-if="latestBill" #latest-entry>
         <p
           v-if="receiptError"
           class="mb-3 text-sm text-destructive"

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Building2, LoaderCircle, LogOut } from '@lucide/vue'
+import { Building2, LogOut } from '@lucide/vue'
 
 import PropertyPicker from '@/components/access/PropertyPicker.vue'
+import LoadingRegion from '@/components/common/LoadingRegion.vue'
+import SkeletonRows from '@/components/common/SkeletonRows.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import { Button } from '@/components/ui/button'
 import { useLogout } from '@/composables/useLogout'
@@ -58,14 +60,17 @@ async function handleSelect(propertyId: string) {
     </template>
 
     <div class="mx-auto w-full max-w-xl">
-      <div
+      <!-- The picker's own shape while properties load, so nothing jumps when they arrive. -->
+      <LoadingRegion
         v-if="accessStore.status === 'idle' || accessStore.status === 'loading'"
-        class="flex items-center justify-center gap-3 py-14 text-muted-foreground"
-        role="status"
+        label="Loading your properties…"
       >
-        <LoaderCircle class="size-5 animate-spin" aria-hidden="true" />
-        Loading your properties…
-      </div>
+        <div class="mb-6">
+          <p class="text-3xl font-bold tracking-tight sm:text-4xl">Choose a property</p>
+          <p class="mt-2 text-muted-foreground">Select the property you want to manage.</p>
+        </div>
+        <SkeletonRows bordered :rows="2" />
+      </LoadingRegion>
 
       <RentEntriesLoadError
         v-else-if="accessStore.status === 'error'"
