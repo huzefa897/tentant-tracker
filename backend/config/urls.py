@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import SimpleRouter
@@ -20,7 +21,7 @@ rent_entry_detail = RentEntryViewSet.as_view({"get": "retrieve"})
 payment_list = PaymentViewSet.as_view({"get": "list", "post": "create"})
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    path(settings.ADMIN_PATH, admin.site.urls),
     path("api/v1/health/", health_check, name="health"),
     path("api/v1/me/", me, name="me"),
     path(

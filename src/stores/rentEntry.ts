@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import { ApiError } from '@/services/apiError'
+import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { outstandingFromConflict, paymentService } from '@/services/payment.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { useAccessStore } from '@/stores/access'
@@ -47,6 +47,8 @@ export function entryLoadErrorMessage(error: unknown): string {
       return 'Rent entries are unavailable right now. Please try again shortly.'
     case 'unauthorized':
       return "Your sign-in couldn't be verified. Log out and sign in again."
+    case 'rate-limited':
+      return RATE_LIMITED_MESSAGE
     default:
       return ENTRIES_LOAD_ERROR_MESSAGE
   }
@@ -62,6 +64,8 @@ export function paymentsLoadErrorMessage(error: unknown): string {
       return 'Payments are unavailable right now. Please try again shortly.'
     case 'unauthorized':
       return "Your sign-in couldn't be verified. Log out and sign in again."
+    case 'rate-limited':
+      return RATE_LIMITED_MESSAGE
     default:
       return PAYMENTS_LOAD_ERROR_MESSAGE
   }
@@ -405,6 +409,10 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         )
       }
 
+      // Refused before anything was saved, so trying again later is safe.
+      if (kind === 'rate-limited') {
+        throw new EntrySaveError(`${RATE_LIMITED_MESSAGE} Your form has been kept.`)
+      }
       if (kind === 'unauthorized') {
         throw new EntrySaveError("Your sign-in couldn't be verified. Log out and sign in again.")
       }
@@ -507,6 +515,10 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       }
       if (kind === 'not-found') {
         throw new PaymentSaveError("This entry can't be found. It may no longer be available.")
+      }
+      // Refused before anything was recorded, so trying again later is safe.
+      if (kind === 'rate-limited') {
+        throw new PaymentSaveError(`${RATE_LIMITED_MESSAGE} Your payment details have been kept.`)
       }
       if (kind === 'unauthorized') {
         throw new PaymentSaveError("Your sign-in couldn't be verified. Log out and sign in again.")

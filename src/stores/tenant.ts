@@ -1,7 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import { ApiError } from '@/services/apiError'
+import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { tenantService } from '@/services/tenant.service'
 import { useAccessStore } from '@/stores/access'
 import type { Tenant } from '@/types/tenant'
@@ -20,6 +20,8 @@ export function tenantErrorMessage(error: unknown): string {
       return 'Tenants are unavailable right now. Please try again shortly.'
     case 'unauthorized':
       return "Your sign-in couldn't be verified. Log out and sign in again."
+    case 'rate-limited':
+      return RATE_LIMITED_MESSAGE
     default:
       return TENANTS_LOAD_ERROR_MESSAGE
   }

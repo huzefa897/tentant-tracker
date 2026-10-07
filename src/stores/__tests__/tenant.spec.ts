@@ -142,6 +142,10 @@ describe('useTenantStore', () => {
     getTenants.mockRejectedValueOnce(new ApiError('unavailable'))
     await store.loadTenants()
     expect(store.error).toMatch(/unavailable right now/)
+
+    getTenants.mockRejectedValueOnce(new ApiError('rate-limited'))
+    await store.loadTenants()
+    expect(store.error).toBe('Too many requests. Wait a minute and try again.')
   })
 
   describe('load more', () => {

@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import { accessService } from '@/services/access.service'
-import { ApiError } from '@/services/apiError'
+import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { useAuthStore } from '@/stores/auth'
 import type { AppIdentity } from '@/types/access'
 
@@ -21,6 +21,8 @@ function messageFor(error: unknown): string {
       return "Sign-in couldn't be checked right now. Please try again shortly."
     case 'network':
       return "Couldn't reach the server. Check your connection and try again."
+    case 'rate-limited':
+      return RATE_LIMITED_MESSAGE
     default:
       return 'Unable to load your property access. Please try again.'
   }

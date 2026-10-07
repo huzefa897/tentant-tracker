@@ -61,6 +61,7 @@ export function toApiError(error: unknown): ApiError {
     const details = typeof data === 'object' && data !== null && !Array.isArray(data) ? data : {}
     return new ApiError('conflict', error.message, code, {}, details as Record<string, unknown>)
   }
+  if (status === 429) return new ApiError('rate-limited', error.message, code)
   if (status >= 500) return new ApiError('unavailable', error.message, code)
   return new ApiError('unknown', error.message, code)
 }

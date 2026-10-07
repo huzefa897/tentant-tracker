@@ -260,6 +260,17 @@ describe('loadSummary', () => {
       error: 'Rent entries are unavailable right now. Please try again shortly.',
     })
   })
+
+  it('asks to wait when requests are rate limited', async () => {
+    const store = await withProperty()
+    getEntries.mockRejectedValueOnce(new ApiError('rate-limited'))
+
+    await store.loadSummary('tenant-001')
+
+    expect(store.summaries['tenant-001']?.error).toBe(
+      'Too many requests. Wait a minute and try again.',
+    )
+  })
 })
 
 describe('loadEntry', () => {
@@ -432,6 +443,19 @@ describe('addEntry', () => {
     expect(error.uncertain).toBe(false)
   })
 
+  it('asks to wait when rate limited, without checking for a saved bill', async () => {
+    const store = await withProperty()
+    createEntry.mockRejectedValueOnce(new ApiError('rate-limited'))
+
+    const error = await saveError(store.addEntry(submission(), KEY))
+
+    expect(error.message).toBe(
+      'Too many requests. Wait a minute and try again. Your form has been kept.',
+    )
+    expect(error.existingEntry).toBeNull()
+    expect(getEntries).not.toHaveBeenCalled()
+  })
+
   it('explains a refusal to save', async () => {
     const store = await withProperty()
     createEntry.mockRejectedValueOnce(new ApiError('forbidden'))
@@ -494,6 +518,15 @@ describe('payments', () => {
       payments: [],
       error: 'Payments are unavailable right now. Please try again shortly.',
     })
+  })
+
+  it('asks to wait when loading payments is rate limited', async () => {
+    const store = await withProperty()
+    getPayments.mockRejectedValueOnce(new ApiError('rate-limited'))
+
+    await store.loadPayments('tenant-001', 'sep')
+
+    expect(store.payments.sep?.error).toBe('Too many requests. Wait a minute and try again.')
   })
 
   it('records a payment and shows the backend’s new balance everywhere', async () => {
@@ -603,6 +636,19 @@ describe('payments', () => {
 
     expect(error).toMatchObject({
       message: "The paid date can't be in the future.",
+      uncertain: false,
+    })
+  })
+
+  it('asks to wait when rate limited; nothing was recorded, so it isn’t uncertain', async () => {
+    const store = await withProperty()
+    recordPayment.mockRejectedValueOnce(new ApiError('rate-limited'))
+
+    const error = await paymentError(store.addPayment('tenant-001', payment(3000), KEY))
+
+    expect(error).toMatchObject({
+      message:
+        'Too many requests. Wait a minute and try again. Your payment details have been kept.',
       uncertain: false,
     })
   })

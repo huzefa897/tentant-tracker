@@ -63,3 +63,16 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.display_name
+
+
+class AdminLoginAttempts(models.Model):
+    """Admin login attempts in the current window for one key (a hash of an address, or of an
+    address and username): config/middleware.py AdminLoginThrottleMiddleware. Kept in
+    PostgreSQL and counted under a row lock, so every process shares one exact count."""
+
+    key = models.CharField(max_length=64, primary_key=True)
+    attempts = models.PositiveIntegerField(default=0)
+    window_ends = models.DateTimeField(db_index=True)
+
+    class Meta:
+        verbose_name_plural = "admin login attempts"
