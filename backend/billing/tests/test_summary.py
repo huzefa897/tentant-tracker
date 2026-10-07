@@ -54,6 +54,12 @@ class LedgerSummaryTests(TestCase):
         self.assertNotEqual(before["payments digest"], after["payments digest"])
         self.assertEqual(before["total paid"], after["total paid"])
 
+    def test_renumbered_payments_change_it(self):
+        before = summary()
+        Payment.objects.filter(entry=self.october).update(sequence=2)
+
+        self.assertNotEqual(before["payments digest"], summary()["payments digest"])
+
     def test_moving_money_between_bills_changes_it(self):
         # The same total paid, but split differently between the bills.
         before = summary()
