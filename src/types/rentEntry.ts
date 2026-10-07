@@ -16,8 +16,8 @@ export interface RentEntryInput {
   useTenancyRent?: boolean
 }
 
-// What the new-entry form submits: the bill, and optionally a payment received with it.
-// Payments aren't on the backend yet (BE Phase 5), so the connected form sends null.
+// What the new-entry form submits: the bill, and optionally a payment received with it (saved
+// together with the bill, or neither is).
 export interface NewRentEntrySubmission {
   entry: RentEntryInput
   initialPayment: {
@@ -40,7 +40,7 @@ export interface RentEntry {
   electricityAmount: number
   waterAmount: number
   totalDue: number
-  // Always 0 until payments move to the backend (BE Phase 5).
+  // The sum of the bill's payments.
   totalPaid: number
   outstanding: number
   status: PaymentStatus
@@ -61,5 +61,6 @@ export interface RentEntryPage {
 export interface RentEntryFilters {
   year?: string // YYYY
   billingMonth?: string // YYYY-MM
+  paymentStatus?: PaymentStatus
   page?: number
 }

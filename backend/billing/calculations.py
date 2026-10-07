@@ -8,6 +8,8 @@ and shown.
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.db.models import Sum
+
 PAISE = Decimal("0.01")
 ZERO = Decimal("0.00")
 
@@ -51,11 +53,20 @@ class EntryAmounts:
     payment_status: str
 
 
-def entry_amounts(entry, total_paid: Decimal = ZERO) -> EntryAmounts:
-    """Everything derived for one bill, from its stored historical charges.
+def total_paid_for(entry) -> Decimal:
+    """The sum of the bill's payment records: from the queryset's `paid_total` annotation
+    (RentEntry.objects.with_amounts()) when present, otherwise one aggregate query."""
+    paid = getattr(entry, "paid_total", None)
+    if paid is None:
+        paid = entry.payments.aggregate(total=Sum("amount"))["total"]
+    return to_paise(paid or ZERO)
 
-    Payments arrive in BE Phase 5; until then nothing has been paid against any bill.
-    """
+
+def entry_amounts(entry, total_paid: Decimal | None = None) -> EntryAmounts:
+    """Everything derived for one bill, from its stored historical charges and its payments
+    (summed by total_paid_for unless given)."""
+    if total_paid is None:
+        total_paid = total_paid_for(entry)
     total_due = calculate_total_due(
         entry.rent_amount, entry.electricity_units, entry.electricity_rate, entry.water_amount
     )

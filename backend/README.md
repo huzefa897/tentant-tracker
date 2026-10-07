@@ -43,7 +43,7 @@ Dependency versions are pinned in `Pipfile.lock`. Add packages with `pipenv inst
 - `docker compose down -v` deletes the `postgres_data` volume, which is the whole database.
 - `AUTH_USER_MODEL` is `accounts.User` (an `AbstractUser` with `firebase_uid` and `phone_number`). Roles go on property membership (BE Phase 2), not on the user.
 - CORS only allows the Vue dev origin and is not authentication.
-- `billing` holds rent entries (bills), one per tenancy and month. They're created through the API and are view-only in admin; there's no update or delete yet. Tests in `billing/tests/test_concurrency.py` run real concurrent transactions, so they need PostgreSQL.
+- `billing` holds rent entries (bills), one per tenancy and month, and the payments received against them. Both are created through the API (a bill can be created with an initial payment, saved together) and are view-only in admin, so nothing bypasses the checks that keep payments within the bill; there's no update or delete yet. Recording a payment locks its bill, and each request carries an `Idempotency-Key` header so a retry returns the payment already recorded instead of recording it twice. Tests in `billing/tests/test_concurrency.py` run real concurrent transactions, so they need PostgreSQL.
 
 ## Authentication and property access
 
@@ -90,8 +90,13 @@ End access by making a membership inactive (memberships aren't deleted, so histo
 | `GET /api/v1/properties/{id}/` | One of them; unassigned or missing is **404** |
 | `GET /api/v1/properties/{id}/tenancies/` | The property's tenancies, paginated: `{count, next, previous, results}` (20 per page, `?page=`). `?status=current` (default), `upcoming`, `ended` or `all`; `?search=` matches name or flat, case-insensitively. Ordered by flat, name, id |
 | `GET /api/v1/properties/{id}/tenancies/{tenancyId}/` | One tenancy of any status (ended ones too, for history) |
+| `GET /api/v1/properties/{id}/tenancies/{tenancyId}/entries/` | The tenancy's bills, newest month first, 12 per page. `?year=`, `?billing_month=YYYY-MM`, `?payment_status=unpaid\|partially_paid\|paid` |
+| `POST …/entries/` | Creates a bill (`billingMonth`, `rentAmount`, `electricityUnits`, `waterAmount`, `notes`, optional `initialPayment: {amount, paidDate, notes}`). `Idempotency-Key` header: optional, required with an initial payment; a retry returns the bill (200). 409 `duplicate_billing_month`, `idempotency_conflict` or `payment_exceeds_outstanding` |
+| `GET …/entries/{entryId}/` | One bill, with `totalDue`, `totalPaid`, `outstandingAmount` and `paymentStatus` |
+| `GET …/entries/{entryId}/payments/` | The bill's payments (`id, entryId, amount, paidDate, notes, createdAt`), newest paid date first, unpaginated |
+| `POST …/entries/{entryId}/payments/` | Records a payment (`amount`, `paidDate`, `notes`) with a required `Idempotency-Key` header (a UUID, one per intended payment). Returns `{payment, entry}` with the bill's current balance: 201, or 200 for a retry of the same payment. 409 `payment_exceeds_outstanding` (with `outstandingAmount`) or `idempotency_conflict` |
 
-All of them use `properties/queries.py` `properties_for_user`, so lists and lookups are scoped the same way: a property the user can't access is **404** before any tenancy is looked at, and a tenancy is only found under its own property. Tenancy JSON is `{id, propertyId, name, flatNumber, mobileNumber, rentAmount, rentDueDay, electricityRate, depositAmount, startDate, endDate, status}`, with money as decimal strings (`"15000.00"`). The endpoints are read-only: tenancies are managed in admin.
+All of them use `properties/queries.py` `properties_for_user`, so lists and lookups are scoped the same way: a property the user can't access is **404** before any tenancy is looked at, and a tenancy is only found under its own property. Tenancy JSON is `{id, propertyId, name, flatNumber, mobileNumber, rentAmount, rentDueDay, electricityRate, depositAmount, startDate, endDate, status}`, with money as decimal strings (`"15000.00"`). Tenancies are read-only here (managed in admin); bills and payments are created only through the API and never updated or deleted.
 
 ## Tenancies
 

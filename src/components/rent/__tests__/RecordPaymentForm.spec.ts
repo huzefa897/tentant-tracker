@@ -160,35 +160,26 @@ describe('RecordPaymentForm', () => {
   })
 
   describe('saving', () => {
-    it('emits the payment with an id', async () => {
+    it('emits the payment, with trimmed notes', async () => {
       mountForm()
       await fill({ amount: '3000', paidDate: '2026-10-02', notes: ' Bank transfer ' })
       await save()
 
+      // The page adds the idempotency key: it keeps it across a retry.
       expect(wrapper!.emitted('save')).toEqual([
-        [
-          {
-            id: expect.any(String),
-            input: {
-              entryId: 'entry-1',
-              amount: 3000,
-              paidDate: '2026-10-02',
-              notes: 'Bank transfer',
-            },
-          },
-        ],
+        [{ entryId: 'entry-1', amount: 3000, paidDate: '2026-10-02', notes: 'Bank transfer' }],
       ])
     })
 
-    it('reuses the same id when saving is retried', async () => {
+    it('keeps the entered values after a failed save', async () => {
       mountForm()
-      await fill({ amount: '3000' })
+      await fill({ amount: '3000', notes: 'Cash' })
       await save()
-      await wrapper!.setProps({ saveError: 'Unable to save on this device.' })
-      await save()
+      await wrapper!.setProps({ saveError: 'Unable to save the payment.' })
 
-      const [first, second] = wrapper!.emitted<[{ id: string }]>('save')!
-      expect(first![0].id).toBe(second![0].id)
+      expect(wrapper!.get('[role="alert"]').text()).toBe('Unable to save the payment.')
+      expect((wrapper!.get('#payment-amount').element as HTMLInputElement).value).toBe('3000')
+      expect((wrapper!.get('#payment-notes').element as HTMLTextAreaElement).value).toBe('Cash')
     })
 
     it('disables Save and ignores submits while saving', async () => {
@@ -199,6 +190,26 @@ describe('RecordPaymentForm', () => {
       expect(wrapper!.get('button[type="submit"]').attributes('disabled')).toBeDefined()
       expect(wrapper!.get('button[type="submit"]').text()).toBe('Saving…')
       expect(wrapper!.emitted('save')).toBeUndefined()
+    })
+
+    it('disables the fields and Cancel while saving, so the draft matches the request', async () => {
+      mountForm()
+      await fill({ amount: '3000', notes: 'Cash' })
+      await wrapper!.setProps({ saving: true })
+
+      expect(wrapper!.get('[data-testid="fields"]').attributes('disabled')).toBeDefined()
+      for (const field of ['amount', 'paidDate', 'notes']) {
+        expect(
+          wrapper!.get<HTMLInputElement>(`#payment-${field}`).element.matches(':disabled'),
+        ).toBe(true)
+      }
+      expect(wrapper!.get('button[type="button"]').attributes('disabled')).toBeDefined()
+
+      await wrapper!.setProps({ saving: false })
+      expect(wrapper!.get<HTMLInputElement>('#payment-amount').element.matches(':disabled')).toBe(
+        false,
+      )
+      expect(wrapper!.get<HTMLInputElement>('#payment-amount').element.value).toBe('3000')
     })
 
     it('shows a save error from the parent and keeps the values', async () => {

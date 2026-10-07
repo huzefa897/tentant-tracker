@@ -1,4 +1,5 @@
 import re
+import uuid
 
 from rest_framework import exceptions, mixins, status, viewsets
 from rest_framework.generics import get_object_or_404
@@ -9,16 +10,30 @@ from properties.models import Tenancy
 from properties.queries import properties_for_user
 from properties.roles import Capability, role_can
 
-from .models import RentEntry
-from .serializers import BillingMonthField, RentEntryCreateSerializer, RentEntrySerializer
+from .calculations import PaymentStatus
+from .models import Payment, RentEntry
+from .serializers import (
+    BillingMonthField,
+    PaymentCreateSerializer,
+    PaymentSerializer,
+    RentEntryCreateSerializer,
+    RentEntrySerializer,
+)
 from .services import (
     BillingMonthOutsideTenancyError,
     DuplicateBillingMonthError,
+    EntryNotFoundError,
+    IdempotencyConflictError,
+    PaymentExceedsOutstandingError,
+    PaymentNotAllowedError,
     create_rent_entry,
+    record_payment,
 )
 
 # 0001–9999: Django builds a date from the year, and there is no year 0.
 YEAR_PATTERN = re.compile(r"^(?!0000)\d{4}$")
+PAYMENT_STATUSES = (PaymentStatus.UNPAID, PaymentStatus.PARTIALLY_PAID, PaymentStatus.PAID)
+IDEMPOTENCY_HEADER = "Idempotency-Key"
 
 
 class DuplicateBillingMonth(exceptions.APIException):
@@ -28,6 +43,51 @@ class DuplicateBillingMonth(exceptions.APIException):
         "detail": "An entry already exists for this tenancy and billing month.",
     }
     default_code = "duplicate_billing_month"
+
+
+class IdempotencyConflict(exceptions.APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = {
+        "code": "idempotency_conflict",
+        "detail": "This request key was already used for a different request.",
+    }
+    default_code = "idempotency_conflict"
+
+
+class PaymentExceedsOutstanding(exceptions.APIException):
+    """With the current outstanding amount, so the app can refresh its preview."""
+
+    status_code = status.HTTP_409_CONFLICT
+    default_code = "payment_exceeds_outstanding"
+
+    def __init__(self, outstanding):
+        super().__init__(
+            {
+                "code": "payment_exceeds_outstanding",
+                "detail": "This bill is already fully paid."
+                if outstanding <= 0
+                else f"The payment is more than the outstanding ₹{outstanding}.",
+                "outstandingAmount": str(outstanding),
+            }
+        )
+
+
+def idempotency_key(request, required: bool):
+    """The request's Idempotency-Key header as a UUID: one per intended operation, reused only
+    by retries of it."""
+    value = request.headers.get(IDEMPOTENCY_HEADER)
+    if value is None or value == "":
+        if required:
+            raise exceptions.ValidationError(
+                {IDEMPOTENCY_HEADER: ["Send an Idempotency-Key header (a UUID) with this request."]}
+            )
+        return None
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        raise exceptions.ValidationError(
+            {IDEMPOTENCY_HEADER: ["The Idempotency-Key header must be a UUID."]}
+        ) from None
 
 
 class RentEntryPagination(PageNumberPagination):
@@ -45,8 +105,11 @@ class RentEntryViewSet(
     """A tenancy's bills: list, retrieve and create. No update or delete: financial
     corrections need deliberate rules first.
 
-    List: newest billing month first; ?year=2026 and ?billing_month=2026-10 (to check whether
-    a bill exists, e.g. after a save timed out).
+    List: newest billing month first; ?year=2026, ?billing_month=2026-10 (to check whether
+    a bill exists) and ?payment_status=unpaid|partially_paid|paid, applied before paging.
+
+    Create takes an optional Idempotency-Key header (required with an initialPayment): a retry
+    with the same key returns the bill it created (200) instead of creating another.
     """
 
     serializer_class = RentEntrySerializer
@@ -71,8 +134,11 @@ class RentEntryViewSet(
 
     def get_queryset(self):
         # Every lookup is limited to the authorised tenancy, so another tenancy's bill 404s.
-        return RentEntry.objects.filter(tenancy=self.get_tenancy()).order_by(
-            "-billing_month", "-created_at"
+        # Payments are summed in the same query, never once per bill.
+        return (
+            RentEntry.objects.filter(tenancy=self.get_tenancy())
+            .with_amounts()
+            .order_by("-billing_month", "-created_at")
         )
 
     def filter_queryset(self, queryset):
@@ -94,6 +160,14 @@ class RentEntryViewSet(
                 raise exceptions.ValidationError({"billing_month": error.detail}) from None
             queryset = queryset.filter(billing_month=month)
 
+        payment_status = params.get("payment_status")
+        if payment_status is not None:
+            if payment_status not in PAYMENT_STATUSES:
+                raise exceptions.ValidationError(
+                    {"payment_status": f"Choose one of: {', '.join(PAYMENT_STATUSES)}."}
+                )
+            queryset = queryset.with_payment_status(payment_status)
+
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -103,10 +177,17 @@ class RentEntryViewSet(
 
         serializer = RentEntryCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        initial_payment = data.pop("initial_payment", None)
+        key = idempotency_key(request, required=initial_payment is not None)
 
         try:
-            entry = create_rent_entry(
-                tenancy=tenancy, actor=request.user, validated_data=serializer.validated_data
+            result = create_rent_entry(
+                tenancy=tenancy,
+                actor=request.user,
+                validated_data=data,
+                creation_key=key,
+                initial_payment=initial_payment,
             )
         except DuplicateBillingMonthError:
             raise DuplicateBillingMonth() from None
@@ -114,5 +195,88 @@ class RentEntryViewSet(
             raise exceptions.ValidationError(
                 {"billingMonth": ["This month is outside the tenancy's occupancy period."]}
             ) from None
+        except IdempotencyConflictError:
+            raise IdempotencyConflict() from None
+        except PaymentExceedsOutstandingError as error:
+            # The initial payment is more than the bill (whose rate the server sets).
+            raise PaymentExceedsOutstanding(error.outstanding) from None
 
-        return Response(RentEntrySerializer(entry).data, status=status.HTTP_201_CREATED)
+        # A retry returns the bill as it is now, with any later payments.
+        entry = self.get_queryset().get(pk=result.entry.pk)
+        return Response(
+            RentEntrySerializer(entry).data,
+            status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
+        )
+
+
+class PaymentViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
+    """A bill's payments: list and record. No update or delete: editing and reversing
+    payments need their own rules.
+
+    List: newest paid date first, then newest recorded, then id; every payment of the bill
+    (bills have few), unpaginated.
+
+    Create needs an Idempotency-Key header (a UUID). A new key records the payment (201); a
+    retry with the same key, bill and details returns that payment (200); the same key with
+    anything else is 409 idempotency_conflict. Either way the response has the payment and the
+    bill's current balance.
+    """
+
+    serializer_class = PaymentSerializer
+    pagination_class = None
+
+    def get_entry(self):
+        # Property, then tenancy, then bill, each limited by the one before, so another
+        # property's or tenancy's bill 404s.
+        if not hasattr(self, "_entry"):
+            prop = get_object_or_404(
+                properties_for_user(self.request.user), pk=self.kwargs["property_id"]
+            )
+            tenancy = get_object_or_404(
+                Tenancy.objects.filter(property=prop), pk=self.kwargs["tenancy_id"]
+            )
+            self._property = prop
+            self._entry = get_object_or_404(
+                RentEntry.objects.filter(tenancy=tenancy), pk=self.kwargs["entry_id"]
+            )
+        return self._entry
+
+    def get_queryset(self):
+        return Payment.objects.filter(entry=self.get_entry()).order_by(
+            "-paid_date", "-created_at", "id"
+        )
+
+    def create(self, request, *args, **kwargs):
+        entry = self.get_entry()
+        if not role_can(self._property.role, Capability.RECORD_PAYMENTS):
+            raise exceptions.PermissionDenied("Your role can't record payments.")
+
+        serializer = PaymentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        key = idempotency_key(request, required=True)
+
+        try:
+            result = record_payment(
+                entry_id=entry.pk,
+                actor=request.user,
+                idempotency_key=key,
+                validated_data=serializer.validated_data,
+            )
+        except EntryNotFoundError:
+            raise exceptions.NotFound() from None
+        except PaymentNotAllowedError:
+            raise exceptions.PermissionDenied("Your role can't record payments.") from None
+        except IdempotencyConflictError:
+            raise IdempotencyConflict() from None
+        except PaymentExceedsOutstandingError as error:
+            raise PaymentExceedsOutstanding(error.outstanding) from None
+
+        # The balance as it is now: on a retry it may include later payments.
+        current = RentEntry.objects.with_amounts().get(pk=entry.pk)
+        return Response(
+            {
+                "payment": PaymentSerializer(result.payment).data,
+                "entry": RentEntrySerializer(current).data,
+            },
+            status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
+        )

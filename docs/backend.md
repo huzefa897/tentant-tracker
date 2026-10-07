@@ -1,13 +1,13 @@
 # Backend
 
-Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). The frontend calls it for access (`/me`), tenants (tenancies) and rent entries (bills); payments and receipts aren't on it yet (BE Phase 5). PostgreSQL runs in Docker (`docker compose up -d --wait db` from the root, host port 5434); Django runs on the host with pipenv, from `backend/`. Commands and the done-gate are in `CLAUDE.md`.
+Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). The frontend calls it for access (`/me`), tenants (tenancies), rent entries (bills) and payments; receipts aren't on it yet (BE Phase 6). PostgreSQL runs in Docker (`docker compose up -d --wait db` from the root, host port 5434); Django runs on the host with pipenv, from `backend/`. Commands and the done-gate are in `CLAUDE.md`.
 
-Feature rules live in their own docs: sign-in and property access in [auth-and-access.md](auth-and-access.md), tenancies in [tenants.md](tenants.md), bills in [rent-entries.md](rent-entries.md).
+Feature rules live in their own docs: sign-in and property access in [auth-and-access.md](auth-and-access.md), tenancies in [tenants.md](tenants.md), bills in [rent-entries.md](rent-entries.md), payments in [payments-and-receipts.md](payments-and-receipts.md).
 
 ## Setup and conventions
 
 - Settings come from the gitignored `backend/.env`; every variable is listed in `backend/.env.example`. Add new ones to both.
-- Apps: `accounts`, `properties` (properties, memberships, tenancies), `billing` (rent entries). Tests in `tests.py` or a `tests/` package per app; mock `verify_firebase_token`, never call live Firebase.
+- Apps: `accounts`, `properties` (properties, memberships, tenancies), `billing` (rent entries, payments). Tests in `tests.py` or a `tests/` package per app; mock `verify_firebase_token`, never call live Firebase.
 - Add packages with `pipenv install <name>` and commit `Pipfile.lock`.
 - API JSON is camelCase with explicit serializer fields; never expose whole models.
 - DRF requires authentication by default; a public endpoint opts out with `AllowAny` and `authentication_classes([])` (only `/api/v1/health/` today). CORS is not authentication.
@@ -17,4 +17,4 @@ Feature rules live in their own docs: sign-in and property access in [auth-and-a
 
 ## Talking to it from the app
 
-In development `/api` is proxied to Django on `127.0.0.1:8000` (`vite.config.ts`), so the app calls its own origin and needs no CORS setup; `VITE_API_BASE_URL` overrides it. All calls go through `services/api.ts` (Axios); a request interceptor attaches `Authorization: Bearer <ID token>` from `authService.getIdToken()`, which Firebase caches and refreshes; never store the token. Errors become `ApiError` (`services/apiError.ts`): a 400 is `'invalid-request'` with `fieldErrors`, a 409 is `'conflict'`, a 429 is `'rate-limited'` (shown as `RATE_LIMITED_MESSAGE`; nothing was done, so trying later is safe).
+In development `/api` is proxied to Django on `127.0.0.1:8000` (`vite.config.ts`), so the app calls its own origin and needs no CORS setup; `VITE_API_BASE_URL` overrides it. All calls go through `services/api.ts` (Axios); a request interceptor attaches `Authorization: Bearer <ID token>` from `authService.getIdToken()`, which Firebase caches and refreshes; never store the token. Errors become `ApiError` (`services/apiError.ts`): a 400 is `'invalid-request'` with `fieldErrors`, a 409 is `'conflict'` with the body's other fields in `details` (e.g. `outstandingAmount`), a 429 is `'rate-limited'` (shown as `RATE_LIMITED_MESSAGE`; nothing was done, so trying later is safe).
