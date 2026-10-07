@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
 
 @import 'tailwindcss';
 @import 'tw-animate-css';
@@ -172,5 +172,10 @@
 
   [data-slot='button']:active:not(:disabled) {
     scale: none;
+  }
+
+  /* Skeletons hold still; their shape alone says something is loading. */
+  [data-slot='skeleton'] {
+    animation: none;
   }
 }
