@@ -266,7 +266,7 @@ class PaymentViewSet(
         return (
             Payment.objects.filter(entry=self.get_entry())
             .select_related("receipt")
-            .order_by("-paid_date", "-created_at", "id")
+            .order_by("-paid_date", "-sequence", "id")
         )
 
     def create(self, request, *args, **kwargs):

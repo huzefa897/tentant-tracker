@@ -150,6 +150,9 @@ class ConcurrentPaymentTests(TransactionTestCase):
 
         self.assertEqual(outcomes, ["created"] * 3)
         self.assertEqual(entry_amounts(self.entry).payment_status, "paid")
+        self.assertEqual(
+            sorted(self.entry.payments.values_list("sequence", flat=True)), [1, 2, 3]
+        )
 
     def test_simultaneous_retries_record_the_money_once(self):
         key = uuid.uuid4()

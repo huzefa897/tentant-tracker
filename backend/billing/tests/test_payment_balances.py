@@ -266,6 +266,14 @@ class PaymentConstraintTests(TestCase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             make_payment(self.entry, self.user, "1.00", idempotency_key=key)
 
+    def test_a_sequence_is_used_once_per_bill_and_starts_at_one(self):
+        make_payment(self.entry, self.user, "1.00", sequence=1)
+
+        for sequence in (0, 1):
+            with self.subTest(sequence=sequence), self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    make_payment(self.entry, self.user, "1.00", sequence=sequence)
+
     def test_a_bill_with_payments_cant_be_deleted(self):
         make_payment(self.entry, self.user, "1.00")
 

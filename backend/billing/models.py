@@ -148,6 +148,10 @@ class Payment(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     paid_date = models.DateField(help_text="The day the money was received.")
     notes = models.CharField(max_length=500, blank=True)
+    # The order payments were recorded on this bill: 1, 2, 3…, given by record_payment while it
+    # holds the bill's lock. Receipts total the payments up to this one by it, never by
+    # created_at, which can tie or run backwards with the clock.
+    sequence = models.PositiveIntegerField(editable=False)
     # One intended payment, chosen by the app (the Idempotency-Key header): a retry with the
     # same key returns this payment instead of recording the money twice.
     idempotency_key = models.UUIDField(editable=False)
@@ -159,10 +163,18 @@ class Payment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        # Newest received first; the same day by when it was recorded; then the id, so the
-        # order never changes between requests.
-        ordering = ("-paid_date", "-created_at", "id")
+        # Newest received first; the same day, the latest recorded first. The sequence is unique
+        # per bill, so the order never changes between requests.
+        ordering = ("-paid_date", "-sequence", "id")
         constraints = [
+            models.UniqueConstraint(
+                fields=["entry", "sequence"],
+                name="unique_payment_sequence_per_entry",
+            ),
+            models.CheckConstraint(
+                condition=Q(sequence__gte=1),
+                name="payment_sequence_positive",
+            ),
             models.UniqueConstraint(
                 fields=["idempotency_key"],
                 name="unique_payment_idempotency_key",

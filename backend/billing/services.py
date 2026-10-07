@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum
+from django.db.models import Max, Q, Sum
 from django.utils import timezone
 
 from properties.models import Tenancy, business_date
@@ -165,8 +165,10 @@ def record_payment(*, entry_id, actor, idempotency_key, validated_data: dict) ->
             if validated_data["amount"] > outstanding:
                 raise PaymentExceedsOutstandingError(max(outstanding, Decimal("0.00")))
 
+            last = entry.payments.aggregate(last=Max("sequence"))["last"] or 0
             payment = Payment.objects.create(
                 entry=entry,
+                sequence=last + 1,
                 amount=validated_data["amount"],
                 paid_date=validated_data["paid_date"],
                 notes=validated_data.get("notes", ""),
