@@ -5,6 +5,7 @@ from io import StringIO
 from pathlib import Path
 from unittest import skipUnless
 
+from django.conf import settings
 from django.core.management import CommandError, call_command
 from django.test import TestCase
 
@@ -299,3 +300,14 @@ class SheetToLedgerCommandTests(TestCase):
 
         with self.assertRaisesMessage(CommandError, "pass --force"):
             self.call()
+
+    def test_never_writes_inside_the_repository(self):
+        self.save([row(datetime(2026, 9, 1), 75)])
+        inside = Path(settings.BASE_DIR) / "ledger-review-test.json"
+
+        for extra in (["--output", str(inside)], ["--mapping-template", str(inside)]):
+            with self.subTest(extra[0]), self.assertRaisesMessage(CommandError, "is public"):
+                self.call(*extra)
+
+        self.assertFalse(inside.exists())
+        self.assertFalse((self.folder / "ledger.json").exists())
