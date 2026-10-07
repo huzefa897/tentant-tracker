@@ -174,3 +174,95 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"₹{self.amount} on {self.paid_date:%d %b %Y} — {self.entry}"
+
+
+class Receipt(models.Model):
+    """Confirms one payment: a snapshot of everything printed on it, copied when it's issued.
+
+    Later payments, or changes to the tenancy, property or bill, never change an issued receipt:
+    reopening or downloading it shows exactly what was saved. The bill's figures are as they
+    stood right after this payment (the payments recorded before it, plus this one), so they're
+    the same whenever the receipt is issued.
+
+    Created only through billing/services.py issue_payment_receipt, which locks the payment so
+    each one gets at most one receipt. Read-only afterwards: corrections and voiding need their
+    own workflow.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # One receipt per payment, enforced by the database (a unique column).
+    payment = models.OneToOneField(Payment, on_delete=models.PROTECT, related_name="receipt")
+    # RCT-<id>: unique without a counter that could collide under simultaneous requests.
+    reference = models.CharField(max_length=50, unique=True, editable=False)
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    issued_at = models.DateTimeField()
+    # The property's date when issued, printed on the receipt. Saved rather than worked out from
+    # issued_at, which would depend on the time zone of whoever downloads it.
+    issued_date = models.DateField()
+
+    # Who issued it, from the property and the issuing person.
+    issuer_name = models.CharField(max_length=150)
+    issuer_address = models.TextField()
+    issuer_contact_number = models.CharField(max_length=20, blank=True)
+    received_by_name = models.CharField(max_length=150, blank=True)
+
+    # The tenancy.
+    tenant_name = models.CharField(max_length=150)
+    flat_number = models.CharField(max_length=20)
+    tenant_mobile_number = models.CharField(max_length=20, blank=True)
+    deposit_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    rent_due_day = models.PositiveSmallIntegerField()
+
+    # The bill.
+    billing_month = models.DateField(help_text="The first day of the billed month.")
+    rent_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    electricity_units = models.DecimalField(max_digits=10, decimal_places=3)
+    electricity_rate = models.DecimalField(max_digits=8, decimal_places=2)
+    electricity_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    water_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    total_due = models.DecimalField(max_digits=12, decimal_places=2)
+    total_paid = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="Paid towards the bill up to and including this payment.",
+    )
+    outstanding_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="Left on the bill after this payment.",
+    )
+    previous_month_outstanding = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="What the previous month's bill still owed when this was issued (for "
+        "information; never added to this bill).",
+    )
+
+    # The payment.
+    payment_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    paid_date = models.DateField()
+    payment_notes = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ("-issued_at", "id")
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(payment_amount__gt=0),
+                name="receipt_payment_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(billing_month__day=1),
+                name="receipt_billing_month_first_day",
+            ),
+        ]
+
+    def __str__(self):
+        return self.reference
+
+
+def receipt_reference(receipt_id: uuid.UUID) -> str:
+    return f"RCT-{receipt_id}"

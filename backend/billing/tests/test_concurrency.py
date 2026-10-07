@@ -8,8 +8,13 @@ from django.db import connection
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
 from billing.calculations import entry_amounts
-from billing.models import Payment, RentEntry
-from billing.services import DuplicateBillingMonthError, create_rent_entry, record_payment
+from billing.models import Payment, Receipt, RentEntry
+from billing.services import (
+    DuplicateBillingMonthError,
+    create_rent_entry,
+    issue_payment_receipt,
+    record_payment,
+)
 
 from .factories import make_property, make_tenancy, make_user
 
@@ -200,3 +205,37 @@ class ConcurrentPaymentTests(TransactionTestCase):
         self.assertEqual(sorted(outcomes), ["created", "replayed", "replayed"])
         self.assertEqual(RentEntry.objects.filter(billing_month=date(2026, 11, 1)).count(), 1)
         self.assertEqual(Payment.objects.count(), 1)
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class ConcurrentReceiptTests(TransactionTestCase):
+    """Simultaneous issuance on separate connections: the payment's row lock (and its unique
+    receipt column behind it) must leave exactly one receipt."""
+
+    def setUp(self):
+        self.user = make_user()
+        self.tenancy = make_tenancy(make_property(member=self.user))
+        entry = make_bill(self.tenancy, self.user)
+        self.payment = record_payment(
+            entry_id=entry.pk, actor=self.user, idempotency_key=uuid.uuid4(), validated_data=PAYMENT
+        ).payment
+
+    def issue(self, _):
+        result = issue_payment_receipt(payment_id=self.payment.pk, actor=self.user)
+        return ("created" if result.created else "returned", result.receipt.reference)
+
+    def test_simultaneous_requests_issue_one_receipt(self):
+        outcomes = run_simultaneously(4, self.issue)
+
+        self.assertEqual(sorted(o[0] for o in outcomes), ["created"] + ["returned"] * 3)
+        self.assertEqual(len({o[1] for o in outcomes}), 1)
+        self.assertEqual(Receipt.objects.count(), 1)
+
+    def test_the_unique_column_decides_when_both_reach_the_insert(self):
+        # As if both found no receipt before either saved: the insert itself must refuse.
+        with mock.patch("billing.services.Receipt.objects.filter") as filter_:
+            filter_.return_value.first.return_value = None
+            outcomes = run_simultaneously(2, self.issue)
+
+        self.assertEqual(sorted(o[0] for o in outcomes), ["created", "returned"])
+        self.assertEqual(Receipt.objects.count(), 1)
