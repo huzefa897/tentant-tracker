@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from unittest import mock
 
@@ -89,6 +89,25 @@ class IssueReceiptServiceTests(ReceiptTestCase):
         self.assertEqual(first.outstanding_amount, Decimal("12750.00"))
         self.assertEqual(second.total_paid, Decimal("8000.00"))
         self.assertEqual(second.outstanding_amount, Decimal("7750.00"))
+
+    def test_counts_payments_in_recorded_order_when_timestamps_tie(self):
+        later = make_payment(self.entry, self.user, "5000.00")
+        Payment.objects.filter(entry=self.entry).update(created_at=self.payment.created_at)
+
+        second = self.issue(later).receipt
+
+        self.assertEqual(second.total_paid, Decimal("8000.00"))
+        self.assertEqual(second.outstanding_amount, Decimal("7750.00"))
+
+    def test_counts_payments_in_recorded_order_when_the_clock_runs_backwards(self):
+        later = make_payment(self.entry, self.user, "5000.00")
+        Payment.objects.filter(pk=later.pk).update(created_at=datetime(2020, 1, 1, tzinfo=UTC))
+
+        first = self.issue().receipt
+        second = self.issue(later).receipt
+
+        self.assertEqual(first.total_paid, Decimal("3000.00"))
+        self.assertEqual(second.total_paid, Decimal("8000.00"))
 
     def test_numbers_a_bills_later_receipts(self):
         second = make_payment(self.entry, self.user, "5000.00")

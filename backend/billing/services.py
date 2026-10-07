@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import Max, Q, Sum
+from django.db.models import Max, Sum
 from django.utils import timezone
 
 from properties.models import Tenancy, business_date
@@ -419,10 +419,10 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
         tenancy = payment.entry.tenancy
         prop = tenancy.property
 
-        # The bill as it stood right after this payment: payments are never edited, and
-        # later ones were recorded after it, so this never changes.
+        # The bill as it stood right after this payment: payments are never edited, and later
+        # ones get higher sequences under the bill's lock, so this never changes.
         paid_through = to_paise(
-            entry.payments.filter(Q(created_at__lt=payment.created_at) | Q(pk=payment.pk))
+            entry.payments.filter(sequence__lte=payment.sequence)
             .aggregate(total=Sum("amount"))["total"]
             or ZERO
         )
