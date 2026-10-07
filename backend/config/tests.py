@@ -63,7 +63,6 @@ class HealthCheckTests(TestCase):
         self.assertEqual(response.status_code, 405)
 
 
-
 class ReadinessCheckTests(TestCase):
     def test_returns_ok_when_the_database_answers(self):
         response = APIClient().get("/api/v1/ready/")
@@ -89,7 +88,6 @@ class ReadinessCheckTests(TestCase):
         client.credentials(HTTP_AUTHORIZATION="Bearer not-checked")
 
         self.assertEqual(client.get("/api/v1/ready/").status_code, 200)
-
 
 
 def unreachable_counts():
@@ -122,6 +120,7 @@ class RateLimitFailsOpenTests(TestCase):
         with unreachable_counts(), self.assertLogs("config.throttling", "WARNING"):
             self.assertEqual(client.get("/protected/").status_code, 200)
             self.assertEqual(client.post("/write/").status_code, 200)
+
 
 class ApiCachingTests(TestCase):
     def test_api_responses_are_never_stored(self):
@@ -357,7 +356,6 @@ class AdminLoginThrottleTests(TestCase):
             self.client.get(self.url)
 
         self.assertEqual(self.login("right-pass-123").status_code, 302)
-
 
 
 @skipUnlessDBFeature("has_select_for_update")
