@@ -68,7 +68,7 @@ To try the containers on your own machine (never on a real server), make a secon
 
 ## Releasing
 
-`scripts/deploy.sh` releases the checked-out commit. CI must have passed for it (tests and the frontend build). The script:
+`scripts/deploy.sh` releases the checked-out commit, and refuses while there are uncommitted or untracked files (they would be built into a release its commit doesn't hold). CI must have passed for it (tests and the frontend build). The script:
 
 1. Builds both images, tagged with the commit (`rent-tracker-backend:<commit>`), so the previous release's images stay available.
 2. Backs up the database ([backups](#backups)).
@@ -80,7 +80,7 @@ Then go through the checks above.
 
 ### Rolling back
 
-`scripts/rollback.sh <release>` starts an earlier release's images again (`deploy/releases.log` lists them). **It doesn't undo migrations.** So:
+`scripts/rollback.sh <release>` starts an earlier release's images again (`deploy/releases.log` lists them), but with the current `compose.prod.yaml` and `.env.production`. If a release since changed either (a new setting, service or volume), check out the earlier commit's `compose.prod.yaml` first, and keep any settings it needs. **It doesn't undo migrations.** So:
 
 - Keep each release's migrations usable by the release before it: add columns as nullable or with defaults, and remove or rename things in a later release, once nothing uses them.
 - When a migration can't be compatible (it rewrites or drops data), say so in its PR, and recover by restoring the backup `deploy.sh` took just before it ([restoring](#restoring-production)), then rolling back. Anything recorded after that backup is lost, so check before choosing this.
