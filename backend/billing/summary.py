@@ -71,7 +71,12 @@ def ledger_summary() -> list[tuple[str, str]]:
         ),
         (
             "payments digest",
-            _digest(Payment.objects.values_list("id", "entry_id", "amount", "paid_date", "notes")),
+            _digest(
+                Payment.objects.values_list(
+                    # The sequence too: receipts total a bill's payments in that order.
+                    "id", "entry_id", "sequence", "amount", "paid_date", "notes"
+                )
+            ),
         ),
         (
             "receipts digest",
