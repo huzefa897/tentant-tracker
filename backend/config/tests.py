@@ -6,7 +6,7 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.management import call_command
-from django.db import connection
+from django.db import OperationalError, connection
 from django.test import (
     Client,
     TestCase,
@@ -62,6 +62,58 @@ class HealthCheckTests(TestCase):
 
         self.assertEqual(response.status_code, 405)
 
+
+
+class ReadinessCheckTests(TestCase):
+    def test_returns_ok_when_the_database_answers(self):
+        response = APIClient().get("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_returns_503_without_details_when_the_database_is_unavailable(self):
+        error = OperationalError('connection to server at "db" failed: password for "app"')
+        with (
+            mock.patch("config.views.connection.cursor", side_effect=error),
+            self.assertLogs("config.views", "WARNING") as logs,
+        ):
+            response = APIClient().get("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        # Neither the response nor the log repeats the driver's message.
+        self.assertNotIn("password", " ".join(logs.output))
+
+    def test_ignores_tokens_so_firebase_outages_do_not_fail_it(self):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION="Bearer not-checked")
+
+        self.assertEqual(client.get("/api/v1/ready/").status_code, 200)
+
+
+class ApiCachingTests(TestCase):
+    def test_api_responses_are_never_stored(self):
+        response = APIClient().get("/api/v1/health/")
+
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        self.assertIn("private", response.headers["Cache-Control"])
+
+    def test_protected_responses_are_never_stored(self):
+        response = APIClient().get("/api/v1/me/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("no-store", response.headers["Cache-Control"])
+
+    @override_settings(CACHES=REAL_CACHE)
+    def test_rate_limited_responses_are_never_stored(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {"address": "1/minute"}):
+            APIClient().get("/api/v1/health/")
+            response = APIClient().get("/api/v1/health/")
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("no-store", response.headers["Cache-Control"])
 
 @override_settings(ROOT_URLCONF=__name__)
 class DefaultPermissionTests(TestCase):

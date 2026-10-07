@@ -5,6 +5,7 @@ from django.db import transaction
 from django.db.models import F
 from django.http import HttpResponse
 from django.urls import reverse
+from django.utils.cache import patch_cache_control
 from django.utils import timezone
 from rest_framework.throttling import BaseThrottle
 
@@ -83,4 +84,17 @@ class AdminLoginThrottleMiddleware:
             AdminLoginAttempts.objects.filter(key=address_key, attempts__gt=0).update(
                 attempts=F("attempts") - 1
             )
+        return response
+
+
+class ApiNoStoreMiddleware:
+    """API responses carry people's records: no browser, proxy or CDN may keep a copy."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if request.path.startswith("/api/"):
+            patch_cache_control(response, no_store=True, private=True)
         return response
