@@ -784,6 +784,21 @@ describe('receipts', () => {
     expect(fakeReceipts.size).toBe(1)
   })
 
+  it('says only to try again when an issued receipt fails to load', async () => {
+    const store = await withProperty()
+    getReceipt.mockRejectedValueOnce(new ApiError('network'))
+    const payment = makePayment({
+      id: 'p-1',
+      entryId: 'sep',
+      receipt: { id: 'r-1', reference: 'Shaik_Zahid_Ali_202_Rent_September 2026' },
+    })
+
+    const error = await receiptError(store.getReceipt('tenant-001', payment))
+
+    expect(error).toMatchObject({ message: RECEIPT_ERROR_MESSAGE, uncertain: false })
+    expect(issueReceipt).not.toHaveBeenCalled()
+  })
+
   it('never changes the payment when a receipt fails', async () => {
     const store = await withProperty()
     await store.loadPayments('tenant-001', 'sep')
@@ -875,6 +890,15 @@ describe('receipts', () => {
 
     expect(error.message).toBe(RECEIPT_ERROR_MESSAGE)
     expect(issueReceipt).not.toHaveBeenCalled()
+  })
+
+  it('says the entry can’t be found when its payments 404', async () => {
+    const store = await withProperty()
+    getPayments.mockRejectedValueOnce(new ApiError('not-found'))
+
+    const error = await receiptError(store.getLatestReceipt('tenant-001', 'sep'))
+
+    expect(error.message).toBe("This entry can't be found. It may no longer be available.")
   })
 
   it('forgets loaded receipts when the property changes', async () => {

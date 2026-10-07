@@ -119,12 +119,16 @@ export class ReceiptError extends Error {
   }
 }
 
-function receiptErrorMessage(err: unknown): string {
+// notFound: what's missing on a 404, the payment unless said otherwise.
+function receiptErrorMessage(
+  err: unknown,
+  notFound = "This payment can't be found. It may no longer be available.",
+): string {
   const problem = receiptConfigurationProblem(err)
   if (problem) return problem
   const kind = err instanceof ApiError ? err.kind : 'unknown'
   if (kind === 'forbidden') return "You don't have permission to issue receipts for this property."
-  if (kind === 'not-found') return "This payment can't be found. It may no longer be available."
+  if (kind === 'not-found') return notFound
   if (kind === 'rate-limited') return RATE_LIMITED_MESSAGE
   if (kind === 'unauthorized')
     return "Your sign-in couldn't be verified. Log out and sign in again."
@@ -596,7 +600,11 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         : (await receiptService.issueReceipt(propertyId, tenantId, payment.entryId, payment.id))
             .receipt
     } catch (err) {
-      if (isUncertainFailure(err)) throw new ReceiptError(RECEIPT_UNCONFIRMED_MESSAGE, true)
+      if (isUncertainFailure(err)) {
+        // Only issuing can leave it unknown whether a receipt now exists; loading one can't.
+        if (payment.receipt) throw new ReceiptError(RECEIPT_ERROR_MESSAGE)
+        throw new ReceiptError(RECEIPT_UNCONFIRMED_MESSAGE, true)
+      }
       throw new ReceiptError(receiptErrorMessage(err))
     }
 
@@ -620,7 +628,9 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       list = await paymentService.getPayments(propertyId, tenantId, entryId)
     } catch (err) {
       throw new ReceiptError(
-        isUncertainFailure(err) ? RECEIPT_ERROR_MESSAGE : receiptErrorMessage(err),
+        isUncertainFailure(err)
+          ? RECEIPT_ERROR_MESSAGE
+          : receiptErrorMessage(err, "This entry can't be found. It may no longer be available."),
       )
     }
     // Shown unless a load started since; one under way when this began may predate the newest
