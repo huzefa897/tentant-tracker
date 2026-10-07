@@ -7,7 +7,7 @@ from rest_framework import serializers
 from properties.models import business_date
 
 from .calculations import entry_amounts
-from .models import Payment, RentEntry
+from .models import Payment, Receipt, RentEntry
 
 MONTH_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -116,17 +116,73 @@ class PaymentCreateSerializer(serializers.Serializer):
 
 
 class PaymentSerializer(serializers.ModelSerializer):
-    """A recorded payment. The amount is a decimal string ("3000.00")."""
+    """A recorded payment. The amount is a decimal string ("3000.00"). receipt: {id, reference}
+    once one is issued, else null (lists load receipts in the same query: select_related)."""
 
     entryId = serializers.UUIDField(source="entry_id")
     amount = serializers.DecimalField(max_digits=10, decimal_places=2)
     paidDate = serializers.DateField(source="paid_date")
     createdAt = serializers.DateTimeField(source="created_at")
+    receipt = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
-        fields = ("id", "entryId", "amount", "paidDate", "notes", "createdAt")
+        fields = ("id", "entryId", "amount", "paidDate", "notes", "createdAt", "receipt")
         read_only_fields = fields
+
+    def get_receipt(self, payment):
+        try:
+            receipt = payment.receipt
+        except Receipt.DoesNotExist:
+            return None
+        return {"id": str(receipt.id), "reference": receipt.reference}
+
+
+def money(value) -> str:
+    return f"{value:.2f}"
+
+
+class ReceiptSerializer(serializers.BaseSerializer):
+    """An issued receipt, entirely from its saved snapshot: never today's tenancy, property,
+    bill or payment details. Money is a decimal string."""
+
+    def to_representation(self, receipt: Receipt):
+        return {
+            "id": str(receipt.id),
+            "reference": receipt.reference,
+            "paymentId": str(receipt.payment_id),
+            "entryId": str(receipt.payment.entry_id),
+            "issuedAt": serializers.DateTimeField().to_representation(receipt.issued_at),
+            "issuedDate": receipt.issued_date.isoformat(),
+            "issuer": {
+                "name": receipt.issuer_name,
+                "address": receipt.issuer_address,
+                "contactNumber": receipt.issuer_contact_number,
+                "receivedBy": receipt.received_by_name,
+            },
+            "tenant": {
+                "name": receipt.tenant_name,
+                "flatNumber": receipt.flat_number,
+                "mobileNumber": receipt.tenant_mobile_number,
+                "depositAmount": money(receipt.deposit_amount),
+            },
+            "billingMonth": format_month(receipt.billing_month),
+            "rentDueDay": receipt.rent_due_day,
+            "charges": {
+                "rentAmount": money(receipt.rent_amount),
+                "electricityUnits": f"{receipt.electricity_units:.3f}",
+                "electricityRate": money(receipt.electricity_rate),
+                "electricityAmount": money(receipt.electricity_amount),
+                "waterAmount": money(receipt.water_amount),
+            },
+            "totalDue": money(receipt.total_due),
+            "totalPaid": money(receipt.total_paid),
+            "outstandingAmount": money(receipt.outstanding_amount),
+            "previousMonthOutstanding": money(receipt.previous_month_outstanding),
+            "paymentAmount": money(receipt.payment_amount),
+            "paidDate": receipt.paid_date.isoformat(),
+            "paymentNotes": receipt.payment_notes,
+        }
 
 
 class RentEntryCreateSerializer(serializers.Serializer):

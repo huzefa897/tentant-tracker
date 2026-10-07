@@ -84,6 +84,7 @@ class RecordPaymentTests(PaymentApiTestCase):
                 "amount": "3000.00",
                 "paidDate": "2026-10-05",
                 "notes": "Bank transfer",
+                "receipt": None,
             },
         )
         self.assertEqual(body["entry"]["id"], str(self.entry.id))
@@ -343,7 +344,8 @@ class PaymentHistoryTests(PaymentApiTestCase):
             [str(same_day_later.id), str(newer.id), str(older.id)],
         )
         self.assertEqual(
-            set(response.json()[0]), {"id", "entryId", "amount", "paidDate", "notes", "createdAt"}
+            set(response.json()[0]),
+            {"id", "entryId", "amount", "paidDate", "notes", "createdAt", "receipt"},
         )
 
     def test_payments_are_read_only(self):
