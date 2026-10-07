@@ -8,7 +8,9 @@ month. Columns are found by their header label, since their positions differ bet
 What it takes, and what it leaves:
 - Each month's own charges: rent, units × the tenant's electricity rate, water. Never Total Due
   or Overdue Amount, which add last month's balance (sometimes twice), so debts would be counted
-  again. The app derives balances from bills and payments.
+  again. The app derives balances from bills and payments. They're only compared: Total Due
+  less last month's Overdue Amount should be the month's own charges, and a tab where it isn't
+  gets a warning, since its figures differ from what the owners saw.
 - Total Paid and Paid Date as one payment, with the receipt the sheet's script emailed for it
   (RCP-<flat>-<yyyyMM>, issued on the paid date).
 - Never Aadhaar numbers, phone numbers or the Email Log.
@@ -20,7 +22,7 @@ downloading it again. Anything it converted but is worth checking is a warning.
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from billing.calculations import ZERO, calculate_electricity, calculate_total_due
 from billing.legacy_ledger import FORMAT, VERSION
@@ -89,6 +91,17 @@ def _decimal(value, places: int) -> Decimal | None:
     return rounded if rounded == number else None
 
 
+def _rounded(value) -> Decimal | None:
+    """A formula's number to the paisa (they can carry float noise), or None if it isn't one."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(str(value).strip().replace(",", ""))
+    except InvalidOperation:
+        return None
+    return number.quantize(Decimal("0.01"), ROUND_HALF_UP) if number.is_finite() else None
+
+
 def _date(value) -> date | None:
     if isinstance(value, datetime):
         return value.date()
@@ -123,6 +136,8 @@ class _Tab:
         self.today = today
         self.rows = [list(row) for row in sheet.iter_rows(values_only=True)]
         self.failed = False
+        # (row, month, the Sheet's own charges, the ledger's) where they differ.
+        self.mismatches: list[tuple[int, date, Decimal, Decimal]] = []
 
     def problem(self, row: int | None, message: str):
         self.failed = True
@@ -182,6 +197,9 @@ class _Tab:
             bill = self.convert_row(index + 1, self.rows[index], columns, rate, flat, months)
             if bill:
                 bills.append(bill)
+                previous = self.rows[index - 1] if index - 1 > header else None
+                self.compare_with_sheet(index + 1, self.rows[index], previous, columns, bill)
+        self.report_mismatches()
         name = str(details.get("name") or "").strip()
         return {"sourceId": self.name, "name": name, "bills": bills}
 
@@ -254,6 +272,40 @@ class _Tab:
         if payment:
             bill["payments"].append(payment)
         return bill
+
+    def compare_with_sheet(self, number, row, previous, columns, bill):
+        """Notes the month if the Sheet's Total Due, less last month's Overdue Amount (what it
+        carried forward), isn't the bill's own charges. Rows without those figures are skipped."""
+        due_column, overdue_column = columns.get("total due"), columns.get("overdue amount")
+        if due_column is None or overdue_column is None or due_column >= len(row):
+            return
+        sheet_due = _rounded(row[due_column])
+        carried = previous[overdue_column] if previous and overdue_column < len(previous) else None
+        carried = ZERO if _blank(carried) else _rounded(carried)
+        if sheet_due is None or carried is None:
+            return
+        own = calculate_total_due(
+            Decimal(bill["rentAmount"]),
+            Decimal(bill["electricityUnits"]),
+            Decimal(bill["electricityRate"]),
+            Decimal(bill["waterAmount"]),
+        )
+        if sheet_due - carried != own:
+            month = date.fromisoformat(f"{bill['billingMonth']}-01")
+            self.mismatches.append((number, month, sheet_due - carried, own))
+
+    def report_mismatches(self):
+        if not self.mismatches:
+            return
+        number, month, sheet, own = self.mismatches[0]
+        rows = ", ".join(str(row) for row, *_ in self.mismatches)
+        self.warning(
+            None,
+            f"{len(self.mismatches)} month(s) where Total Due, less last month's Overdue "
+            f"Amount, isn't the month's own charges (rows {rows}); e.g. {month:%B %Y} shows "
+            f"{sheet}, the ledger bills {own}. The ledger's figures are what's imported: check "
+            "them against the Sheet",
+        )
 
     def convert_payment(self, number, month, cell, bill, flat) -> dict | None | bool:
         """The month's payment, None if there's none, or False after a problem."""

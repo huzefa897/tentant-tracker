@@ -50,11 +50,14 @@ def tenant_tab(workbook, title, rows, *, rate=6, flat=202.0, notes_header="Notes
 
 
 def row(month, units, paid=None, paid_date=None, *, rent=15000, water=None, notes=None,
-        total_due=99999, charge=None, rate=6):
-    # Total Due is deliberately wrong (as with the sheet's carry-forward): it's never read.
+        total_due=None, charge=None, rate=6, overdue=0):
+    # Total Due and Overdue Amount are never imported, only compared. By default Total Due is
+    # the month's own charges, with nothing carried forward from last month.
     charge = round(units * rate, 2) if charge is None and units is not None else charge
+    if total_due is None:
+        total_due = rent + (charge or 0) + (water or 0)
     return [month, rent, "Paid", units, charge, water, total_due, paid, paid_date, notes,
-            False, 0]
+            False, overdue]
 
 
 def workbook_with(*tabs):
@@ -165,6 +168,49 @@ class ConvertWorkbookTests(TestCase):
 
         self.assertEqual(conversion.ledger["tenants"][0]["bills"][0]["electricityRate"], "7.00")
         self.assertIn("electricity charged at 7.00/unit", conversion.warnings[0])
+
+    def test_follows_the_sheets_carry_forward_without_warning(self):
+        # August left ₹5,750 owing; September's Total Due adds it once, as it should.
+        conversion = convert(
+            (
+                "Tenant A",
+                [
+                    row(datetime(2026, 8, 1), 75, 10000, datetime(2026, 8, 16), water=300,
+                        overdue=5750),
+                    row(datetime(2026, 9, 1), 80, total_due=15480 + 5750, overdue=21230),
+                ],
+                {},
+            )
+        )
+
+        self.assertEqual(conversion.problems, [])
+        self.assertEqual(conversion.warnings, [])
+
+    def test_warns_once_per_tab_where_total_due_isnt_the_months_charges(self):
+        conversion = convert(
+            (
+                "Tenant A",
+                [
+                    row(datetime(2026, 8, 1), 75, 10000, datetime(2026, 8, 16), water=300,
+                        overdue=5750),
+                    # Last month's balance added twice, as on two of the owners' tabs.
+                    row(datetime(2026, 9, 1), 80, total_due=15480 + 2 * 5750, overdue=26980),
+                    # Water left out of Total Due.
+                    row(datetime(2026, 10, 1), 70, water=200, total_due=15420 + 26980),
+                ],
+                {},
+            )
+        )
+
+        self.assertEqual(conversion.problems, [])
+        self.assertEqual(len(conversion.warnings), 1)
+        warning = conversion.warnings[0]
+        self.assertIn("2 month(s)", warning)
+        self.assertIn("(rows 12, 13)", warning)
+        self.assertIn("September 2026 shows 21230.00, the ledger bills 15480.00", warning)
+        # Only compared: the ledger keeps the month's own charges.
+        october = conversion.ledger["tenants"][0]["bills"][2]
+        self.assertEqual(october["waterAmount"], "200.00")
 
     def test_skips_tabs_without_a_month_header(self):
         workbook = workbook_with()

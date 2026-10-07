@@ -51,7 +51,7 @@ It prints what it found (tenants, bills, payments, receipts, total billed and pa
 - **Problems**: rows it couldn't convert safely, with the tab and row. Nothing is written until they're fixed. Fix them **in the Sheet** (a working copy is fine), download again and rerun. The usual ones (see [google-sheets-integration.md](google-sheets-integration.md)):
   - _paid more than the month's own charges_: the Sheet let a payment cover several months; the app keeps each payment on its own month's bill. Move the part that paid other months into those months' Total Paid (with the right dates).
   - _Paid Date isn't a date_, _Rent Amount isn't more than 0_, _Electricity Charge isn't Units Used × a rate_: correct the cell.
-- **Check these**: things it converted but you should look at, e.g. a paid date that looks like its day and month were swapped, or a month with a payment but no units.
+- **Check these**: things it converted but you should look at, e.g. a paid date that looks like its day and month were swapped, or a month with a payment but no units. A tab whose Total Due, less last month's Overdue Amount, isn't the month's own charges (last month's balance added twice, water left out, an Overdue Amount typed over) gets one warning listing its rows: the ledger has the month's own charges, so those months' balances will differ from what the Sheet showed. Check them against the Sheet.
 
 Read `ledger.json`: it's plain text, one entry per month.
 
@@ -90,6 +90,8 @@ Run the same command without `--dry-run`. It prints what it created and the reco
 | bills, payments, receipts       | the same count in the ledger and the database |
 | total billed, total paid        | the same                                      |
 | bills whose outstanding differs | 0                                             |
+
+These compare the ledger with the database, so they catch an import gone wrong, or payments recorded in the app since an earlier run. They can't tell you the ledger matches the Sheet: that's step 3's warnings and your reading of `ledger.json`.
 
 Then compare with what the converter printed in step 3, open a few tenants in the app (their bills, payments and receipts), and run `python manage.py ledger_summary` for the database's totals.
 
