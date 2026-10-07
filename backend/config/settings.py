@@ -43,6 +43,8 @@ ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 # environment (`manage.py check --deploy` lists what's missing). Behind a proxy that ends TLS,
 # DJANGO_BEHIND_HTTPS_PROXY trusts its X-Forwarded-Proto, so redirects don't loop.
 SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT")
+# The container's own health checks call these over plain http from inside it.
+SECURE_REDIRECT_EXEMPT = [r"^api/v1/(health|ready)/$"]
 if env_bool("DJANGO_BEHIND_HTTPS_PROXY"):
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_HSTS_SECONDS = env_int("DJANGO_SECURE_HSTS_SECONDS", 0)
@@ -81,6 +83,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Serves admin's static files (collected into STATIC_ROOT in the image) in production.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     # Before CommonMiddleware so CORS headers are added to every response.
     "corsheaders.middleware.CorsMiddleware",
     # Cache-Control: no-store on every API response; outside the rate limit, so its 429 too.
@@ -152,6 +156,8 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# `manage.py collectstatic` copies admin's CSS and JS here (done when the image is built).
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # The app sends no email yet. Development prints it; production uses SMTP unless set.
 MAILERS = {
