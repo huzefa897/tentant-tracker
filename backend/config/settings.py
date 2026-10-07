@@ -223,7 +223,7 @@ REST_FRAMEWORK = {
     # authentication (ApiRateLimitMiddleware, "address"), then per signed-in person, with writes
     # limited more strictly. Over a limit is 429 with Retry-After.
     "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.UserRateThrottle",
+        "config.throttling.UserRateThrottle",
         "config.throttling.WriteRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {

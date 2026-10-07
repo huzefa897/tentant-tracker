@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+# The VITE_* build arguments are public by design (below), not secrets.
+# check=skip=SecretsUsedInArgOrEnv
 # The public web server: Caddy with the built Vue app. Caddy gets HTTPS certificates, serves the
 # app and passes the API, admin and admin's static files to Django (deploy/web/Caddyfile).
 # Build context: the repository root (its .dockerignore lists what's sent).
