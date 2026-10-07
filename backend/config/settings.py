@@ -83,6 +83,8 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     # Before CommonMiddleware so CORS headers are added to every response.
     "corsheaders.middleware.CorsMiddleware",
+    # Cache-Control: no-store on every API response; outside the rate limit, so its 429 too.
+    "config.middleware.ApiNoStoreMiddleware",
     # After CORS, so a 429 still carries CORS headers and the app can read it.
     "config.throttling.ApiRateLimitMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
