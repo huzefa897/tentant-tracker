@@ -53,6 +53,8 @@ It prints what it found (tenants, bills, payments, receipts, total billed and pa
   - _Paid Date isn't a date_, _Rent Amount isn't more than 0_, _Electricity Charge isn't Units Used × a rate_: correct the cell.
 - **Check these**: things it converted but you should look at, e.g. a paid date that looks like its day and month were swapped, or a month with a payment but no units. A tab whose Total Due, less last month's Overdue Amount, isn't the month's own charges (last month's balance added twice, water left out, an Overdue Amount typed over) gets one warning listing its rows: the ledger has the month's own charges, so those months' balances will differ from what the Sheet showed. Check them against the Sheet.
 
+It writes only outside the repository (the files hold tenants' names and payments), and refuses a path inside it.
+
 Read `ledger.json`: it's plain text, one entry per month.
 
 ### 4. Create the tenancies and fill in the mapping

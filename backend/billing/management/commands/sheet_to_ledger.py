@@ -1,10 +1,22 @@
 import json
 from pathlib import Path
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from billing.sheet_ledger import convert_workbook
 from properties.models import business_date
+
+
+def _repository() -> Path | None:
+    """The checkout this runs from, if it is one (the repository is public)."""
+    root = Path(settings.BASE_DIR).parent
+    return root.resolve() if (root / ".git").exists() else None
+
+
+def _inside_repository(path: Path) -> bool:
+    repository = _repository()
+    return repository is not None and path.expanduser().resolve().is_relative_to(repository)
 
 
 class Command(BaseCommand):
@@ -30,6 +42,14 @@ class Command(BaseCommand):
             raise CommandError("Needs openpyxl: run `pipenv install --dev`.") from None
 
         output = Path(options["output"])
+        template = options["mapping_template"]
+        # Both hold tenants' names (and the ledger their payments): never where git can see them.
+        for path in (output, Path(template) if template else None):
+            if path is not None and _inside_repository(path):
+                raise CommandError(
+                    f"{path} is inside the repository, which is public: write it somewhere "
+                    "private outside it (e.g. ~/private/)."
+                )
         if output.exists() and not options["force"]:
             raise CommandError(f"{output} exists; pass --force to replace it.")
         try:
@@ -58,7 +78,6 @@ class Command(BaseCommand):
 
         output.write_text(json.dumps(conversion.ledger, indent=2, ensure_ascii=False) + "\n")
         self.stdout.write(self.style.SUCCESS(f"\nWrote {output}."))
-        template = options["mapping_template"]
         if template and not Path(template).exists():
             mapping = {tenant["sourceId"]: "" for tenant in conversion.ledger["tenants"]}
             Path(template).write_text(json.dumps(mapping, indent=2, ensure_ascii=False) + "\n")
