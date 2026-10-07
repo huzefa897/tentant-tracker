@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import path, reverse
 from rest_framework.decorators import api_view
@@ -152,6 +153,28 @@ class RateLimitTests(TestCase):
         self.assertEqual(response.status_code, 429)
         self.assertIn("Retry-After", response.headers)
 
+
+
+SHARED_CACHE = {
+    "default": {"BACKEND": "django.core.cache.backends.db.DatabaseCache", "LOCATION": "django_cache"}
+}
+
+
+@override_settings(ROOT_URLCONF=__name__, CACHES=SHARED_CACHE)
+class SharedCacheRateLimitTests(TestCase):
+    """DJANGO_SHARED_CACHE keeps the counts in PostgreSQL, shared by every process."""
+
+    def setUp(self):
+        call_command("createcachetable", verbosity=0)
+        rates = mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {"address": "2/minute"})
+        rates.start()
+        self.addCleanup(rates.stop)
+
+    def test_limits_requests_with_the_database_cache(self):
+        client = APIClient()
+        statuses = [client.get("/api/protected/").status_code for _ in range(3)]
+
+        self.assertEqual(statuses, [401, 401, 429])
 
 @override_settings(CACHES=REAL_CACHE)
 class AdminLoginThrottleTests(TestCase):

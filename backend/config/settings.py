@@ -170,13 +170,12 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 CORS_URLS_REGEX = r"^/api/.*$"
 CORS_ALLOW_CREDENTIALS = False
 
-# Throttle counts live in the cache. Production with more than one process needs a shared cache
-# (REDIS_URL, which needs the `redis` package); local memory is per process.
-REDIS_URL = os.getenv("REDIS_URL", "").strip()
+# Throttle counts live in the cache. Local memory is per process; with more than one process,
+# set DJANGO_SHARED_CACHE to keep them in PostgreSQL (run `manage.py createcachetable` once).
 CACHES = {
     "default": (
-        {"BACKEND": "django.core.cache.backends.redis.RedisCache", "LOCATION": REDIS_URL}
-        if REDIS_URL
+        {"BACKEND": "django.core.cache.backends.db.DatabaseCache", "LOCATION": "django_cache"}
+        if env_bool("DJANGO_SHARED_CACHE")
         else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
     ),
 }
