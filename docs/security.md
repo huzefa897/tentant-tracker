@@ -15,11 +15,11 @@ The rules every change follows, what's in place, and what's left. Update the sta
 | 7   | No secrets in logs               | Done (rule + logging config)                                            |
 | 8   | Parameterised SQL                | Done (rule)                                                             |
 | 9   | Validate form inputs             | Done (rule)                                                             |
-| 10  | Block XSS                        | Done in code and API headers; the app's CSP is set where it's hosted    |
+| 10  | Block XSS                        | Done in code, API and Caddy headers; CSP report-only until checked      |
 | 11  | Validate uploads                 | Rule, for when uploads arrive                                           |
 | 12  | Rate-limit all requests          | Done                                                                    |
 | 13  | Tighten CORS                     | Done                                                                    |
-| 14  | Production settings, DEBUG off   | Done; checked in CI                                                     |
+| 14  | Production settings, DEBUG off   | Done; set by compose.prod.yaml, checked in CI                           |
 | 15  | Patch dependencies               | Done; audited in CI, Dependabot weekly                                  |
 
 All settings below come from the environment; `backend/.env.example` lists every variable.
@@ -57,7 +57,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 6. Secrets stay server-side
 
-- Backend secrets (`DJANGO_SECRET_KEY`, the database password, the Firebase service-account key path) come from the gitignored `backend/.env`. The service-account JSON lives outside the repository. In production, use the host's secret store.
+- Backend secrets (`DJANGO_SECRET_KEY`, the database password, the Firebase service-account key path) come from the gitignored `backend/.env`. The service-account JSON lives outside the repository. In production they come from the gitignored `.env.production` on the server, each container gets only the ones it needs, and the key is mounted read-only; neither image contains any (their `.dockerignore` files are allowlists). [deployment.md](deployment.md) says how to keep a copy for recovery.
 - `VITE_*` variables are bundled into the app and are **public**: never put a secret in one. The Firebase web config is public by design.
 - Apps Script secrets live in Script Properties, never in the code. The repo is public: never commit tenant data, phone numbers, emails, sheet or script IDs.
 
@@ -87,13 +87,13 @@ All settings below come from the environment; `backend/.env.example` lists every
 - Redirects after login only follow same-app paths (`?redirect=`).
 - The API returns JSON only; receipts are generated as PDFs with jsPDF text.
 - **Django's responses** carry `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `Cross-Origin-Opener-Policy: same-origin` and `X-Frame-Options: DENY`, stated explicitly in `settings.py` and tested.
-- **The app's Content-Security-Policy** is set by whatever serves the built app; it isn't hosted yet. Start from this policy and check that phone sign-in (reCAPTCHA) still works in staging before tightening:
+- **The app's headers** come from Caddy ([deploy/web/Caddyfile](../deploy/web/Caddyfile)): the same four, plus HSTS and a **Content-Security-Policy**, sent as `Content-Security-Policy-Report-Only` until phone sign-in (reCAPTCHA) has been checked against it in the browser, then switched to enforcing ([deployment.md](deployment.md), first deploy). The policy:
 
   ```
   default-src 'self';
   script-src 'self' https://www.google.com https://www.gstatic.com https://apis.google.com;
-  frame-src https://www.google.com https://<firebase-project>.firebaseapp.com;
-  connect-src 'self' <api-origin> https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com;
+  frame-src https://www.google.com https://<VITE_FIREBASE_AUTH_DOMAIN>;
+  connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com;
   img-src 'self' data:;
   font-src 'self' data:;
   style-src 'self' 'unsafe-inline';
@@ -101,6 +101,8 @@ All settings below come from the environment; `backend/.env.example` lists every
   base-uri 'self';
   frame-ancestors 'none'
   ```
+
+  With a separate API domain, add its origin to `connect-src`. Add a source only when a reported violation needs it.
 
 ## 11. Validate uploads (future)
 
@@ -126,7 +128,7 @@ In production:
 
 - **Proxies:** behind a proxy, set `DJANGO_NUM_PROXIES` to how many there are, so each client's own address is read from `X-Forwarded-For`. Without it, every client shares the proxy's address. It defaults to `0`, which ignores `X-Forwarded-For`: clients can forge that header, so it's only trusted for the proxies you declare (never `None`, which would make DRF trust the whole header and let anyone dodge the limits). This applies to the admin login throttle too.
 - **Shared counts:** the default local-memory cache is per process, so with N worker processes a person effectively gets N times each limit. With more than one process, set `DJANGO_SHARED_CACHE=true` to keep counts in PostgreSQL (Django's database cache, table `django_cache`; run `manage.py createcachetable` once per database). Redis isn't used (decided 2026-10-07).
-- **Proxy limits:** add limits at the proxy as well.
+- **Proxy limits:** Caddy has no rate limiting without a plugin, so the app's limits are the ones that apply. Add proxy limits if traffic ever calls for them.
 
 Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry over between tests. The rate-limit tests turn a real cache back on.
 
@@ -148,6 +150,8 @@ Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry ov
 - **Cookies:** admin's session and CSRF cookies are HTTPS-only unless `DEBUG` is on (`DJANGO_SECURE_COOKIES` overrides). `DJANGO_CSRF_TRUSTED_ORIGINS` lists admin's HTTPS origin if it's behind a proxy.
 - **Email:** the app sends none yet. The backend is console in development and SMTP otherwise (`DJANGO_EMAIL_BACKEND`).
 - **CI** runs `manage.py check --deploy --fail-level WARNING` with production-like settings, so a setting that weakens production fails the build.
+- **In production** `compose.prod.yaml` sets all of these (DEBUG off, the HTTPS redirect, HSTS, secure cookies, the proxy settings, shared rate-limit counts), from `.env.production` where they vary ([deployment.md](deployment.md)).
+- **Caching:** every `/api/` response carries `Cache-Control: no-store, private` (`ApiNoStoreMiddleware`), so no browser, proxy or CDN keeps people's records.
 
 ## 15. Patch dependencies
 

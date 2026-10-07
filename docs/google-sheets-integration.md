@@ -1,8 +1,9 @@
 # Google Sheets integration (later phase)
 
-**Status:** not started. These notes come from reviewing the current spreadsheet
-(`TenantTracker.xlsx`) and its Google Apps Script. Read this before starting the phase that
-connects the app to Google Sheets.
+**Status:** the Sheet's history is imported once, at go-live (BE Phase 7,
+[data-import.md](data-import.md)); after that the backend is the source of truth. A Sheets
+export is a later phase. These notes come from reviewing the current spreadsheet
+(`TenantTracker.xlsx`) and its Google Apps Script. Read this before any Sheets work.
 
 > **This repository is public.** Never commit the real spreadsheet, an export of it, or the
 > script with its current `CONFIG`. The sheet holds tenants' names, phone numbers, deposit
