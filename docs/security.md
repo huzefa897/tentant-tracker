@@ -28,7 +28,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 - **Django admin** uses Django's session login and needs `is_staff`. App people get an unusable password (`accounts/admin.py`), so a phone sign-in never opens admin. Admin access and app access are separate permissions ([auth-and-access.md](auth-and-access.md)).
 - **Its path** is `DJANGO_ADMIN_PATH` (default `admin/`). Use a non-obvious one in production.
-- **Failed logins are throttled** (`config/middleware.py` `AdminLoginThrottleMiddleware`): 5 failures per address and username, or 20 per address across usernames, within 15 minutes, then 429 with `Retry-After`. A successful login clears that username's count.
+- **Failed logins are throttled** (`config/middleware.py` `AdminLoginThrottleMiddleware`): 5 failures per address and username, or 20 per address across usernames, within 15 minutes, then 429 with `Retry-After`. Each attempt is reserved **before** the password is checked, under a row lock in PostgreSQL (`accounts.AdminLoginAttempts`), so a burst of simultaneous guesses can't slip past the limit and every process shares the count. A successful login clears that username's count and gives the address its attempt back.
 - **App routes**: the guards in `router/index.ts` are UX only. Every API endpoint checks access itself (item 2).
 - **Left to hosting and staff:** restrict admin by network or VPN where possible, and consider 2FA for staff (e.g. `django-otp`).
 
@@ -124,7 +124,7 @@ Admin login is throttled separately (item 1). OTP abuse is limited by Firebase a
 
 In production:
 
-- **Proxies:** behind a proxy, set `DJANGO_NUM_PROXIES` so each client's own address is used (from `X-Forwarded-For`). Without it, every client shares the proxy's address.
+- **Proxies:** behind a proxy, set `DJANGO_NUM_PROXIES` to how many there are, so each client's own address is read from `X-Forwarded-For`. Without it, every client shares the proxy's address. It defaults to `0`, which ignores `X-Forwarded-For`: clients can forge that header, so it's only trusted for the proxies you declare (never `None`, which would make DRF trust the whole header and let anyone dodge the limits). This applies to the admin login throttle too.
 - **Shared counts:** the default local-memory cache is per process, so with N worker processes a person effectively gets N times each limit. With more than one process, set `DJANGO_SHARED_CACHE=true` to keep counts in PostgreSQL (Django's database cache, table `django_cache`; run `manage.py createcachetable` once per database). Redis isn't used (decided 2026-10-07).
 - **Proxy limits:** add limits at the proxy as well.
 
