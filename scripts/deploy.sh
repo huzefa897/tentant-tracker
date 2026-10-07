@@ -11,8 +11,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/production.sh
 
-[[ -z "$(git status --porcelain --untracked-files=no)" ]] ||
-  die "uncommitted changes: deploy a commit, so the release can be found again."
+# Untracked files count too: the images are built from the working tree, so one would ship in a
+# release its commit doesn't hold. (Ignored files, such as .env.production, don't.)
+[[ -z "$(git status --porcelain)" ]] ||
+  die "uncommitted or untracked files: deploy a commit, so the release can be found again."
 export RELEASE
 RELEASE=$(git rev-parse --short HEAD)
 previous=$(tail -n 1 deploy/releases.log 2>/dev/null | cut -d' ' -f2 || true)

@@ -4,6 +4,8 @@
 #
 # It does NOT undo database migrations. Releases should keep the database usable by the
 # previous release; when one can't, restore the backup deploy.sh took (docs/deployment.md).
+# It uses the current compose.prod.yaml and .env.production: if a later release changed them,
+# check out the earlier compose.prod.yaml first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/production.sh
