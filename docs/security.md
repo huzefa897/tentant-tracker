@@ -10,7 +10,7 @@ The rules every change follows, what's in place, and what's left. Update the sta
 | 2   | Server-side access, always       | Done (rule)                                                             |
 | 3   | Row-level security               | Done in the app; PostgreSQL RLS not used                                |
 | 4   | Hash passwords                   | Done (Argon2)                                                           |
-| 5   | No auth tokens stored by the app | Done; Firebase's own session persistence to decide                      |
+| 5   | No auth tokens stored by the app | Done; Firebase keeps its own session (decided)                          |
 | 6   | Secrets stay server-side         | Done (rule)                                                             |
 | 7   | No secrets in logs               | Done (rule + logging config)                                            |
 | 8   | Parameterised SQL                | Done (rule)                                                             |
@@ -53,7 +53,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 ## 5. No auth tokens stored by the app
 
 - The app never stores the Firebase ID token. `services/api.ts` asks `authService.getIdToken()` for it on each request; Firebase caches and refreshes it in memory. Never put a token in `localStorage`, `sessionStorage`, a cookie, a URL or a store.
-- **To decide:** the Firebase SDK keeps its own session (including a refresh token) in IndexedDB by default (`browserLocalPersistence`), which is what keeps people signed in after a reload. Switching to `browserSessionPersistence` (per tab) or `inMemoryPersistence` (every reload signs out) trades convenience for less stored on the device. It's a one-line change in `services/auth.service.ts` (`setPersistence`).
+- **Decided 2026-10-07: keep Firebase's default persistence.** The Firebase SDK keeps its own session (including a refresh token) in IndexedDB (`browserLocalPersistence`), so people stay signed in after a reload. That's Firebase's storage, not the app's: the ID token is short-lived and refreshed by the SDK, and logout clears the session. If that ever needs tightening, `browserSessionPersistence` (per tab) or `inMemoryPersistence` (every reload signs out) is a one-line change in `services/auth.service.ts` (`setPersistence`).
 
 ## 6. Secrets stay server-side
 
@@ -125,7 +125,7 @@ Admin login is throttled separately (item 1). OTP abuse is limited by Firebase a
 In production:
 
 - **Proxies:** behind a proxy, set `DJANGO_NUM_PROXIES` so each client's own address is used (from `X-Forwarded-For`). Without it, every client shares the proxy's address.
-- **Shared counts:** with more than one process, set `REDIS_URL` (and install `redis`) so counts are shared. The default local-memory cache is per process.
+- **Shared counts:** the default local-memory cache is per process, so with N worker processes a person effectively gets N times each limit. With more than one process, set `DJANGO_SHARED_CACHE=true` to keep counts in PostgreSQL (Django's database cache, table `django_cache`; run `manage.py createcachetable` once per database). Redis isn't used (decided 2026-10-07).
 - **Proxy limits:** add limits at the proxy as well.
 
 Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry over between tests. The rate-limit tests turn a real cache back on.
@@ -142,7 +142,7 @@ Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry ov
 - `DEBUG` defaults to off (`DJANGO_DEBUG` must be `true` to turn it on), and `ALLOWED_HOSTS` comes from the environment.
 - **HTTPS:**
   - `DJANGO_SECURE_SSL_REDIRECT` redirects to HTTPS.
-  - `DJANGO_SECURE_HSTS_SECONDS` and `DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS` set HSTS. HSTS preload is a decision for the whole domain and is left out (its check is silenced).
+  - `DJANGO_SECURE_HSTS_SECONDS` and `DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS` set HSTS: once a browser has visited over HTTPS, it refuses plain http for that long. **HSTS preload** (left out, its check silenced) would go further: submitting the domain to a list built into browsers, so even a first visit is HTTPS-only. It applies to the whole domain and every subdomain and takes months to undo, so it's only worth it once the domain is dedicated to HTTPS for good.
   - Behind a TLS proxy, set `DJANGO_BEHIND_HTTPS_PROXY` to trust its `X-Forwarded-Proto`, so redirects don't loop.
   - These default to off, so local http development and tests work.
 - **Cookies:** admin's session and CSRF cookies are HTTPS-only unless `DEBUG` is on (`DJANGO_SECURE_COOKIES` overrides). `DJANGO_CSRF_TRUSTED_ORIGINS` lists admin's HTTPS origin if it's behind a proxy.
