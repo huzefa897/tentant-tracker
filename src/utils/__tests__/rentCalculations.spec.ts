@@ -125,6 +125,7 @@ describe('sortPaymentsNewestFirst', () => {
     paidDate,
     notes: '',
     createdAt,
+    receipt: null,
   })
 
   it('sorts by paid date, then by when it was recorded, newest first', () => {

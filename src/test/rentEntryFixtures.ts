@@ -52,6 +52,7 @@ export function makePayment(overrides: Partial<Payment> = {}): Payment {
     paidDate: '2026-10-03',
     notes: '',
     createdAt: '2026-10-03T06:00:00.000Z',
+    receipt: null,
     ...overrides,
   }
 }
@@ -61,17 +62,16 @@ export function makePayment(overrides: Partial<Payment> = {}): Payment {
 export function makeReceipt(overrides: Partial<PaymentReceipt> = {}): PaymentReceipt {
   return {
     id: 'receipt-1',
-    reference: 'RCP-202-202609',
+    reference: 'RCT-0b7c9e52-4f1a-4d3e-9a8b-1c2d3e4f5a6b',
     paymentId: 'payment-1',
     entryId: 'entry-1',
     issuedAt: '2026-10-03T07:00:00.000Z',
     issuedDate: '2026-10-03',
     issuer: {
       name: 'Saleem Towers',
-      managerName: 'Test Manager',
       address: '1 Example Road\nHyderabad',
       contactNumber: '',
-      email: '',
+      receivedBy: 'Test Manager',
     },
     tenant: {
       name: 'Shaik Zahid Ali',
@@ -81,7 +81,13 @@ export function makeReceipt(overrides: Partial<PaymentReceipt> = {}): PaymentRec
     },
     billingMonth: '2026-09',
     rentDueDay: 11,
-    charges: { rentAmount: 15000, electricityUnits: 75, electricityRate: 6, waterAmount: 300 },
+    charges: {
+      rentAmount: 15000,
+      electricityUnits: 75,
+      electricityRate: 6,
+      electricityAmount: 450,
+      waterAmount: 300,
+    },
     totalDue: 15750,
     totalPaid: 10000,
     outstanding: 5750,

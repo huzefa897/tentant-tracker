@@ -27,6 +27,7 @@ const paymentDto = {
   paidDate: '2026-10-05',
   notes: 'Bank transfer',
   createdAt: '2026-10-05T08:00:00Z',
+  receipt: null,
 }
 
 const entryDto = {
@@ -77,7 +78,14 @@ describe('parsePayment', () => {
       paidDate: '2026-10-05',
       notes: 'Bank transfer',
       createdAt: '2026-10-05T08:00:00Z',
+      receipt: null,
     })
+  })
+
+  it('maps the receipt issued for it', () => {
+    const receipt = { id: 'r-1', reference: 'RCT-r-1' }
+
+    expect(toPayment(parsePayment({ ...paymentDto, receipt })).receipt).toEqual(receipt)
   })
 
   it.each([
@@ -87,6 +95,8 @@ describe('parsePayment', () => {
     ['a negative amount', { amount: '-1.00' }],
     ['a timestamp as the paid date', { paidDate: '2026-10-05T00:00:00Z' }],
     ['missing notes', { notes: null }],
+    ['no receipt field', { receipt: undefined }],
+    ['a receipt without a reference', { receipt: { id: 'r-1', reference: '' } }],
   ])('rejects %s', (_, change) => {
     expect(() => parsePayment({ ...paymentDto, ...change })).toThrow(ApiError)
   })

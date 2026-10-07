@@ -3,9 +3,11 @@ import { defineStore } from 'pinia'
 
 import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { outstandingFromConflict, paymentService } from '@/services/payment.service'
+import { receiptConfigurationProblem, receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { useAccessStore } from '@/stores/access'
 import type { Payment, PaymentInput, RecordedPayment } from '@/types/payment'
+import type { PaymentReceipt } from '@/types/receipt'
 import type { NewRentEntrySubmission, PaymentStatus, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { validatePaymentDraft, validatePaymentInput } from '@/utils/paymentValidation'
@@ -28,6 +30,9 @@ export const PAYMENT_UNCONFIRMED_MESSAGE =
   "We couldn't confirm whether the payment was saved. Save again to retry: it won't be recorded twice."
 export const PAYMENT_KEY_CONFLICT_MESSAGE =
   'A payment from your earlier attempt was already recorded. Check the payment history before recording another.'
+export const RECEIPT_ERROR_MESSAGE = 'Unable to get the receipt. Please try again.'
+export const RECEIPT_UNCONFIRMED_MESSAGE =
+  "We couldn't confirm whether the receipt was issued. Try again: it won't issue a second one."
 
 // No response, a server error or a response we couldn't read: the request may have been
 // carried out anyway. Retrying with the same idempotency key is safe; a new key isn't.
@@ -102,6 +107,30 @@ export class PaymentSaveError extends Error {
   }
 }
 
+// A receipt that couldn't be issued or loaded. The payment is never affected. uncertain: there
+// was no usable response; trying again is safe (the payment has at most one receipt).
+export class ReceiptError extends Error {
+  constructor(
+    message: string,
+    readonly uncertain = false,
+  ) {
+    super(message)
+    this.name = 'ReceiptError'
+  }
+}
+
+function receiptErrorMessage(err: unknown): string {
+  const problem = receiptConfigurationProblem(err)
+  if (problem) return problem
+  const kind = err instanceof ApiError ? err.kind : 'unknown'
+  if (kind === 'forbidden') return "You don't have permission to issue receipts for this property."
+  if (kind === 'not-found') return "This payment can't be found. It may no longer be available."
+  if (kind === 'rate-limited') return RATE_LIMITED_MESSAGE
+  if (kind === 'unauthorized')
+    return "Your sign-in couldn't be verified. Log out and sign in again."
+  return RECEIPT_ERROR_MESSAGE
+}
+
 // One page of one tenant's bills, as the history page shows it.
 export interface EntryHistory {
   tenantId: string | null
@@ -170,6 +199,8 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
   // leaving the page after an uncertain save (no response) never loses it: the next attempt,
   // whenever it comes, is a retry the backend recognises.
   const paymentKeys = new Map<string, string>()
+  // Issued receipts by payment id. Snapshots never change, so one loaded is reused.
+  const receipts = new Map<string, PaymentReceipt>()
 
   function nextSummarySeq(tenantId: string): number {
     const seq = (summarySeq.get(tenantId) ?? 0) + 1
@@ -549,6 +580,49 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     paymentKeys.delete(entryId)
   }
 
+  // The payment's receipt from Django: its saved snapshot if one was issued, otherwise issued
+  // now (and the payment history shows it has one). Issuing again, or retrying after a lost
+  // response, returns the same receipt. Throws ReceiptError; the payment is never changed.
+  async function getReceipt(tenantId: string, payment: Payment): Promise<PaymentReceipt> {
+    const cached = receipts.get(payment.id)
+    if (cached) return cached
+
+    const propertyId = requireProperty()
+    const gen = generation
+    let receipt: PaymentReceipt
+    try {
+      receipt = payment.receipt
+        ? await receiptService.getReceipt(propertyId, tenantId, payment.entryId, payment.id)
+        : (await receiptService.issueReceipt(propertyId, tenantId, payment.entryId, payment.id))
+            .receipt
+    } catch (err) {
+      if (isUncertainFailure(err)) throw new ReceiptError(RECEIPT_UNCONFIRMED_MESSAGE, true)
+      throw new ReceiptError(receiptErrorMessage(err))
+    }
+
+    if (gen === generation) {
+      receipts.set(payment.id, receipt)
+      markReceiptIssued(payment.entryId, payment.id, receipt)
+    }
+    return receipt
+  }
+
+  function markReceiptIssued(entryId: string, paymentId: string, receipt: PaymentReceipt) {
+    const current = payments.value[entryId]
+    if (!current) return
+    payments.value = {
+      ...payments.value,
+      [entryId]: {
+        ...current,
+        payments: current.payments.map((item) =>
+          item.id === paymentId && !item.receipt
+            ? { ...item, receipt: { id: receipt.id, reference: receipt.reference } }
+            : item,
+        ),
+      },
+    }
+  }
+
   async function refreshAfterConflict(tenantId: string, entryId: string, gen: number) {
     if (gen !== generation) return
     await Promise.allSettled([
@@ -564,6 +638,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     summarySeq.clear()
     paymentsSeq.clear()
     paymentKeys.clear()
+    receipts.clear()
     entriesById.value = {}
     history.value = emptyHistory()
     summaries.value = {}
@@ -592,6 +667,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     addPayment,
     paymentKeyFor,
     forgetPaymentKey,
+    getReceipt,
     reset,
   }
 })

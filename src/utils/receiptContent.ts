@@ -1,11 +1,11 @@
-// What a receipt says, worked out from its saved snapshot only: nothing here reads current
-// tenant, issuer, bill or payment data. The PDF (utils/receiptPdf.ts) only lays this out.
+// What a receipt says, worked out from Django's saved snapshot only: nothing here reads current
+// tenant, issuer, bill or payment data, or recalculates a figure. The PDF (utils/receiptPdf.ts)
+// only lays this out.
 
 import type { PaymentReceipt } from '@/types/receipt'
 import { formatAmount, formatINR, formatINRWithPaise } from '@/utils/currency'
 import { formatDateValueNumeric, formatMonthValue, formatOrdinal } from '@/utils/date'
 import { formatPhoneNumber } from '@/utils/phone'
-import { calculateElectricity } from '@/utils/rentCalculations'
 
 export interface ReceiptField {
   label: string
@@ -85,7 +85,7 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
     {
       description: 'Electricity Charge',
       details: `${charges.electricityUnits} Units × ${formatINR(charges.electricityRate)}`,
-      amount: formatAmount(calculateElectricity(charges.electricityUnits, charges.electricityRate)),
+      amount: formatAmount(charges.electricityAmount),
     },
   ]
 
@@ -107,14 +107,13 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
     paidInFull,
     status: paidInFull ? 'PAID' : 'PARTIALLY PAID',
     issuer: present([
-      { label: 'Received By / Property Manager', value: issuer.managerName },
+      { label: 'Received By', value: issuer.receivedBy },
       { label: 'Property / Building Name', value: issuer.name },
       { label: 'Address', value: issuer.address },
       {
         label: 'Contact Number',
         value: issuer.contactNumber && formatPhoneNumber(issuer.contactNumber),
       },
-      { label: 'Email', value: issuer.email },
     ]),
     tenant: present([
       { label: 'Tenant Name', value: tenant.name },
@@ -161,7 +160,7 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
     remarks: receipt.paymentNotes.trim()
       ? [receipt.paymentNotes, STANDARD_REMARKS]
       : [STANDARD_REMARKS],
-    authorizedBy: `AUTHORIZED BY · ${issuer.managerName || issuer.name}`,
+    authorizedBy: `AUTHORIZED BY · ${issuer.receivedBy || issuer.name}`,
     footer: 'Thank you for your payment.',
   }
 }

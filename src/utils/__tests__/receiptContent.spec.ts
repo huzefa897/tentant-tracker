@@ -6,15 +6,14 @@ import { getReceiptContent } from '@/utils/receiptContent'
 
 // A September bill: ₹17,000 rent, 109 units at ₹6, paid in full on 4 Oct.
 const paidInFull: Partial<PaymentReceipt> = {
-  reference: 'RCP-102-202609',
+  reference: 'RCT-5f0e2c1a-8b3d-4e6f-9a7b-2c4d6e8f0a1b',
   issuedAt: '2026-10-04T06:30:00.000Z',
   issuedDate: '2026-10-04',
   issuer: {
     name: 'Saleem Towers',
-    managerName: 'Test Manager',
     address: '1 Example Road,\nHyderabad – 500001',
     contactNumber: '+919876543210',
-    email: 'owner@example.com',
+    receivedBy: 'Test Manager',
   },
   tenant: {
     name: 'Test Tenant',
@@ -24,7 +23,13 @@ const paidInFull: Partial<PaymentReceipt> = {
   },
   billingMonth: '2026-09',
   rentDueDay: 1,
-  charges: { rentAmount: 17000, electricityUnits: 109, electricityRate: 6, waterAmount: 0 },
+  charges: {
+    rentAmount: 17000,
+    electricityUnits: 109,
+    electricityRate: 6,
+    electricityAmount: 654,
+    waterAmount: 0,
+  },
   totalDue: 17654,
   totalPaid: 17654,
   outstanding: 0,
@@ -36,7 +41,7 @@ const paidInFull: Partial<PaymentReceipt> = {
 describe('getReceiptContent', () => {
   it('names the file like the owners’ receipts', () => {
     expect(getReceiptContent(makeReceipt(paidInFull)).fileName).toBe(
-      'Test Tenant 102 Rent September 2026 RCP-102-202609.pdf',
+      'Test Tenant 102 Rent September 2026 RCT-5f0e2c1a-8b3d-4e6f-9a7b-2c4d6e8f0a1b.pdf',
     )
   })
 
@@ -45,7 +50,9 @@ describe('getReceiptContent', () => {
       makeReceipt({ tenant: { ...makeReceipt().tenant, name: 'A/B: "C"?', flatNumber: '1*2' } }),
     )
 
-    expect(content.fileName).toBe('A-B- -C- 1-2 Rent September 2026 RCP-202-202609.pdf')
+    expect(content.fileName).toBe(
+      'A-B- -C- 1-2 Rent September 2026 RCT-0b7c9e52-4f1a-4d3e-9a8b-1c2d3e4f5a6b.pdf',
+    )
   })
 
   it('gives the receipt number, date and status', () => {
@@ -53,7 +60,7 @@ describe('getReceiptContent', () => {
 
     expect(content).toMatchObject({
       title: 'PAYMENT RECEIPT',
-      receiptNumber: 'RCP-102-202609',
+      receiptNumber: 'RCT-5f0e2c1a-8b3d-4e6f-9a7b-2c4d6e8f0a1b',
       receiptDate: '04/10/2026',
       paidInFull: true,
       status: 'PAID',
@@ -73,11 +80,10 @@ describe('getReceiptContent', () => {
     const content = getReceiptContent(makeReceipt(paidInFull))
 
     expect(content.issuer).toEqual([
-      { label: 'Received By / Property Manager', value: 'Test Manager' },
+      { label: 'Received By', value: 'Test Manager' },
       { label: 'Property / Building Name', value: 'Saleem Towers' },
       { label: 'Address', value: '1 Example Road,\nHyderabad – 500001' },
       { label: 'Contact Number', value: '+91 98765 43210' },
-      { label: 'Email', value: 'owner@example.com' },
     ])
     expect(content.tenant).toEqual([
       { label: 'Tenant Name', value: 'Test Tenant' },
@@ -90,13 +96,7 @@ describe('getReceiptContent', () => {
   it('leaves out details that are not set, and is authorized by the property then', () => {
     const content = getReceiptContent(
       makeReceipt({
-        issuer: {
-          name: 'Saleem Towers',
-          managerName: '',
-          address: 'Addr',
-          contactNumber: '',
-          email: '',
-        },
+        issuer: { name: 'Saleem Towers', address: 'Addr', contactNumber: '', receivedBy: '' },
         tenant: { name: 'Test Tenant', flatNumber: '102', mobileNumber: '', depositAmount: 0 },
       }),
     )
@@ -108,6 +108,16 @@ describe('getReceiptContent', () => {
     expect(content.tenant.map((field) => field.label)).not.toContain('Tenant Mobile Number')
     expect(content.tenant.slice(-1)[0]).toEqual({ label: 'Tenant Deposit Amount', value: '₹0' })
     expect(content.authorizedBy).toBe('AUTHORIZED BY · Saleem Towers')
+  })
+
+  it('prints the saved electricity amount, never recalculating it', () => {
+    const content = getReceiptContent(
+      makeReceipt({ charges: { ...makeReceipt().charges, electricityAmount: 451 } }),
+    )
+
+    expect(content.charges.find((row) => row.description === 'Electricity Charge')?.amount).toBe(
+      '451.00',
+    )
   })
 
   it('gives the rental details, charges, totals and summary of a bill paid in full', () => {

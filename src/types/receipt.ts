@@ -1,24 +1,23 @@
-// Who issues receipts (config/receiptIssuer.ts).
+// Who issued a receipt, copied from the property (and the person issuing it) when it was issued.
 export interface ReceiptIssuer {
   name: string // property / building
-  managerName: string // received by; '' to leave it off
   address: string
   contactNumber: string // E.164, or '' for none
-  email: string // '' for none
+  receivedBy: string // the person who issued it; '' when they have no name
 }
 
-// Confirms one Payment. A snapshot taken when it's issued, so later payments, or changes to the
-// tenant or issuer details, never change it: reprints use it exactly as saved.
+// Confirms one Payment. A snapshot Django saved when it was issued, so later payments, or
+// changes to the tenant or property, never change it: every download uses it exactly as saved.
 // The bill figures are as they stood right after this payment (payments recorded before it,
-// plus this one), so they're the same whenever the receipt is issued.
+// plus this one), so they're the same whenever the receipt was issued.
 export interface PaymentReceipt {
   id: string
-  reference: string // shown on the receipt; never regenerated
+  reference: string // RCT-<id>, shown on the receipt; never regenerated
   paymentId: string
   entryId: string
   issuedAt: string // ISO timestamp
-  // The date printed on the receipt: the issuer's local date when it was issued. Saved rather
-  // than worked out from issuedAt, which would depend on the time zone of whoever downloads it.
+  // The date printed on the receipt: the property's date when it was issued. Saved rather than
+  // worked out from issuedAt, which would depend on the time zone of whoever downloads it.
   issuedDate: string // YYYY-MM-DD
 
   issuer: ReceiptIssuer
@@ -33,11 +32,12 @@ export interface PaymentReceipt {
   billingMonth: string // YYYY-MM
   rentDueDay: number // 1-31
 
-  // The bill's charges, copied from the entry.
+  // The bill's charges and electricity amount, as Django calculated them.
   charges: {
     rentAmount: number
     electricityUnits: number
     electricityRate: number
+    electricityAmount: number
     waterAmount: number
   }
   totalDue: number
@@ -50,4 +50,18 @@ export interface PaymentReceipt {
   paymentAmount: number
   paidDate: string // YYYY-MM-DD
   paymentNotes: string
+}
+
+// What a payment says about its receipt: enough to offer "Download receipt" rather than
+// "Issue receipt".
+export interface ReceiptSummary {
+  id: string
+  reference: string
+}
+
+// What issuing returns. created: false when the payment already had this receipt (a repeat or
+// a retry after a lost response): nothing new was issued.
+export interface IssuedReceipt {
+  receipt: PaymentReceipt
+  created: boolean
 }

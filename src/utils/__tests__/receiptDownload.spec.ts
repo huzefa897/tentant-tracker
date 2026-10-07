@@ -36,10 +36,12 @@ describe('downloadReceiptPdf', () => {
     await downloadReceiptPdf(makeReceipt())
 
     expect(renderReceiptPdf).toHaveBeenCalledWith(
-      expect.objectContaining({ receiptNumber: 'RCP-202-202609' }),
+      expect.objectContaining({ receiptNumber: 'RCT-0b7c9e52-4f1a-4d3e-9a8b-1c2d3e4f5a6b' }),
       { regular: btoa('\x01\x02\x03'), bold: btoa('\x04\x05\x06') },
     )
-    expect(save).toHaveBeenCalledWith('Shaik Zahid Ali 202 Rent September 2026 RCP-202-202609.pdf')
+    expect(save).toHaveBeenCalledWith(
+      'Shaik Zahid Ali 202 Rent September 2026 RCT-0b7c9e52-4f1a-4d3e-9a8b-1c2d3e4f5a6b.pdf',
+    )
   })
 
   it('loads the fonts once for several downloads', async () => {

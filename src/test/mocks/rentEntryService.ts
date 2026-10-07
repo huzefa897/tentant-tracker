@@ -172,6 +172,7 @@ export function resetRentEntryService() {
             entryId: entry.id,
             ...initialPayment,
             createdAt: new Date().toISOString(),
+            receipt: null,
           })
         }
         return fakeEntries.entries.find((item) => item.id === entry.id)!
