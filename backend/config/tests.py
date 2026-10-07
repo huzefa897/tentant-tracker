@@ -91,6 +91,38 @@ class ReadinessCheckTests(TestCase):
         self.assertEqual(client.get("/api/v1/ready/").status_code, 200)
 
 
+
+def unreachable_counts():
+    """A cache whose every call fails like the database cache with PostgreSQL down."""
+    broken = mock.Mock()
+    broken.get.side_effect = OperationalError("connection refused")
+    broken.set.side_effect = OperationalError("connection refused")
+    return mock.patch.object(SimpleRateThrottle, "cache", broken)
+
+
+class RateLimitFailsOpenTests(TestCase):
+    """Production keeps the counts in PostgreSQL: with the database down, the limits must step
+    aside, so readiness reports 503 and health 200 instead of every request failing."""
+
+    def test_readiness_still_reports_the_database_unavailable(self):
+        with (
+            unreachable_counts(),
+            mock.patch("config.views.connection.cursor", side_effect=OperationalError("down")),
+            self.assertLogs("config", "WARNING") as logs,
+        ):
+            response = APIClient().get("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Rate limit not applied", " ".join(logs.output))
+
+    @override_settings(ROOT_URLCONF=__name__)
+    def test_requests_go_through_when_the_counts_are_unavailable(self):
+        client = APIClient()
+        client.force_authenticate(get_user_model().objects.create_user(username="me"))
+        with unreachable_counts(), self.assertLogs("config.throttling", "WARNING"):
+            self.assertEqual(client.get("/protected/").status_code, 200)
+            self.assertEqual(client.post("/write/").status_code, 200)
+
 class ApiCachingTests(TestCase):
     def test_api_responses_are_never_stored(self):
         response = APIClient().get("/api/v1/health/")

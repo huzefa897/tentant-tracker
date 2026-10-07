@@ -1,10 +1,33 @@
+import logging
+
+from django.db import DatabaseError
 from django.http import JsonResponse
+from rest_framework import throttling
 from rest_framework.permissions import SAFE_METHODS
-from rest_framework.throttling import SimpleRateThrottle, UserRateThrottle
+
+logger = logging.getLogger(__name__)
 
 
-class WriteRateThrottle(UserRateThrottle):
-    """A stricter limit on writes (creating bills, later payments), per person. Reads only
+class FailOpenMixin:
+    """If the counts can't be read (production keeps them in PostgreSQL, DJANGO_SHARED_CACHE:
+    the database is down, or `createcachetable` wasn't run), let the request through rather
+    than fail it: a rate limit must never take the app down, and readiness must still report
+    the database as unavailable instead of every request erroring."""
+
+    def allow_request(self, request, view):
+        try:
+            return super().allow_request(request, view)
+        except DatabaseError as error:
+            logger.warning("Rate limit not applied: counts unavailable (%s)", type(error).__name__)
+            return True
+
+
+class UserRateThrottle(FailOpenMixin, throttling.UserRateThrottle):
+    """Every API request per signed-in person (per address when signed out)."""
+
+
+class WriteRateThrottle(FailOpenMixin, throttling.UserRateThrottle):
+    """A stricter limit on writes (creating bills, recording payments), per person. Reads only
     count against the general user limit."""
 
     scope = "writes"
@@ -15,7 +38,7 @@ class WriteRateThrottle(UserRateThrottle):
         return super().allow_request(request, view)
 
 
-class AddressRateThrottle(SimpleRateThrottle):
+class AddressRateThrottle(FailOpenMixin, throttling.SimpleRateThrottle):
     """Every API request from one address, signed in or not."""
 
     scope = "address"

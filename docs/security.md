@@ -130,6 +130,8 @@ In production:
 - **Shared counts:** the default local-memory cache is per process, so with N worker processes a person effectively gets N times each limit. With more than one process, set `DJANGO_SHARED_CACHE=true` to keep counts in PostgreSQL (Django's database cache, table `django_cache`; run `manage.py createcachetable` once per database). Redis isn't used (decided 2026-10-07).
 - **Proxy limits:** Caddy has no rate limiting without a plugin, so the app's limits are the ones that apply. Add proxy limits if traffic ever calls for them.
 
+The limits **fail open**: if the counts can't be read (the database is down, or `createcachetable` wasn't run), the request goes through and a warning is logged, so a rate limit never takes the app down and readiness can still report the database as unavailable.
+
 Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry over between tests. The rate-limit tests turn a real cache back on.
 
 ## 13. Tighten CORS
