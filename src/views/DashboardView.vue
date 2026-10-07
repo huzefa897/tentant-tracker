@@ -9,6 +9,7 @@ import TenantDetails from '@/components/tenant/TenantDetails.vue'
 import TenantSelector from '@/components/tenant/TenantSelector.vue'
 import { Button } from '@/components/ui/button'
 import { useLogout } from '@/composables/useLogout'
+import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
 import { useRentEntryStore } from '@/stores/rentEntry'
@@ -47,6 +48,20 @@ const selectedTenantEntryCount = computed(() =>
 
 // The newest bill by billing month; null while loading, on failure and when there's none.
 const latestBill = computed(() => (summary.value?.status === 'ready' ? summary.value.latest : null))
+
+// The latest bill's receipt (its most recent payment's), from Django, as a PDF.
+const {
+  downloadingId: downloadingReceiptId,
+  error: receiptError,
+  downloadLatestReceipt,
+  clearError: clearReceiptError,
+} = useReceiptDownload()
+watch(() => latestBill.value?.id, clearReceiptError)
+
+function downloadReceipt(entryId: string) {
+  const tenant = tenantStore.selectedTenant
+  if (tenant) void downloadLatestReceipt(tenant.id, entryId)
+}
 
 function retrySummary() {
   if (tenantStore.selectedTenantId) rentEntryStore.loadSummary(tenantStore.selectedTenantId)
@@ -166,7 +181,20 @@ function openHistory() {
       @view-entries="openHistory"
     >
       <template v-if="latestBill" #latest-entry>
-        <LatestEntryCard :entry="latestBill" @view="openEntry" />
+        <p
+          v-if="receiptError"
+          class="mb-3 text-sm text-destructive"
+          role="alert"
+          data-testid="receipt-error"
+        >
+          {{ receiptError }}
+        </p>
+        <LatestEntryCard
+          :entry="latestBill"
+          :downloading-receipt="downloadingReceiptId === latestBill.id"
+          @view="openEntry"
+          @download-receipt="downloadReceipt"
+        />
       </template>
     </TenantDetails>
 

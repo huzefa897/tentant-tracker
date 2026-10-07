@@ -607,6 +607,35 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     return receipt
   }
 
+  // The receipt for the bill's most recent payment (newest paid date, then newest recorded),
+  // issued if it has none: for buttons that offer a bill's receipt without listing its
+  // payments. Uses the bill's loaded payments, or loads them. Throws ReceiptError.
+  async function getLatestReceipt(tenantId: string, entryId: string): Promise<PaymentReceipt> {
+    const propertyId = requireProperty()
+    const gen = generation
+    const loaded = payments.value[entryId]
+    let list = loaded?.status === 'ready' ? loaded.payments : null
+    if (!list) {
+      try {
+        list = await paymentService.getPayments(propertyId, tenantId, entryId)
+      } catch (err) {
+        throw new ReceiptError(
+          isUncertainFailure(err) ? RECEIPT_ERROR_MESSAGE : receiptErrorMessage(err),
+        )
+      }
+      if (gen === generation) {
+        payments.value = {
+          ...payments.value,
+          [entryId]: { status: 'ready', payments: list, error: null },
+        }
+      }
+    }
+
+    const latest = list[0]
+    if (!latest) throw new ReceiptError('No payments have been recorded for this entry yet.')
+    return getReceipt(tenantId, latest)
+  }
+
   function markReceiptIssued(entryId: string, paymentId: string, receipt: PaymentReceipt) {
     const current = payments.value[entryId]
     if (!current) return
@@ -668,6 +697,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     paymentKeyFor,
     forgetPaymentKey,
     getReceipt,
+    getLatestReceipt,
     reset,
   }
 })

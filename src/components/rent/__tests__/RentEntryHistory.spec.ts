@@ -19,8 +19,15 @@ describe('RentEntryHistory', () => {
       .map((row) => row.findAll('th, td').map((cell) => cell.text()))
 
     expect(rows).toEqual([
-      ['October 2026', '₹15,750', '₹10,000', '₹5,750', 'Partially paid', 'View Summary'],
-      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'View Summary'],
+      [
+        'October 2026',
+        '₹15,750',
+        '₹10,000',
+        '₹5,750',
+        'Partially paid',
+        'Download receipt View Summary',
+      ],
+      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'Download receipt View Summary'],
       ['August 2026', '₹15,306.75', '₹0', '₹15,306.75', 'Unpaid', 'View Summary'],
     ])
   })
@@ -52,5 +59,32 @@ describe('RentEntryHistory', () => {
     await summaries[1]!.trigger('click')
 
     expect(wrapper.emitted('view')).toEqual([['b'], ['b']])
+  })
+
+  it('offers a paid bill’s receipt from the table and the cards, never an unpaid one’s', async () => {
+    const wrapper = mount(RentEntryHistory, { props: { entries } })
+    const buttons = wrapper.findAll('[aria-label="Download the latest receipt for September 2026"]')
+
+    expect(buttons).toHaveLength(2)
+    await buttons[0]!.trigger('click')
+    await buttons[1]!.trigger('click')
+
+    expect(wrapper.emitted('download-receipt')).toEqual([['b'], ['b']])
+    expect(
+      wrapper.find('[aria-label="Download the latest receipt for August 2026"]').exists(),
+    ).toBe(false)
+  })
+
+  it('shows which receipt is being prepared and makes every receipt button wait', () => {
+    const wrapper = mount(RentEntryHistory, { props: { entries, downloadingEntryId: 'b' } })
+    const buttons = wrapper.findAll('[data-testid="download-entry-receipt"]')
+
+    expect(buttons.map((b) => b.text())).toEqual([
+      'Download receipt',
+      'Preparing…',
+      'Download receipt',
+      'Preparing…',
+    ])
+    expect(buttons.every((b) => b.attributes('disabled') !== undefined)).toBe(true)
   })
 })

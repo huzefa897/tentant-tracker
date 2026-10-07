@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import router from '@/router'
 import { accessService } from '@/services/access.service'
 import { ApiError } from '@/services/apiError'
+import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
 import { authService } from '@/services/auth.service'
@@ -14,8 +15,10 @@ import { ENTRIES_LOAD_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntr
 import { useTenantStore } from '@/stores/tenant'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
-import { fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
-import { makeEntry } from '@/test/rentEntries'
+import { fakeReceipts } from '@/test/mocks/receiptService'
+import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
+import { makeEntry, makePayment } from '@/test/rentEntries'
+import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import DashboardView from '@/views/DashboardView.vue'
 import { SEARCH_DEBOUNCE_MS } from '@/components/tenant/TenantSelector.vue'
 import { TENANTS_LOAD_ERROR_MESSAGE } from '@/stores/tenant'
@@ -26,6 +29,8 @@ vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
+vi.mock('@/services/receipt.service', () => import('@/test/mocks/receiptService'))
+vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 let view: VueWrapper | undefined
 const body = new DOMWrapper(document.body)
@@ -262,6 +267,55 @@ describe('DashboardView', () => {
       })
       // So the summary's back button returns to the dashboard.
       expect(router.currentRoute.value.query).toEqual({ from: 'dashboard' })
+    })
+
+    describe('the latest entry’s receipt', () => {
+      beforeEach(async () => {
+        vi.mocked(downloadReceiptPdf).mockReset().mockResolvedValue()
+        fakeEntries.entries = [makeEntry({ id: 'entry-oct', billingMonth: '2026-10' })]
+        addFakePayment(makePayment({ id: 'p-1', entryId: 'entry-oct', paidDate: '2026-10-03' }))
+        addFakePayment(
+          makePayment({ id: 'p-2', entryId: 'entry-oct', amount: 2000, paidDate: '2026-10-05' }),
+        )
+        await mountView()
+        useTenantStore().selectTenant('tenant-001')
+        await flushPromises()
+      })
+
+      function receiptButton() {
+        return view!.get('[data-testid="download-entry-receipt"]')
+      }
+
+      it('downloads the receipt for the bill’s most recent payment', async () => {
+        await receiptButton().trigger('click')
+        await flushPromises()
+
+        expect(receiptService.issueReceipt).toHaveBeenCalledWith(
+          expect.any(String),
+          'tenant-001',
+          'entry-oct',
+          'p-2',
+        )
+        expect(downloadReceiptPdf).toHaveBeenCalledWith(fakeReceipts.get('p-2'))
+        expect(fakeReceipts.get('p-2')).toMatchObject({ paymentAmount: 2000 })
+        expect(view!.find('[data-testid="receipt-error"]').exists()).toBe(false)
+      })
+
+      it('shows why a receipt can’t be issued', async () => {
+        vi.mocked(receiptService.issueReceipt).mockRejectedValueOnce(
+          new ApiError('invalid-request', 'x', 'receipt_configuration_incomplete', {
+            detail: 'Configure the property address before issuing receipts.',
+          }),
+        )
+
+        await receiptButton().trigger('click')
+        await flushPromises()
+
+        expect(view!.get('[data-testid="receipt-error"]').text()).toBe(
+          'Configure the property address before issuing receipts.',
+        )
+        expect(downloadReceiptPdf).not.toHaveBeenCalled()
+      })
     })
 
     it('shows no latest entry for a tenant without entries', async () => {

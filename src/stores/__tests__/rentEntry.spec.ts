@@ -18,6 +18,7 @@ import {
   PAYMENT_KEY_CONFLICT_MESSAGE,
   PAYMENT_UNCONFIRMED_MESSAGE,
   PaymentSaveError,
+  RECEIPT_ERROR_MESSAGE,
   RECEIPT_UNCONFIRMED_MESSAGE,
   ReceiptError,
   SAVE_UNCONFIRMED_MESSAGE,
@@ -794,6 +795,39 @@ describe('receipts', () => {
     expect(error.message).toBe("You don't have permission to issue receipts for this property.")
     expect(store.payments.sep).toEqual(before)
     expect(recordPayment).not.toHaveBeenCalled()
+  })
+
+  it('gets the receipt for a bill’s most recent payment, loading its payments', async () => {
+    addFakePayment(makePayment({ id: 'p-2', entryId: 'sep', amount: 500, paidDate: '2026-10-06' }))
+    const store = await withProperty()
+
+    const receipt = await store.getLatestReceipt('tenant-001', 'sep')
+
+    expect(receipt.paymentId).toBe('p-2')
+    expect(store.payments.sep!.payments[0]).toMatchObject({
+      id: 'p-2',
+      receipt: { id: receipt.id, reference: receipt.reference },
+    })
+  })
+
+  it('says a bill without payments has no receipt', async () => {
+    fakeEntries.entries = [october]
+    const store = await withProperty()
+
+    const error = await receiptError(store.getLatestReceipt('tenant-001', 'oct'))
+
+    expect(error.message).toBe('No payments have been recorded for this entry yet.')
+    expect(issueReceipt).not.toHaveBeenCalled()
+  })
+
+  it('reports payments that fail to load as an error', async () => {
+    const store = await withProperty()
+    getPayments.mockRejectedValueOnce(new ApiError('network'))
+
+    const error = await receiptError(store.getLatestReceipt('tenant-001', 'sep'))
+
+    expect(error.message).toBe(RECEIPT_ERROR_MESSAGE)
+    expect(issueReceipt).not.toHaveBeenCalled()
   })
 
   it('forgets loaded receipts when the property changes', async () => {
