@@ -75,13 +75,16 @@ watch(
   { immediate: true },
 )
 
-// Both filters change together on Clear filters: one reload, not two.
+// Both filters change together on Clear filters: one reload, not two. A filter or page shows
+// other bills, so an earlier bill's receipt download no longer shows or holds the buttons.
 watch([selectedYear, selectedStatus], () => {
+  resetReceiptDownload()
   page.value = 1
   load()
 })
 
 function goToPage(next: number) {
+  resetReceiptDownload()
   page.value = next
   load()
 }

@@ -299,6 +299,57 @@ describe('RentEntryHistoryView', () => {
     expect(rows().map((row) => row[0])).toEqual(['September 2026'])
   })
 
+  it('drops a pending receipt download when the filter changes', async () => {
+    vi.mocked(downloadReceiptPdf).mockReset().mockResolvedValue()
+    let fail!: (error: unknown) => void
+    vi.mocked(receiptService.issueReceipt).mockReturnValueOnce(
+      new Promise((_, reject) => (fail = reject)),
+    )
+    fakeEntries.entries = [september, lastYear]
+    addFakePayment(makePayment({ id: 'p-sep', entryId: 'sep', amount: 5000 }))
+    addFakePayment(makePayment({ id: 'p-dec', entryId: 'dec', amount: 5000 }))
+    await openHistory()
+
+    await view!
+      .get('[aria-label="Download the latest receipt for September 2026"]')
+      .trigger('click')
+    await flushPromises()
+    await view!.get('#filter-year').setValue('2025')
+    await flushPromises()
+
+    const december = view!.get('[aria-label="Download the latest receipt for December 2025"]')
+    expect(december.attributes('disabled')).toBeUndefined()
+    fail(new ApiError('forbidden'))
+    await flushPromises()
+
+    expect(rows().map((row) => row[0])).toEqual(['December 2025'])
+    expect(view!.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('drops a pending receipt download when the page changes', async () => {
+    vi.mocked(downloadReceiptPdf).mockReset().mockResolvedValue()
+    let fail!: (error: unknown) => void
+    vi.mocked(receiptService.issueReceipt).mockReturnValueOnce(
+      new Promise((_, reject) => (fail = reject)),
+    )
+    fakeEntries.entries = months(14)
+    addFakePayment(makePayment({ id: 'p-oct', entryId: 'm0', amount: 5000 }))
+    addFakePayment(makePayment({ id: 'p-old', entryId: 'm12', amount: 5000 }))
+    await openHistory()
+
+    await view!.get('[aria-label="Download the latest receipt for October 2026"]').trigger('click')
+    await flushPromises()
+    await button('Older').trigger('click')
+    await flushPromises()
+
+    const older = view!.get('[aria-label="Download the latest receipt for October 2025"]')
+    expect(older.attributes('disabled')).toBeUndefined()
+    fail(new ApiError('forbidden'))
+    await flushPromises()
+
+    expect(view!.find('[role="alert"]').exists()).toBe(false)
+  })
+
   it('opens an entry’s summary', async () => {
     fakeEntries.entries = [october]
     await openHistory()
