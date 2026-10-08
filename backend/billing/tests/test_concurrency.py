@@ -16,6 +16,8 @@ from billing.services import (
     record_payment,
 )
 
+from properties.models import Tenancy
+
 from .factories import make_property, make_tenancy, make_user
 
 
@@ -265,5 +267,61 @@ class ConcurrentReceiptTests(TransactionTestCase):
                 "Shaik_Zahid_Ali_202_Rent_September 2026",
                 "Shaik_Zahid_Ali_202_Rent_September 2026_2",
                 "Shaik_Zahid_Ali_202_Rent_September 2026_3",
+            ],
+        )
+
+    def test_properties_issue_the_same_reference_at_once_without_retrying(self):
+        # Five properties, each with a Shaik Zahid Ali in flat 202 paying for September.
+        payments = [self.payment]
+        for i in range(4):
+            prop = make_property(name=f"Property {i}", member=self.user)
+            entry = make_bill(make_tenancy(prop), self.user)
+            payments.append(
+                record_payment(
+                    entry_id=entry.pk,
+                    actor=self.user,
+                    idempotency_key=uuid.uuid4(),
+                    validated_data=PAYMENT,
+                ).payment
+            )
+
+        def issue(i):
+            result = issue_payment_receipt(payment_id=payments[i].pk, actor=self.user)
+            return ("created" if result.created else "returned", result.receipt.reference)
+
+        outcomes = run_simultaneously(5, issue)
+
+        self.assertEqual(
+            outcomes, [("created", "Shaik_Zahid_Ali_202_Rent_September 2026")] * 5
+        )
+        self.assertEqual(Receipt.objects.values("property").distinct().count(), 5)
+
+    def test_one_propertys_bills_issued_at_once_get_distinct_references(self):
+        # The same name and flat on two tenancies that both cover September, so two bills.
+        prop = self.tenancy.property
+        Tenancy.objects.filter(pk=self.tenancy.pk).update(end_date=date(2026, 9, 10))
+        later = make_tenancy(prop, start_date=date(2026, 9, 11))
+        entry = make_bill(later, self.user)
+        payments = [
+            self.payment,
+            record_payment(
+                entry_id=entry.pk,
+                actor=self.user,
+                idempotency_key=uuid.uuid4(),
+                validated_data=PAYMENT,
+            ).payment,
+        ]
+
+        outcomes = run_simultaneously(
+            2,
+            lambda i: issue_payment_receipt(payment_id=payments[i].pk, actor=self.user)
+            .receipt.reference,
+        )
+
+        self.assertEqual(
+            sorted(outcomes),
+            [
+                "Shaik_Zahid_Ali_202_Rent_September 2026",
+                "Shaik_Zahid_Ali_202_Rent_September 2026_2",
             ],
         )

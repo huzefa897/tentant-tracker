@@ -4,6 +4,7 @@ from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -123,6 +124,30 @@ class IssueReceiptServiceTests(ReceiptTestCase):
                 "Shaik_Zahid_Ali_202_Rent_September 2026_3",
             ],
         )
+
+    def test_another_propertys_receipt_never_numbers_this_ones(self):
+        elsewhere = make_property(name="Annex", member=self.user)
+        other_entry = make_entry(make_tenancy(elsewhere), self.user)
+        other = self.issue(make_payment(other_entry, self.user, "1000.00")).receipt
+
+        receipt = self.issue().receipt
+
+        self.assertEqual(other.reference, "Shaik_Zahid_Ali_202_Rent_September 2026")
+        self.assertEqual(receipt.reference, "Shaik_Zahid_Ali_202_Rent_September 2026")
+        self.assertEqual((other.property, receipt.property), (elsewhere, self.property))
+
+    def test_a_reference_is_unique_within_its_property(self):
+        receipt = self.issue().receipt
+        duplicate = {
+            field.name: getattr(receipt, field.name)
+            for field in Receipt._meta.concrete_fields
+            if field.name not in ("id", "payment")
+        }
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Receipt.objects.create(
+                **duplicate, payment=make_payment(self.entry, self.user, "1.00")
+            )
 
     def test_each_month_starts_its_own_references(self):
         october = make_entry(self.tenancy, self.user, month=date(2026, 10, 1))

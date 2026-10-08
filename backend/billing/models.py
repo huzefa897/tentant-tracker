@@ -8,7 +8,7 @@ from django.db import models
 from django.db.models import DecimalField, F, Q, Sum, Value
 from django.db.models.functions import Coalesce, Round
 
-from properties.models import Tenancy
+from properties.models import Property, Tenancy
 
 
 def month_end(billing_month: date) -> date:
@@ -198,16 +198,21 @@ class Receipt(models.Model):
     the same whenever the receipt is issued.
 
     Created only through billing/services.py issue_payment_receipt, which locks the payment so
-    each one gets at most one receipt. Read-only afterwards: corrections and voiding need their
-    own workflow.
+    each one gets at most one receipt, and the property so its references are numbered one at a
+    time. Read-only afterwards: corrections and voiding need their own workflow.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # One receipt per payment, enforced by the database (a unique column).
     payment = models.OneToOneField(Payment, on_delete=models.PROTECT, related_name="receipt")
-    # Tenant_Name_Flat_Rent_Month YYYY (receipt_reference), with _2, _3… for a bill's later
-    # receipts. Set once when issued, never regenerated.
-    reference = models.CharField(max_length=255, unique=True, editable=False)
+    # The property that issued it, which its reference is unique within. Saved, like everything
+    # else here, rather than followed through the payment.
+    property = models.ForeignKey(
+        Property, on_delete=models.PROTECT, related_name="receipts", editable=False
+    )
+    # Tenant_Name_Flat_Rent_Month YYYY (receipt_reference), with _2, _3… for the property's later
+    # receipts with the same name, flat and month. Set once when issued, never regenerated.
+    reference = models.CharField(max_length=255, editable=False)
     issued_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -264,6 +269,12 @@ class Receipt(models.Model):
     class Meta:
         ordering = ("-issued_at", "id")
         constraints = [
+            # Properties number their own: another property's tenant with the same name, flat
+            # and month never makes this one's _2.
+            models.UniqueConstraint(
+                fields=["property", "reference"],
+                name="unique_receipt_reference_per_property",
+            ),
             models.CheckConstraint(
                 condition=Q(payment_amount__gt=0),
                 name="receipt_payment_amount_positive",
