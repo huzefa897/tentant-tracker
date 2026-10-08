@@ -345,11 +345,8 @@ def _next_reference(prop, tenancy, entry) -> str:
     return base if not numbers else f"{base}_{max(numbers) + 1}"
 
 
-def _receipt_problem(payment: Payment) -> str | None:
+def _receipt_problem(payment: Payment, tenancy: Tenancy, prop: Property) -> str | None:
     """What stops a new receipt from being issued, or None."""
-    entry = payment.entry
-    tenancy = entry.tenancy
-    prop = tenancy.property
     if not prop.name.strip():
         return "Configure the property name before issuing receipts."
     if not prop.address.strip():
@@ -366,8 +363,10 @@ def issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
 
     Everything printed on the receipt is copied from the stored records now, so later payments
     or changed details never change it. The payment row is locked, so simultaneous requests
-    issue one receipt; its unique column is the last guard. The property is locked while the
-    reference is numbered, so references never collide and nothing needs retrying.
+    issue one receipt; its unique column is the last guard. The bill, tenancy and property are
+    locked and read again before anything is copied, so an edit that commits first is always
+    on the receipt; the property's lock also numbers references one at a time, so they never
+    collide and nothing needs retrying.
     """
     try:
         return _issue_payment_receipt(payment_id=payment_id, actor=actor)
@@ -403,16 +402,18 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
         if existing is not None:
             return IssuedReceipt(receipt=existing, created=False)
 
-        problem = _receipt_problem(payment)
+        # Always payment, then bill, then tenancy, then property, each read again under its
+        # lock: the copies loaded with the payment may predate an edit this request waited
+        # for, and the receipt must print the details as they are when it's issued. NO KEY, so
+        # new bills and tenancies (which reference these rows) aren't held up; the property's
+        # lock also numbers its receipts one at a time.
+        entry = RentEntry.objects.select_for_update().get(pk=payment.entry_id)
+        tenancy = Tenancy.objects.select_for_update(no_key=True).get(pk=entry.tenancy_id)
+        prop = Property.objects.select_for_update(no_key=True).get(pk=tenancy.property_id)
+
+        problem = _receipt_problem(payment, tenancy, prop)
         if problem is not None:
             raise ReceiptConfigurationIncompleteError(problem)
-
-        entry = RentEntry.objects.select_for_update().get(pk=payment.entry_id)
-        tenancy = payment.entry.tenancy
-        prop = tenancy.property
-        # Always payment, then bill, then property. One receipt numbered at a time per
-        # property; NO KEY so new tenancies and bills (which reference it) aren't held up.
-        Property.objects.select_for_update(no_key=True).only("pk").get(pk=prop.pk)
 
         # The bill as it stood right after this payment: payments are never edited, and later
         # ones get higher sequences under the bill's lock, so this never changes.
