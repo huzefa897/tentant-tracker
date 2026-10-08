@@ -1,5 +1,7 @@
 import django.db.models.deletion
 from django.db import migrations, models
+from django.db.migrations.exceptions import IrreversibleError
+from django.db.models import Count
 
 
 def copy_property(apps, schema_editor):
@@ -9,6 +11,26 @@ def copy_property(apps, schema_editor):
     ):
         Receipt.objects.filter(pk=receipt.pk).update(
             property_id=receipt.payment.entry.tenancy.property_id
+        )
+
+
+def refuse_shared_references(apps, schema_editor):
+    # Undoing this makes references unique across every property again. Two properties may
+    # now share one, and renumbering would change references already printed on tenants'
+    # receipts, so the rollback stops instead and says which references clash.
+    Receipt = apps.get_model("billing", "Receipt")
+    shared = list(
+        Receipt.objects.values("reference")
+        .annotate(count=Count("id"))
+        .filter(count__gt=1)
+        .order_by("reference")
+        .values_list("reference", flat=True)
+    )
+    if shared:
+        raise IrreversibleError(
+            "Can't undo billing.0006: these receipt references are used by more than one "
+            "property, and before it references were unique across every property: "
+            + ", ".join(shared)
         )
 
 
@@ -53,4 +75,6 @@ class Migration(migrations.Migration):
                 fields=("property", "reference"), name="unique_receipt_reference_per_property"
             ),
         ),
+        # Last, so on the way back it runs first, before references are unique again.
+        migrations.RunPython(migrations.RunPython.noop, refuse_shared_references),
     ]
