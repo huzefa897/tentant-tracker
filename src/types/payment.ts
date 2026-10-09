@@ -1,3 +1,4 @@
+import type { ReceiptSummary } from '@/types/receipt'
 import type { RentEntry } from '@/types/rentEntry'
 
 // Money received against one bill (RentEntry). A bill can have several payments; they are
@@ -14,6 +15,7 @@ export interface PaymentInput {
 export interface Payment extends PaymentInput {
   id: string
   createdAt: string // ISO timestamp
+  receipt: ReceiptSummary | null // null until one is issued
 }
 
 // What recording a payment returns: the payment and its bill's balance after it, as Django

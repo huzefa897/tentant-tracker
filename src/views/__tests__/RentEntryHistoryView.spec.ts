@@ -3,13 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
 import { ApiError } from '@/services/apiError'
+import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
 import { ENTRIES_LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
-import { makeEntry, openPage } from '@/test/rentEntries'
+import { makeEntry, makePayment, openPage } from '@/test/rentEntries'
+import { fakeReceipts } from '@/test/mocks/receiptService'
+import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService } from '@/test/mocks/authService'
-import { fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
+import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { resetTenantService } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
@@ -17,6 +20,8 @@ vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
+vi.mock('@/services/receipt.service', () => import('@/test/mocks/receiptService'))
+vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 const getEntries = vi.mocked(rentEntryService.getEntries)
 
@@ -251,6 +256,98 @@ describe('RentEntryHistoryView', () => {
 
     expect(view!.text()).toContain('Tenant not found')
     expect(view!.find('[data-testid="history-row"]').exists()).toBe(false)
+  })
+
+  it('downloads a paid bill’s latest receipt from its row', async () => {
+    vi.mocked(downloadReceiptPdf).mockReset().mockResolvedValue()
+    fakeEntries.entries = [october, september]
+    addFakePayment(makePayment({ id: 'p-sep', entryId: 'sep', amount: 5000 }))
+    await openHistory()
+
+    expect(view!.find('[aria-label="Download the latest receipt for October 2026"]').exists()).toBe(
+      false,
+    )
+    await view!
+      .get('[aria-label="Download the latest receipt for September 2026"]')
+      .trigger('click')
+    await flushPromises()
+
+    expect(receiptService.issueReceipt).toHaveBeenCalledWith(
+      expect.any(String),
+      'tenant-001',
+      'sep',
+      'p-sep',
+    )
+    expect(downloadReceiptPdf).toHaveBeenCalledWith(fakeReceipts.get('p-sep'))
+  })
+
+  it('says when a receipt can’t be made, keeping the history', async () => {
+    vi.mocked(downloadReceiptPdf).mockReset().mockResolvedValue()
+    vi.mocked(receiptService.issueReceipt).mockRejectedValueOnce(new ApiError('forbidden'))
+    fakeEntries.entries = [september]
+    addFakePayment(makePayment({ id: 'p-sep', entryId: 'sep', amount: 5000 }))
+    await openHistory()
+
+    await view!
+      .get('[aria-label="Download the latest receipt for September 2026"]')
+      .trigger('click')
+    await flushPromises()
+
+    expect(view!.get('[role="alert"]').text()).toBe(
+      "You don't have permission to issue receipts for this property.",
+    )
+    expect(rows().map((row) => row[0])).toEqual(['September 2026'])
+  })
+
+  it('drops a pending receipt download when the filter changes', async () => {
+    vi.mocked(downloadReceiptPdf).mockReset().mockResolvedValue()
+    let fail!: (error: unknown) => void
+    vi.mocked(receiptService.issueReceipt).mockReturnValueOnce(
+      new Promise((_, reject) => (fail = reject)),
+    )
+    fakeEntries.entries = [september, lastYear]
+    addFakePayment(makePayment({ id: 'p-sep', entryId: 'sep', amount: 5000 }))
+    addFakePayment(makePayment({ id: 'p-dec', entryId: 'dec', amount: 5000 }))
+    await openHistory()
+
+    await view!
+      .get('[aria-label="Download the latest receipt for September 2026"]')
+      .trigger('click')
+    await flushPromises()
+    await view!.get('#filter-year').setValue('2025')
+    await flushPromises()
+
+    const december = view!.get('[aria-label="Download the latest receipt for December 2025"]')
+    expect(december.attributes('disabled')).toBeUndefined()
+    fail(new ApiError('forbidden'))
+    await flushPromises()
+
+    expect(rows().map((row) => row[0])).toEqual(['December 2025'])
+    expect(view!.find('[role="alert"]').exists()).toBe(false)
+  })
+
+  it('drops a pending receipt download when the page changes', async () => {
+    vi.mocked(downloadReceiptPdf).mockReset().mockResolvedValue()
+    let fail!: (error: unknown) => void
+    vi.mocked(receiptService.issueReceipt).mockReturnValueOnce(
+      new Promise((_, reject) => (fail = reject)),
+    )
+    fakeEntries.entries = months(14)
+    addFakePayment(makePayment({ id: 'p-oct', entryId: 'm0', amount: 5000 }))
+    addFakePayment(makePayment({ id: 'p-old', entryId: 'm12', amount: 5000 }))
+    await openHistory()
+
+    await view!.get('[aria-label="Download the latest receipt for October 2026"]').trigger('click')
+    await flushPromises()
+    await button('Older').trigger('click')
+    await flushPromises()
+
+    const older = view!.get('[aria-label="Download the latest receipt for October 2025"]')
+    expect(older.attributes('disabled')).toBeUndefined()
+    fail(new ApiError('forbidden'))
+    await flushPromises()
+
+    expect(view!.find('[role="alert"]').exists()).toBe(false)
   })
 
   it('opens an entry’s summary', async () => {

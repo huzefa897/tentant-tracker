@@ -8,6 +8,7 @@ import RentEntryFilters from '@/components/rent/RentEntryFilters.vue'
 import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
 import RentEntryTotals from '@/components/rent/RentEntryTotals.vue'
 import { Button } from '@/components/ui/button'
+import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
@@ -48,11 +49,24 @@ function load() {
   })
 }
 
+// A bill's receipt (its most recent payment's), from Django, as a PDF.
+const {
+  downloadingId: downloadingReceiptId,
+  error: receiptError,
+  downloadLatestReceipt,
+  reset: resetReceiptDownload,
+} = useReceiptDownload()
+
+function downloadReceipt(entryId: string) {
+  void downloadLatestReceipt(props.tenantId, entryId)
+}
+
 // The router reuses this page when only the tenant in the URL changes; one tenant's filter
 // and page shouldn't apply to another's entries.
 watch(
   () => props.tenantId,
   () => {
+    resetReceiptDownload()
     selectedYear.value = 'all'
     selectedStatus.value = 'all'
     page.value = 1
@@ -61,13 +75,16 @@ watch(
   { immediate: true },
 )
 
-// Both filters change together on Clear filters: one reload, not two.
+// Both filters change together on Clear filters: one reload, not two. A filter or page shows
+// other bills, so an earlier bill's receipt download no longer shows or holds the buttons.
 watch([selectedYear, selectedStatus], () => {
+  resetReceiptDownload()
   page.value = 1
   load()
 })
 
 function goToPage(next: number) {
+  resetReceiptDownload()
   page.value = next
   load()
 }
@@ -206,7 +223,15 @@ function viewEntry(entryId: string) {
         </div>
 
         <template v-if="entries.length > 0">
-          <RentEntryHistory :entries="entries" @view="viewEntry" />
+          <p v-if="receiptError" class="text-sm text-destructive" role="alert">
+            {{ receiptError }}
+          </p>
+          <RentEntryHistory
+            :entries="entries"
+            :downloading-entry-id="downloadingReceiptId"
+            @view="viewEntry"
+            @download-receipt="downloadReceipt"
+          />
 
           <nav
             v-if="history.hasNext || history.hasPrevious"

@@ -11,11 +11,12 @@ from properties.queries import properties_for_user
 from properties.roles import Capability, role_can
 
 from .calculations import PaymentStatus
-from .models import Payment, RentEntry
+from .models import Payment, Receipt, RentEntry
 from .serializers import (
     BillingMonthField,
     PaymentCreateSerializer,
     PaymentSerializer,
+    ReceiptSerializer,
     RentEntryCreateSerializer,
     RentEntrySerializer,
 )
@@ -26,7 +27,11 @@ from .services import (
     IdempotencyConflictError,
     PaymentExceedsOutstandingError,
     PaymentNotAllowedError,
+    PaymentNotFoundError,
+    ReceiptConfigurationIncompleteError,
+    ReceiptNotAllowedError,
     create_rent_entry,
+    issue_payment_receipt,
     record_payment,
 )
 
@@ -72,6 +77,14 @@ class PaymentExceedsOutstanding(exceptions.APIException):
         )
 
 
+class ReceiptConfigurationIncomplete(exceptions.APIException):
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_code = "receipt_configuration_incomplete"
+
+    def __init__(self, detail: str):
+        super().__init__({"code": "receipt_configuration_incomplete", "detail": detail})
+
+
 def idempotency_key(request, required: bool):
     """The request's Idempotency-Key header as a UUID: one per intended operation, reused only
     by retries of it."""
@@ -90,6 +103,43 @@ def idempotency_key(request, required: bool):
         ) from None
 
 
+class ScopedLookupMixin:
+    """Property, then tenancy, then bill, then payment, each found only within the one before,
+    so a record under another property's or tenancy's URL 404s rather than trusting the URL.
+    Every billing view looks records up through these."""
+
+    def get_property(self):
+        # Through the user's active memberships first, so another property 404s before its
+        # tenancies or bills are looked at. Annotated with the user's role there.
+        if not hasattr(self, "_property"):
+            self._property = get_object_or_404(
+                properties_for_user(self.request.user), pk=self.kwargs["property_id"]
+            )
+        return self._property
+
+    def get_tenancy(self):
+        if not hasattr(self, "_tenancy"):
+            self._tenancy = get_object_or_404(
+                Tenancy.objects.filter(property=self.get_property()),
+                pk=self.kwargs["tenancy_id"],
+            )
+        return self._tenancy
+
+    def get_entry(self):
+        if not hasattr(self, "_entry"):
+            self._entry = get_object_or_404(
+                RentEntry.objects.filter(tenancy=self.get_tenancy()), pk=self.kwargs["entry_id"]
+            )
+        return self._entry
+
+    def get_payment(self):
+        if not hasattr(self, "_payment"):
+            self._payment = get_object_or_404(
+                Payment.objects.filter(entry=self.get_entry()), pk=self.kwargs["payment_id"]
+            )
+        return self._payment
+
+
 class RentEntryPagination(PageNumberPagination):
     """{count, next, previous, results}, a year of bills per page (?page=)."""
 
@@ -97,6 +147,7 @@ class RentEntryPagination(PageNumberPagination):
 
 
 class RentEntryViewSet(
+    ScopedLookupMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.CreateModelMixin,
@@ -114,23 +165,6 @@ class RentEntryViewSet(
 
     serializer_class = RentEntrySerializer
     pagination_class = RentEntryPagination
-
-    def get_property(self):
-        # Through the user's active memberships first, so another property 404s before its
-        # tenancies or bills are looked at.
-        if not hasattr(self, "_property"):
-            self._property = get_object_or_404(
-                properties_for_user(self.request.user), pk=self.kwargs["property_id"]
-            )
-        return self._property
-
-    def get_tenancy(self):
-        if not hasattr(self, "_tenancy"):
-            self._tenancy = get_object_or_404(
-                Tenancy.objects.filter(property=self.get_property()),
-                pk=self.kwargs["tenancy_id"],
-            )
-        return self._tenancy
 
     def get_queryset(self):
         # Every lookup is limited to the authorised tenancy, so another tenancy's bill 404s.
@@ -209,7 +243,9 @@ class RentEntryViewSet(
         )
 
 
-class PaymentViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet):
+class PaymentViewSet(
+    ScopedLookupMixin, mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet
+):
     """A bill's payments: list and record. No update or delete: editing and reversing
     payments need their own rules.
 
@@ -225,30 +261,17 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.Ge
     serializer_class = PaymentSerializer
     pagination_class = None
 
-    def get_entry(self):
-        # Property, then tenancy, then bill, each limited by the one before, so another
-        # property's or tenancy's bill 404s.
-        if not hasattr(self, "_entry"):
-            prop = get_object_or_404(
-                properties_for_user(self.request.user), pk=self.kwargs["property_id"]
-            )
-            tenancy = get_object_or_404(
-                Tenancy.objects.filter(property=prop), pk=self.kwargs["tenancy_id"]
-            )
-            self._property = prop
-            self._entry = get_object_or_404(
-                RentEntry.objects.filter(tenancy=tenancy), pk=self.kwargs["entry_id"]
-            )
-        return self._entry
-
     def get_queryset(self):
-        return Payment.objects.filter(entry=self.get_entry()).order_by(
-            "-paid_date", "-created_at", "id"
+        # Receipts in the same query, never once per payment.
+        return (
+            Payment.objects.filter(entry=self.get_entry())
+            .select_related("receipt")
+            .order_by("-paid_date", "-sequence", "id")
         )
 
     def create(self, request, *args, **kwargs):
         entry = self.get_entry()
-        if not role_can(self._property.role, Capability.RECORD_PAYMENTS):
+        if not role_can(self.get_property().role, Capability.RECORD_PAYMENTS):
             raise exceptions.PermissionDenied("Your role can't record payments.")
 
         serializer = PaymentCreateSerializer(data=request.data)
@@ -278,5 +301,46 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.Ge
                 "payment": PaymentSerializer(result.payment).data,
                 "entry": RentEntrySerializer(current).data,
             },
+            status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
+        )
+
+
+class ReceiptViewSet(ScopedLookupMixin, viewsets.GenericViewSet):
+    """A payment's receipt: POST issues it (201), or returns the one already issued (200);
+    GET returns it, or 404 if none was issued (a GET never issues one). The body is empty:
+    everything on the receipt comes from the stored records. No update or delete.
+
+    No Idempotency-Key: the payment identifies the only receipt it can have, so a retry
+    returns that receipt.
+    """
+
+    serializer_class = ReceiptSerializer
+    pagination_class = None
+
+    def retrieve(self, request, *args, **kwargs):
+        payment = self.get_payment()
+        receipt = get_object_or_404(Receipt.objects.select_related("payment"), payment=payment)
+        return Response(ReceiptSerializer(receipt).data)
+
+    def create(self, request, *args, **kwargs):
+        payment = self.get_payment()
+        if not role_can(self.get_property().role, Capability.ISSUE_RECEIPTS):
+            raise exceptions.PermissionDenied("Your role can't issue receipts.")
+        if request.data:
+            raise exceptions.ValidationError(
+                {"nonFieldErrors": ["Send an empty body: receipts are made from saved records."]}
+            )
+
+        try:
+            result = issue_payment_receipt(payment_id=payment.pk, actor=request.user)
+        except PaymentNotFoundError:
+            raise exceptions.NotFound() from None
+        except ReceiptNotAllowedError:
+            raise exceptions.PermissionDenied("Your role can't issue receipts.") from None
+        except ReceiptConfigurationIncompleteError as error:
+            raise ReceiptConfigurationIncomplete(error.detail) from None
+
+        return Response(
+            ReceiptSerializer(result.receipt).data,
             status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
         )

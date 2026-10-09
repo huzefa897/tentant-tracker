@@ -36,7 +36,12 @@ def make_entry(tenancy, user, month=date(2026, 9, 1)):
 
 
 def make_payment(entry, user, amount, **fields):
-    defaults = {"paid_date": date(2026, 10, 1), "idempotency_key": uuid.uuid4()}
+    # The next sequence on the bill, as record_payment gives it.
+    defaults = {
+        "paid_date": date(2026, 10, 1),
+        "idempotency_key": uuid.uuid4(),
+        "sequence": entry.payments.count() + 1,
+    }
     return Payment.objects.create(
         entry=entry, amount=Decimal(amount), created_by=user, **{**defaults, **fields}
     )
@@ -84,6 +89,7 @@ class RecordPaymentTests(PaymentApiTestCase):
                 "amount": "3000.00",
                 "paidDate": "2026-10-05",
                 "notes": "Bank transfer",
+                "receipt": None,
             },
         )
         self.assertEqual(body["entry"]["id"], str(self.entry.id))
@@ -196,6 +202,19 @@ class RecordPaymentTests(PaymentApiTestCase):
         self.assertIn("Idempotency-Key", self.pay(key=False).json())
         self.assertEqual(self.pay(key="not-a-uuid").status_code, 400)
         self.assertFalse(Payment.objects.exists())
+
+
+    def test_numbers_each_bills_payments_in_recorded_order(self):
+        other_bill = make_entry(self.tenancy, self.user, month=date(2026, 10, 1))
+        make_payment(other_bill, self.user, "700.00")
+
+        self.pay("1000.00")
+        self.pay("2000.00")
+
+        self.assertEqual(
+            list(self.entry.payments.order_by("sequence").values_list("amount", "sequence")),
+            [(Decimal("1000.00"), 1), (Decimal("2000.00"), 2)],
+        )
 
 
 class PaymentRetryTests(PaymentApiTestCase):
@@ -332,6 +351,8 @@ class PaymentHistoryTests(PaymentApiTestCase):
         older = make_payment(self.entry, self.user, "1000.00", paid_date=date(2026, 10, 1))
         newer = make_payment(self.entry, self.user, "2000.00", paid_date=date(2026, 10, 3))
         same_day_later = make_payment(self.entry, self.user, "500.00", paid_date=date(2026, 10, 3))
+        # The same day, recorded later: by sequence, even if the clock says otherwise.
+        Payment.objects.filter(pk=same_day_later.pk).update(created_at=older.created_at)
         other_bill = make_entry(self.tenancy, self.user, month=date(2026, 10, 1))
         make_payment(other_bill, self.user, "700.00")
 
@@ -343,7 +364,8 @@ class PaymentHistoryTests(PaymentApiTestCase):
             [str(same_day_later.id), str(newer.id), str(older.id)],
         )
         self.assertEqual(
-            set(response.json()[0]), {"id", "entryId", "amount", "paidDate", "notes", "createdAt"}
+            set(response.json()[0]),
+            {"id", "entryId", "amount", "paidDate", "notes", "createdAt", "receipt"},
         )
 
     def test_payments_are_read_only(self):

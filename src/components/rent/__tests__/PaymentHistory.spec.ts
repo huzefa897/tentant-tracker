@@ -23,16 +23,18 @@ describe('PaymentHistory', () => {
       ['10 Oct 2026', '₹3,000', 'Bank transfer'],
       ['3 Oct 2026', '₹10,000', '—'],
     ])
-    // Receipts move to the backend in BE Phase 6.
     expect(wrapper.find('[data-testid="download-receipt"]').exists()).toBe(false)
   })
 
-  it('offers a receipt per payment when receipts are on', () => {
-    const wrapper = mount(PaymentHistory, { props: { payments, receipts: true } })
+  it('offers to issue a receipt, or download the one already issued, when receipts are on', () => {
+    const issued = { id: 'receipt-1', reference: 'Shaik_Zahid_Ali_202_Rent_October 2026' }
+    const wrapper = mount(PaymentHistory, {
+      props: { payments: [{ ...payments[0]!, receipt: issued }, payments[1]!], receipts: true },
+    })
 
     expect(cells(wrapper)).toEqual([
       ['10 Oct 2026', '₹3,000', 'Bank transfer', 'Download receipt'],
-      ['3 Oct 2026', '₹10,000', '—', 'Download receipt'],
+      ['3 Oct 2026', '₹10,000', '—', 'Issue receipt'],
     ])
   })
 
@@ -56,7 +58,7 @@ describe('PaymentHistory', () => {
     })
     const buttons = wrapper.findAll('[data-testid="download-receipt"]')
 
-    expect(buttons.map((button) => button.text())).toEqual(['Download receipt', 'Preparing…'])
+    expect(buttons.map((button) => button.text())).toEqual(['Issue receipt', 'Preparing…'])
     expect(buttons.every((button) => button.attributes('disabled') !== undefined)).toBe(true)
   })
 

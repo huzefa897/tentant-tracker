@@ -1,6 +1,6 @@
 # Backend
 
-Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). The frontend calls it for access (`/me`), tenants (tenancies), rent entries (bills) and payments; receipts aren't on it yet (BE Phase 6). PostgreSQL runs in Docker (`docker compose up -d --wait db` from the root, host port 5434); Django runs on the host with pipenv, from `backend/`. Commands and the done-gate are in `CLAUDE.md`.
+Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). The frontend calls it for access (`/me`), tenants (tenancies), rent entries (bills), payments and receipts. PostgreSQL runs in Docker (`docker compose up -d --wait db` from the root, host port 5434); Django runs on the host with pipenv, from `backend/`. Commands and the done-gate are in `CLAUDE.md`.
 
 Feature rules live in their own docs: sign-in and property access in [auth-and-access.md](auth-and-access.md), tenancies in [tenants.md](tenants.md), bills in [rent-entries.md](rent-entries.md), payments in [payments-and-receipts.md](payments-and-receipts.md).
 

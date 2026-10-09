@@ -81,18 +81,22 @@ describe('formatMonthValue', () => {
 })
 
 describe('isValidIsoTimestamp', () => {
-  it.each(['2026-10-03T06:00:00.000Z', '2026-10-03T06:00:00Z', new Date(2026, 0, 1).toISOString()])(
-    'accepts %s',
-    (value) => {
-      expect(isValidIsoTimestamp(value)).toBe(true)
-    },
-  )
+  it.each([
+    '2026-10-03T06:00:00.000Z',
+    '2026-10-03T06:00:00Z',
+    new Date(2026, 0, 1).toISOString(),
+    '2026-10-03T06:00:00+05:30',
+    '2026-10-06T20:48:30.976041+05:30',
+  ])('accepts %s', (value) => {
+    expect(isValidIsoTimestamp(value)).toBe(true)
+  })
 
   it.each([
     '',
     '2026-10-03',
     '2026-10-03 06:00:00',
-    '2026-10-03T06:00:00+05:30',
+    '2026-10-03T06:00:00',
+    '2026-10-03T06:00:00+0530',
     '2026-02-30T00:00:00Z',
     'nope',
   ])('rejects %j', (value) => {
@@ -118,8 +122,21 @@ describe('formatTimestamp', () => {
     expect(formatTimestamp(new Date(2026, 9, 3, 11, 30).toISOString())).toBe('3 Oct 2026, 11:30 am')
   })
 
+  it('reads Django’s timestamps, with microseconds and an offset', () => {
+    const fromDjango = '2026-10-06T20:48:30.976041+05:30'
+
+    expect(formatTimestamp(fromDjango)).toBe(
+      new Date('2026-10-06T15:18:30.976Z').toLocaleString('en-IN', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }),
+    )
+    expect(formatTimestamp(fromDjango)).not.toContain('T')
+  })
+
   it('returns invalid input unchanged', () => {
     expect(formatTimestamp('nope')).toBe('nope')
+    expect(formatTimestamp('2026-02-30T10:00:00+05:30')).toBe('2026-02-30T10:00:00+05:30')
   })
 })
 

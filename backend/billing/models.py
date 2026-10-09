@@ -1,3 +1,4 @@
+import re
 import uuid
 from calendar import monthrange
 from datetime import date
@@ -7,7 +8,7 @@ from django.db import models
 from django.db.models import DecimalField, F, Q, Sum, Value
 from django.db.models.functions import Coalesce, Round
 
-from properties.models import Tenancy
+from properties.models import Property, Tenancy
 
 
 def month_end(billing_month: date) -> date:
@@ -147,6 +148,10 @@ class Payment(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     paid_date = models.DateField(help_text="The day the money was received.")
     notes = models.CharField(max_length=500, blank=True)
+    # The order payments were recorded on this bill: 1, 2, 3…, given by record_payment while it
+    # holds the bill's lock. Receipts total the payments up to this one by it, never by
+    # created_at, which can tie or run backwards with the clock.
+    sequence = models.PositiveIntegerField(editable=False)
     # One intended payment, chosen by the app (the Idempotency-Key header): a retry with the
     # same key returns this payment instead of recording the money twice.
     idempotency_key = models.UUIDField(editable=False)
@@ -158,10 +163,18 @@ class Payment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        # Newest received first; the same day by when it was recorded; then the id, so the
-        # order never changes between requests.
-        ordering = ("-paid_date", "-created_at", "id")
+        # Newest received first; the same day, the latest recorded first. The sequence is unique
+        # per bill, so the order never changes between requests.
+        ordering = ("-paid_date", "-sequence", "id")
         constraints = [
+            models.UniqueConstraint(
+                fields=["entry", "sequence"],
+                name="unique_payment_sequence_per_entry",
+            ),
+            models.CheckConstraint(
+                condition=Q(sequence__gte=1),
+                name="payment_sequence_positive",
+            ),
             models.UniqueConstraint(
                 fields=["idempotency_key"],
                 name="unique_payment_idempotency_key",
@@ -174,3 +187,115 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"₹{self.amount} on {self.paid_date:%d %b %Y} — {self.entry}"
+
+
+class Receipt(models.Model):
+    """Confirms one payment: a snapshot of everything printed on it, copied when it's issued.
+
+    Later payments, or changes to the tenancy, property or bill, never change an issued receipt:
+    reopening or downloading it shows exactly what was saved. The bill's figures are as they
+    stood right after this payment (the payments recorded before it, plus this one), so they're
+    the same whenever the receipt is issued.
+
+    Created only through billing/services.py issue_payment_receipt, which locks the payment so
+    each one gets at most one receipt, and the property so its references are numbered one at a
+    time. Read-only afterwards: corrections and voiding need their own workflow.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # One receipt per payment, enforced by the database (a unique column).
+    payment = models.OneToOneField(Payment, on_delete=models.PROTECT, related_name="receipt")
+    # The property that issued it, which its reference is unique within. Saved, like everything
+    # else here, rather than followed through the payment.
+    property = models.ForeignKey(
+        Property, on_delete=models.PROTECT, related_name="receipts", editable=False
+    )
+    # Tenant_Name_Flat_Rent_Month YYYY (receipt_reference), with _2, _3… for the property's later
+    # receipts with the same name, flat and month. Set once when issued, never regenerated.
+    reference = models.CharField(max_length=255, editable=False)
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    issued_at = models.DateTimeField()
+    # The property's date when issued, printed on the receipt. Saved rather than worked out from
+    # issued_at, which would depend on the time zone of whoever downloads it.
+    issued_date = models.DateField()
+
+    # Who issued it, from the property and the issuing person.
+    issuer_name = models.CharField(max_length=150)
+    issuer_address = models.TextField()
+    issuer_contact_number = models.CharField(max_length=20, blank=True)
+    received_by_name = models.CharField(max_length=150, blank=True)
+
+    # The tenancy.
+    tenant_name = models.CharField(max_length=150)
+    flat_number = models.CharField(max_length=20)
+    tenant_mobile_number = models.CharField(max_length=20, blank=True)
+    deposit_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    rent_due_day = models.PositiveSmallIntegerField()
+
+    # The bill.
+    billing_month = models.DateField(help_text="The first day of the billed month.")
+    rent_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    electricity_units = models.DecimalField(max_digits=10, decimal_places=3)
+    electricity_rate = models.DecimalField(max_digits=8, decimal_places=2)
+    electricity_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    water_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    total_due = models.DecimalField(max_digits=12, decimal_places=2)
+    total_paid = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="Paid towards the bill up to and including this payment.",
+    )
+    outstanding_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="Left on the bill after this payment.",
+    )
+    previous_month_outstanding = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="What the previous month's bill still owed when this was issued (for "
+        "information; never added to this bill).",
+    )
+
+    # The payment.
+    payment_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    paid_date = models.DateField()
+    payment_notes = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ("-issued_at", "id")
+        constraints = [
+            # Properties number their own: another property's tenant with the same name, flat
+            # and month never makes this one's _2.
+            models.UniqueConstraint(
+                fields=["property", "reference"],
+                name="unique_receipt_reference_per_property",
+            ),
+            models.CheckConstraint(
+                condition=Q(payment_amount__gt=0),
+                name="receipt_payment_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(billing_month__day=1),
+                name="receipt_billing_month_first_day",
+            ),
+        ]
+
+    def __str__(self):
+        return self.reference
+
+
+def receipt_reference(tenant_name: str, flat_number: str, billing_month: date) -> str:
+    """'Shaik Zahid Ali', '202', October 2026 -> 'Shaik_Zahid_Ali_202_Rent_October 2026': the
+    tenant's name and flat (spaces as underscores, characters file names can't hold left out)
+    and the billed month. A bill's later receipts add _2, _3… (billing/services.py)."""
+
+    def part(value: str) -> str:
+        cleaned = re.sub(r'[\\/:*?"<>|]+', "", value)
+        return "_".join(cleaned.split())
+
+    return f"{part(tenant_name)}_{part(flat_number)}_Rent_{billing_month:%B %Y}"

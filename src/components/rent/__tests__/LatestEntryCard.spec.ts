@@ -46,4 +46,31 @@ describe('LatestEntryCard', () => {
 
     expect(wrapper.emitted('view')).toEqual([['entry-1']])
   })
+
+  it('offers the receipt once anything is paid, emitting the entry id', async () => {
+    const wrapper = mount(LatestEntryCard, { props: { entry: makeEntry({ totalPaid: 10000 }) } })
+    const button = wrapper.get('[data-testid="download-entry-receipt"]')
+
+    expect(button.text()).toBe('Download receipt')
+    expect(button.attributes('aria-label')).toBe('Download the latest receipt for September 2026')
+    await button.trigger('click')
+
+    expect(wrapper.emitted('download-receipt')).toEqual([['entry-1']])
+  })
+
+  it('offers no receipt for an unpaid bill', () => {
+    const wrapper = mount(LatestEntryCard, { props: { entry: makeEntry() } })
+
+    expect(wrapper.find('[data-testid="download-entry-receipt"]').exists()).toBe(false)
+  })
+
+  it('shows Preparing… and waits while the receipt is prepared', () => {
+    const wrapper = mount(LatestEntryCard, {
+      props: { entry: makeEntry({ totalPaid: 10000 }), downloadingReceipt: true },
+    })
+    const button = wrapper.get('[data-testid="download-entry-receipt"]')
+
+    expect(button.text()).toBe('Preparing…')
+    expect(button.attributes('disabled')).toBeDefined()
+  })
 })

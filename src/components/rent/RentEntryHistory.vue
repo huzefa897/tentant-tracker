@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronRight } from '@lucide/vue'
+import { ChevronRight, Download } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import { Button } from '@/components/ui/button'
@@ -8,14 +8,18 @@ import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
 
-// Shown in the given order, with the figures the backend calculated. Receipts come back in
-// BE Phase 6.
+// Shown in the given order, with the figures the backend calculated. Receipts are issued per
+// payment, on the entry's details page.
 const props = defineProps<{
   entries: RentEntry[]
+  // The bill whose receipt is being prepared; every receipt button waits until it's done.
+  downloadingEntryId?: string | null
 }>()
 
 const emit = defineEmits<{
   view: [entryId: string]
+  // The receipt for the bill's most recent payment (offered once anything is paid).
+  'download-receipt': [entryId: string]
 }>()
 
 const rows = computed(() =>
@@ -57,7 +61,19 @@ const rows = computed(() =>
               <PaymentStatusBadge :status="row.status" />
             </td>
             <td class="px-4 py-2">
-              <div class="flex justify-end">
+              <div class="flex justify-end gap-1">
+                <Button
+                  v-if="row.totalPaid > 0"
+                  variant="ghost"
+                  class="h-10"
+                  :disabled="!!downloadingEntryId"
+                  :aria-label="`Download the latest receipt for ${row.month}`"
+                  data-testid="download-entry-receipt"
+                  @click="emit('download-receipt', row.id)"
+                >
+                  <Download aria-hidden="true" />
+                  {{ downloadingEntryId === row.id ? 'Preparing…' : 'Download receipt' }}
+                </Button>
                 <Button
                   variant="ghost"
                   class="h-10"
@@ -100,6 +116,18 @@ const rows = computed(() =>
           </div>
         </dl>
         <div class="mt-4 grid gap-2">
+          <Button
+            v-if="row.totalPaid > 0"
+            variant="outline"
+            class="h-11 w-full"
+            :disabled="!!downloadingEntryId"
+            :aria-label="`Download the latest receipt for ${row.month}`"
+            data-testid="download-entry-receipt"
+            @click="emit('download-receipt', row.id)"
+          >
+            <Download aria-hidden="true" />
+            {{ downloadingEntryId === row.id ? 'Preparing…' : 'Download receipt' }}
+          </Button>
           <Button
             variant="outline"
             class="h-11 w-full"

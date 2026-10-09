@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteEntry } from '@/composables/useRouteEntry'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
@@ -115,6 +116,19 @@ async function handleSavePayment(input: PaymentInput) {
   }
 }
 
+// Every receipt button waits while one is prepared; the error shows above the history.
+const {
+  downloadingId: downloadingPaymentId,
+  error: receiptError,
+  downloadPaymentReceipt,
+  reset: resetReceiptDownload,
+} = useReceiptDownload()
+
+function handleDownloadReceipt(paymentId: string) {
+  const payment = entryPayments.value?.payments.find((item) => item.id === paymentId)
+  if (payment) void downloadPaymentReceipt(props.tenantId, payment)
+}
+
 // The router reuses this page when only the ids in the URL change: nothing from one entry
 // should show on another, and its payments load.
 watch(
@@ -123,6 +137,7 @@ watch(
     paymentDialogOpen.value = false
     paymentError.value = null
     confirmation.value = null
+    resetReceiptDownload()
     loadPayments()
   },
   { immediate: true },
@@ -316,7 +331,17 @@ function goToHistory() {
           >
             Loading payments…
           </p>
-          <PaymentHistory v-else :payments="entryPayments.payments" />
+          <template v-else>
+            <p v-if="receiptError" class="mb-3 text-sm text-destructive" role="alert">
+              {{ receiptError }}
+            </p>
+            <PaymentHistory
+              :payments="entryPayments.payments"
+              receipts
+              :downloading-payment-id="downloadingPaymentId"
+              @download-receipt="handleDownloadReceipt"
+            />
+          </template>
         </section>
 
         <section

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronRight } from '@lucide/vue'
+import { ChevronRight, Download } from '@lucide/vue'
 
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import { Button } from '@/components/ui/button'
@@ -12,10 +12,14 @@ import { formatMonthValue } from '@/utils/date'
 // calculated, so they match Previous Entries and the summary page.
 const props = defineProps<{
   entry: RentEntry
+  // While its receipt is being prepared: the button waits.
+  downloadingReceipt?: boolean
 }>()
 
 const emit = defineEmits<{
   view: [entryId: string]
+  // The receipt for the bill's most recent payment (offered once anything is paid).
+  'download-receipt': [entryId: string]
 }>()
 
 const month = computed(() => formatMonthValue(props.entry.billingMonth))
@@ -45,15 +49,29 @@ const charges = computed(() => [
           <PaymentStatusBadge :status="entry.status" />
         </div>
       </div>
-      <Button
-        variant="outline"
-        class="h-10"
-        :aria-label="`View summary for ${month}`"
-        @click="emit('view', entry.id)"
-      >
-        View Summary
-        <ChevronRight aria-hidden="true" />
-      </Button>
+      <div class="flex flex-wrap gap-2">
+        <Button
+          v-if="entry.totalPaid > 0"
+          variant="outline"
+          class="h-10"
+          :disabled="downloadingReceipt"
+          :aria-label="`Download the latest receipt for ${month}`"
+          data-testid="download-entry-receipt"
+          @click="emit('download-receipt', entry.id)"
+        >
+          <Download aria-hidden="true" />
+          {{ downloadingReceipt ? 'Preparing…' : 'Download receipt' }}
+        </Button>
+        <Button
+          variant="outline"
+          class="h-10"
+          :aria-label="`View summary for ${month}`"
+          @click="emit('view', entry.id)"
+        >
+          View Summary
+          <ChevronRight aria-hidden="true" />
+        </Button>
+      </div>
     </div>
 
     <div class="mt-4 grid gap-4 text-sm sm:grid-cols-2">

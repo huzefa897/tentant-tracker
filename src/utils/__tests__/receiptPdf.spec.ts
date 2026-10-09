@@ -54,7 +54,8 @@ describe('renderReceiptPdf', () => {
   it('fits a long reference, a long name and maximum-length notes on one page', () => {
     const doc = render(
       makeReceipt({
-        reference: `RCP-202-202609-2-${'c'.repeat(36)}`,
+        reference:
+          'Mohammed_Abdul_Rahman_Siddiqui_Khan_Bahadur_Syed_Mustafa_Hussaini_Qadri_202_Rent_September 2026_12',
         tenant: {
           ...makeReceipt().tenant,
           name: 'Mohammed Abdul Rahman Siddiqui Khan Bahadur Syed Mustafa Hussaini Qadri',
@@ -103,6 +104,6 @@ describe('renderReceiptPdf', () => {
   })
 
   it('titles the PDF with the receipt number', () => {
-    expect(render().output()).toContain('Payment Receipt RCP-202-202609')
+    expect(render().output()).toContain('Payment Receipt Shaik_Zahid_Ali_202_Rent_September 2026')
   })
 })

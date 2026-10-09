@@ -59,15 +59,23 @@ export function formatMonthValue(value: string): string {
   return date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
 }
 
-const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/
+const ISO_TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/
 
-// "2026-10-03T06:00:00.000Z", as produced by Date#toISOString.
-// Date.parse alone rolls impossible days over ("02-30" -> March), so check the date part too.
+// Milliseconds at most, which every browser parses (Django sends microseconds).
+function toParsableTimestamp(value: string): string | null {
+  const match = ISO_TIMESTAMP.exec(value)
+  if (!match) return null
+  const fraction = match[2] ? `.${match[2].slice(0, 3)}` : ''
+  return `${match[1]}${fraction}${match[3]}`
+}
+
+// "2026-10-03T06:00:00.000Z" (Date#toISOString) or "2026-10-06T20:48:30.976041+05:30" (Django:
+// microseconds, with an offset). Date.parse alone rolls impossible days over ("02-30" ->
+// March), so check the date part too.
 export function isValidIsoTimestamp(value: string): boolean {
+  const parsable = toParsableTimestamp(value)
   return (
-    ISO_TIMESTAMP.test(value) &&
-    isValidDateValue(value.slice(0, 10)) &&
-    !Number.isNaN(Date.parse(value))
+    parsable !== null && isValidDateValue(value.slice(0, 10)) && !Number.isNaN(Date.parse(parsable))
   )
 }
 
@@ -87,7 +95,10 @@ export function formatDateValue(value: string): string {
 export function formatTimestamp(value: string): string {
   if (!isValidIsoTimestamp(value)) return value
 
-  return new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+  return new Date(toParsableTimestamp(value)!).toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
 }
 
 // "2026-01" -> "2025-12". Invalid input is returned unchanged.

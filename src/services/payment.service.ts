@@ -11,6 +11,7 @@ export interface PaymentDto {
   paidDate: string // YYYY-MM-DD
   notes: string
   createdAt: string
+  receipt: { id: string; reference: string } | null
 }
 
 // What a payment sends. The bill comes from the URL, the creator from the signed-in user, and
@@ -41,6 +42,13 @@ export function parsePayment(value: unknown): PaymentDto {
   if (typeof value.amount !== 'string' || !MONEY.test(value.amount)) invalid('amount')
   if (typeof value.paidDate !== 'string' || !DATE.test(value.paidDate)) invalid('paidDate')
   if (typeof value.notes !== 'string') invalid('notes')
+  const receipt = value.receipt
+  if (receipt !== null) {
+    if (!isRecord(receipt)) invalid('receipt')
+    for (const key of ['id', 'reference'] as const) {
+      if (typeof receipt[key] !== 'string' || receipt[key] === '') invalid(`receipt ${key}`)
+    }
+  }
 
   return value as unknown as PaymentDto
 }
@@ -53,6 +61,7 @@ export function toPayment(dto: PaymentDto): Payment {
     paidDate: dto.paidDate,
     notes: dto.notes,
     createdAt: dto.createdAt,
+    receipt: dto.receipt && { id: dto.receipt.id, reference: dto.receipt.reference },
   }
 }
 
@@ -73,7 +82,7 @@ export function outstandingFromConflict(error: unknown): number | null {
   return typeof value === 'string' && MONEY.test(value) ? Number(value) : null
 }
 
-function paymentsUrl(propertyId: string, tenancyId: string, entryId: string) {
+export function paymentsUrl(propertyId: string, tenancyId: string, entryId: string) {
   return (
     `/properties/${encodeURIComponent(propertyId)}/tenancies/${encodeURIComponent(tenancyId)}` +
     `/entries/${encodeURIComponent(entryId)}/payments/`

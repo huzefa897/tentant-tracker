@@ -6,6 +6,7 @@ import { flushPromises } from '@vue/test-utils'
 
 import { ApiError } from '@/services/apiError'
 import { paymentService } from '@/services/payment.service'
+import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
@@ -17,11 +18,15 @@ import {
   PAYMENT_KEY_CONFLICT_MESSAGE,
   PAYMENT_UNCONFIRMED_MESSAGE,
   PaymentSaveError,
+  RECEIPT_ERROR_MESSAGE,
+  RECEIPT_UNCONFIRMED_MESSAGE,
+  ReceiptError,
   SAVE_UNCONFIRMED_MESSAGE,
   useRentEntryStore,
 } from '@/stores/rentEntry'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
+import { fakeReceipts } from '@/test/mocks/receiptService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { makeEntry, makePayment } from '@/test/rentEntries'
 import type { PaymentInput } from '@/types/payment'
@@ -31,6 +36,7 @@ vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
+vi.mock('@/services/receipt.service', () => import('@/test/mocks/receiptService'))
 
 const createEntry = vi.mocked(rentEntryService.createEntry)
 const getEntries = vi.mocked(rentEntryService.getEntries)
@@ -690,6 +696,221 @@ describe('payments', () => {
     useAccessStore().selectProperty(annex.id)
 
     expect(store.paymentKeyFor('sep')).not.toBe(key)
+  })
+})
+
+describe('receipts', () => {
+  const issueReceipt = vi.mocked(receiptService.issueReceipt)
+  const getReceipt = vi.mocked(receiptService.getReceipt)
+
+  beforeEach(() => {
+    fakeEntries.entries = [september]
+    addFakePayment(makePayment({ id: 'p-1', entryId: 'sep', amount: 3000 }))
+  })
+
+  async function receiptError(promise: Promise<unknown>): Promise<ReceiptError> {
+    const error = await promise.then(
+      () => null,
+      (err: unknown) => err,
+    )
+    expect(error).toBeInstanceOf(ReceiptError)
+    return error as ReceiptError
+  }
+
+  it('issues a payment’s first receipt and shows the payment has one', async () => {
+    const store = await withProperty()
+    await store.loadPayments('tenant-001', 'sep')
+    const payment = store.payments.sep!.payments[0]!
+
+    const receipt = await store.getReceipt('tenant-001', payment)
+
+    expect(issueReceipt).toHaveBeenCalledWith(testProperty.id, 'tenant-001', 'sep', 'p-1')
+    expect(receipt).toMatchObject({ paymentId: 'p-1', paymentAmount: 3000 })
+    expect(store.payments.sep!.payments[0]!.receipt).toEqual({
+      id: receipt.id,
+      reference: receipt.reference,
+    })
+  })
+
+  it('loads an issued receipt without issuing another, then reuses it', async () => {
+    const store = await withProperty()
+    await store.loadPayments('tenant-001', 'sep')
+    await store.getReceipt('tenant-001', store.payments.sep!.payments[0]!)
+    // As on another visit: nothing cached, the payment shows it has a receipt.
+    store.reset()
+    await store.loadPayments('tenant-001', 'sep')
+    const payment = store.payments.sep!.payments[0]!
+    issueReceipt.mockClear()
+
+    const receipt = await store.getReceipt('tenant-001', payment)
+    await store.getReceipt('tenant-001', payment)
+
+    expect(issueReceipt).not.toHaveBeenCalled()
+    expect(getReceipt).toHaveBeenCalledTimes(1)
+    expect(receipt).toBe(fakeReceipts.get('p-1'))
+  })
+
+  it('reports what to configure when the backend refuses to issue', async () => {
+    const store = await withProperty()
+    issueReceipt.mockRejectedValueOnce(
+      new ApiError('invalid-request', 'x', 'receipt_configuration_incomplete', {
+        detail: 'Configure the property address before issuing receipts.',
+      }),
+    )
+
+    const error = await receiptError(
+      store.getReceipt('tenant-001', makePayment({ id: 'p-1', entryId: 'sep' })),
+    )
+
+    expect(error.message).toBe('Configure the property address before issuing receipts.')
+    expect(error.uncertain).toBe(false)
+  })
+
+  it('says a lost response is safe to retry, and the retry returns the same receipt', async () => {
+    const store = await withProperty()
+    const issue = issueReceipt.getMockImplementation()!
+    // Issued on the server, but the response was lost.
+    issueReceipt.mockImplementationOnce(async (...args) => {
+      await issue(...args)
+      throw new ApiError('network')
+    })
+    const payment = makePayment({ id: 'p-1', entryId: 'sep' })
+
+    const error = await receiptError(store.getReceipt('tenant-001', payment))
+    expect(error).toMatchObject({ message: RECEIPT_UNCONFIRMED_MESSAGE, uncertain: true })
+
+    const receipt = await store.getReceipt('tenant-001', payment)
+    expect(receipt).toBe(fakeReceipts.get('p-1'))
+    expect(fakeReceipts.size).toBe(1)
+  })
+
+  it('says only to try again when an issued receipt fails to load', async () => {
+    const store = await withProperty()
+    getReceipt.mockRejectedValueOnce(new ApiError('network'))
+    const payment = makePayment({
+      id: 'p-1',
+      entryId: 'sep',
+      receipt: { id: 'r-1', reference: 'Shaik_Zahid_Ali_202_Rent_September 2026' },
+    })
+
+    const error = await receiptError(store.getReceipt('tenant-001', payment))
+
+    expect(error).toMatchObject({ message: RECEIPT_ERROR_MESSAGE, uncertain: false })
+    expect(issueReceipt).not.toHaveBeenCalled()
+  })
+
+  it('never changes the payment when a receipt fails', async () => {
+    const store = await withProperty()
+    await store.loadPayments('tenant-001', 'sep')
+    const before = store.payments.sep
+    issueReceipt.mockRejectedValueOnce(new ApiError('forbidden'))
+
+    const error = await receiptError(store.getReceipt('tenant-001', before!.payments[0]!))
+
+    expect(error.message).toBe("You don't have permission to issue receipts for this property.")
+    expect(store.payments.sep).toEqual(before)
+    expect(recordPayment).not.toHaveBeenCalled()
+  })
+
+  it('gets the receipt for a bill’s most recent payment, loading its payments', async () => {
+    addFakePayment(makePayment({ id: 'p-2', entryId: 'sep', amount: 500, paidDate: '2026-10-06' }))
+    const store = await withProperty()
+
+    const receipt = await store.getLatestReceipt('tenant-001', 'sep')
+
+    expect(receipt.paymentId).toBe('p-2')
+    expect(store.payments.sep!.payments[0]).toMatchObject({
+      id: 'p-2',
+      receipt: { id: receipt.id, reference: receipt.reference },
+    })
+  })
+
+  it('reloads the bill’s payments for its latest receipt, never a loaded list', async () => {
+    const store = await withProperty()
+    await store.loadPayments('tenant-001', 'sep')
+    const cached = store.payments.sep!.payments[0]!
+    // Someone else records a newer payment after the list loaded.
+    addFakePayment(makePayment({ id: 'p-2', entryId: 'sep', amount: 500, paidDate: '2026-10-06' }))
+
+    const receipt = await store.getLatestReceipt('tenant-001', 'sep')
+
+    expect(receipt.paymentId).toBe('p-2')
+    expect(fakeReceipts.has(cached.id)).toBe(false)
+    expect(store.payments.sep!.payments.map((payment) => payment.id)).toEqual(['p-2', cached.id])
+  })
+
+  it('never falls back to a loaded list when the payments fail to reload', async () => {
+    const store = await withProperty()
+    await store.loadPayments('tenant-001', 'sep')
+    const before = store.payments.sep
+    getPayments.mockRejectedValueOnce(new ApiError('network'))
+
+    const error = await receiptError(store.getLatestReceipt('tenant-001', 'sep'))
+
+    expect(error.message).toBe(RECEIPT_ERROR_MESSAGE)
+    expect(issueReceipt).not.toHaveBeenCalled()
+    expect(store.payments.sep).toEqual(before)
+  })
+
+  it('supersedes a payments load already under way', async () => {
+    const store = await withProperty()
+    const list = getPayments.getMockImplementation()!
+    let finishStale!: () => void
+    getPayments.mockImplementationOnce(async (...args) => {
+      const stale = await list(...args)
+      await new Promise<void>((resolve) => (finishStale = resolve))
+      return stale
+    })
+    const loading = store.loadPayments('tenant-001', 'sep')
+    addFakePayment(makePayment({ id: 'p-2', entryId: 'sep', amount: 500, paidDate: '2026-10-06' }))
+
+    await store.getLatestReceipt('tenant-001', 'sep')
+    finishStale()
+    await loading
+
+    expect(store.payments.sep!.status).toBe('ready')
+    expect(store.payments.sep!.payments[0]!.id).toBe('p-2')
+  })
+
+  it('says a bill without payments has no receipt', async () => {
+    fakeEntries.entries = [october]
+    const store = await withProperty()
+
+    const error = await receiptError(store.getLatestReceipt('tenant-001', 'oct'))
+
+    expect(error.message).toBe('No payments have been recorded for this entry yet.')
+    expect(issueReceipt).not.toHaveBeenCalled()
+  })
+
+  it('reports payments that fail to load as an error', async () => {
+    const store = await withProperty()
+    getPayments.mockRejectedValueOnce(new ApiError('network'))
+
+    const error = await receiptError(store.getLatestReceipt('tenant-001', 'sep'))
+
+    expect(error.message).toBe(RECEIPT_ERROR_MESSAGE)
+    expect(issueReceipt).not.toHaveBeenCalled()
+  })
+
+  it('says the entry can’t be found when its payments 404', async () => {
+    const store = await withProperty()
+    getPayments.mockRejectedValueOnce(new ApiError('not-found'))
+
+    const error = await receiptError(store.getLatestReceipt('tenant-001', 'sep'))
+
+    expect(error.message).toBe("This entry can't be found. It may no longer be available.")
+  })
+
+  it('forgets loaded receipts when the property changes', async () => {
+    const store = await withProperty([testProperty, annex])
+    const payment = makePayment({ id: 'p-1', entryId: 'sep' })
+    await store.getReceipt('tenant-001', payment)
+
+    useAccessStore().selectProperty(annex.id)
+    useAccessStore().selectProperty(testProperty.id)
+    await store.getReceipt('tenant-001', payment)
+
+    expect(issueReceipt).toHaveBeenCalledTimes(2)
   })
 })
 

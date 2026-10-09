@@ -80,6 +80,7 @@ export function resetPaymentService() {
           id: nextFakeId('payment'),
           ...input,
           createdAt: new Date().toISOString(),
+          receipt: null,
         })
         fakeEntries.paymentKeys.set(idempotencyKey, { paymentId: payment.id, request })
         return { payment, entry: findEntry(tenancyId, input.entryId), replayed: false }

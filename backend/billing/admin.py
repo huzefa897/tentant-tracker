@@ -1,13 +1,14 @@
 from django.contrib import admin
 
 from .calculations import entry_amounts
-from .models import Payment, RentEntry
+from .models import Payment, Receipt, RentEntry
 
 
 class ViewOnlyAdminMixin:
-    """Bills and payments are created through the app's API, which copies the tenancy's charges,
-    checks occupancy and locks the bill so payments never exceed it. Changing them here would
-    bypass those rules and the balances built on them; corrections need deliberate rules first."""
+    """Bills, payments and receipts are created through the app's API, which copies the
+    tenancy's charges, checks occupancy and locks the bill so payments never exceed it.
+    Changing them here would bypass those rules and the balances built on them; corrections
+    need deliberate rules first."""
 
     def has_add_permission(self, request, obj=None):
         return False
@@ -85,4 +86,47 @@ class PaymentAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
     search_fields = ("entry__tenancy__name", "entry__tenancy__flat_number", "notes")
     date_hierarchy = "paid_date"
     fields = ("id", "entry", "amount", "paid_date", "notes", "created_by", "created_at")
+    readonly_fields = fields
+
+
+@admin.register(Receipt)
+class ReceiptAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
+    """Issued receipts, to inspect. Read-only here (not database-level immutability): every
+    receipt is written by billing/services.py issue_payment_receipt, and corrections or voiding
+    need their own workflow."""
+
+    list_display = ("reference", "tenant_name", "flat_number", "payment_amount", "issued_at")
+    list_filter = ("payment__entry__tenancy__property",)
+    search_fields = ("reference", "tenant_name", "flat_number")
+    date_hierarchy = "issued_at"
+    fields = (
+        "id",
+        "reference",
+        "payment",
+        "issued_by",
+        "issued_at",
+        "issued_date",
+        "issuer_name",
+        "issuer_address",
+        "issuer_contact_number",
+        "received_by_name",
+        "tenant_name",
+        "flat_number",
+        "tenant_mobile_number",
+        "deposit_amount",
+        "rent_due_day",
+        "billing_month",
+        "rent_amount",
+        "electricity_units",
+        "electricity_rate",
+        "electricity_amount",
+        "water_amount",
+        "total_due",
+        "total_paid",
+        "outstanding_amount",
+        "previous_month_outstanding",
+        "payment_amount",
+        "paid_date",
+        "payment_notes",
+    )
     readonly_fields = fields

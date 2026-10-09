@@ -44,8 +44,9 @@ name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
 
 Rent entries (bills) and payments are saved in the backend, which calculates
 every total and balance, so they show in any browser for anyone with access to
-the property. Receipts aren't available yet (BE Phase 6), and entries saved in
-this browser before BE Phase 4 are no longer shown.
+the property. Each payment can have one receipt, issued from those saved
+records and downloaded as a PDF; set the property's address in Django admin
+first. Entries saved in this browser before BE Phase 4 are no longer shown.
 
 ## Scripts
 
