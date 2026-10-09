@@ -159,6 +159,10 @@ STATIC_URL = "static/"
 # `manage.py collectstatic` copies admin's CSS and JS here (done when the image is built).
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# The only upload is the Sheet import in admin (billing/sheet_import.py, superusers only), which
+# refuses more than 5 MB: a file that size stays in memory rather than in a temporary file.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
+
 # The app sends no email yet. Development prints it; production uses SMTP unless set.
 MAILERS = {
     "default": {

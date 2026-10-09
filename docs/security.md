@@ -16,7 +16,7 @@ The rules every change follows, what's in place, and what's left. Update the sta
 | 8   | Parameterised SQL                | Done (rule)                                                             |
 | 9   | Validate form inputs             | Done (rule)                                                             |
 | 10  | Block XSS                        | Done in code, API and Caddy headers; CSP report-only until checked      |
-| 11  | Validate uploads                 | Rule, for when uploads arrive                                           |
+| 11  | Validate uploads                 | Done for the one upload (the Sheet import in admin)                     |
 | 12  | Rate-limit all requests          | Done                                                                    |
 | 13  | Tighten CORS                     | Done                                                                    |
 | 14  | Production settings, DEBUG off   | Done; set by compose.prod.yaml, checked in CI                           |
@@ -104,9 +104,11 @@ All settings below come from the environment; `backend/.env.example` lists every
 
   With a separate API domain, add its origin to `connect-src`. Add a source only when a reported violation needs it.
 
-## 11. Validate uploads (future)
+## 11. Validate uploads
 
-There are no uploads today. When they arrive:
+The only upload is the Google Sheet import on a property's admin page ([data-import.md](data-import.md), `billing/sheet_import.py`). It's for superusers only, checks the size (5 MB) on the server, checks the file is a zip by its content and refuses one that would unpack to more than 50 MB or 2,000 entries, and parses its XML through `defusedxml` (which `openpyxl` uses when it's installed). It's read in memory (`FILE_UPLOAD_MAX_MEMORY_SIZE`) and never stored or served; between steps the converted data is signed for that property and admin, and expires after an hour.
+
+For any future upload:
 
 - Check size on the server, and set `DATA_UPLOAD_MAX_MEMORY_SIZE` and `FILE_UPLOAD_MAX_MEMORY_SIZE`.
 - Check the type by content, not the name or `Content-Type`, and allow a short list of types.

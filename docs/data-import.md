@@ -13,7 +13,15 @@ Getting the records the owners already have into the production database once, w
 
 ## How it works
 
-Two steps, with a file you can read in between:
+**The easy way: admin.** On the property's page in admin, **Import from Google Sheet** (superusers only) does it all on the server, in three steps on one page:
+
+1. **Upload** the `.xlsx` (up to 5 MB). It's read in memory and never stored. It must be a real `.xlsx` (checked by its content), and one that unpacks to far more than a spreadsheet would is refused. The page shows the totals, any **problems** (nothing can be imported until they're fixed in the Sheet) and the warnings to **check** (step 3 below).
+2. **Match each tab** to one of _this property's_ tenancies (never by name), or choose _Don't import this tab_, then **Check**: a dry run that shows what would be created and the reconciliation, and saves nothing.
+3. **Import**: only offered after a clean check, and it imports exactly what was checked. Admin's history for the property records what was imported.
+
+Between steps the converted Sheet travels in the page, signed for that property and admin, so it can't be altered, and it expires after an hour. Create the tenancies first (step 4 below) and take a backup (step 5). The steps below apply too, apart from copying files: the commands are the same import, for running by hand.
+
+**By hand: two commands**, with a file you can read in between:
 
 1. **`sheet_to_ledger`** (on your computer) converts the Sheet, downloaded as `.xlsx`, into a **ledger file** (JSON). It takes each month's own charges and payment and refuses anything it can't convert safely ([billing/sheet_ledger.py](../backend/billing/sheet_ledger.py)).
 2. **`import_legacy_ledger`** (on the server) imports the ledger, using a **mapping file** that says which tenancy each tab belongs to ([billing/legacy_import.py](../backend/billing/legacy_import.py)).
@@ -41,7 +49,7 @@ Google Sheets > File > Download > Microsoft Excel (.xlsx). Keep this file **unch
 
 ```bash
 cd backend
-pipenv install --dev
+pipenv install
 pipenv run python manage.py sheet_to_ledger ~/private/TenantTracker.xlsx \
   --output ~/private/ledger.json --mapping-template ~/private/tenancy-map.json
 ```
