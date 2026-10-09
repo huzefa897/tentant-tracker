@@ -3,8 +3,8 @@ import tempfile
 from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
-from unittest import skipUnless
 
+import openpyxl
 from django.conf import settings
 from django.core.management import CommandError, call_command
 from django.test import TestCase
@@ -12,17 +12,11 @@ from django.test import TestCase
 from billing.legacy_import import import_ledger
 from billing.legacy_ledger import parse_ledger
 from billing.models import Receipt, RentEntry
+from billing.sheet_ledger import convert_workbook
 
 from .factories import make_property, make_tenancy, make_user
 from .test_payments_api import TODAY
 
-try:
-    import openpyxl
-except ImportError:  # A dev package: production images don't have it.
-    openpyxl = None
-
-if openpyxl is not None:
-    from billing.sheet_ledger import convert_workbook
 
 
 def tenant_tab(workbook, title, rows, *, rate=6, flat=202.0, notes_header="Notes",
@@ -76,7 +70,6 @@ def convert(*tabs):
     return convert_workbook(workbook_with(*tabs), today=TODAY)
 
 
-@skipUnless(openpyxl, "needs openpyxl (pipenv install --dev)")
 class ConvertWorkbookTests(TestCase):
     def test_converts_each_months_own_charges_and_payment(self):
         conversion = convert(
@@ -270,7 +263,6 @@ class ConvertWorkbookTests(TestCase):
         self.assertIn(("total paid", "20750.00", "20750.00"), report.reconciliation)
 
 
-@skipUnless(openpyxl, "needs openpyxl (pipenv install --dev)")
 class SheetToLedgerCommandTests(TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
