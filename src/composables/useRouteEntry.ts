@@ -1,6 +1,8 @@
-import { computed, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
+import { computed, onUnmounted, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 
 import { entryLoadErrorMessage, useRentEntryStore } from '@/stores/rentEntry'
+
+const RETRY_MS = 10_000
 
 export type RouteEntryStatus = 'loading' | 'error' | 'missing' | 'ready'
 
@@ -27,8 +29,17 @@ export function useRouteEntry(
 
   // Only the latest load (for the current ids) may change state.
   let loadSeq = 0
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+  function stopRetry() {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
+  }
 
   async function load() {
+    stopRetry()
     const seq = ++loadSeq
     loadState.value = 'loading'
     error.value = null
@@ -40,11 +51,13 @@ export function useRouteEntry(
       if (seq !== loadSeq) return
       error.value = entryLoadErrorMessage(err)
       loadState.value = 'error'
+      retryTimer = setTimeout(load, RETRY_MS)
     }
   }
 
   // The router reuses the page when only the ids change, so load again then.
   watch(() => [toValue(tenantId), toValue(entryId)], load, { immediate: true, flush: 'sync' })
+  onUnmounted(stopRetry)
 
   return { entry, status, error: computed(() => error.value), retry: load }
 }

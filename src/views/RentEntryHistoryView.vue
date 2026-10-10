@@ -5,13 +5,14 @@ import { ArrowLeft, ChevronLeft, ChevronRight, History, Plus, User } from '@luci
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
-import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
+import SlowLoadScreen from '@/components/common/SlowLoadScreen.vue'
 import RentEntryFilters from '@/components/rent/RentEntryFilters.vue'
 import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
 import RentEntryTotals from '@/components/rent/RentEntryTotals.vue'
 import TenantChipSkeleton from '@/components/tenant/TenantChipSkeleton.vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useAutoRetry } from '@/composables/useAutoRetry'
 import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
@@ -28,12 +29,7 @@ const props = defineProps<{
 const rentEntryStore = useRentEntryStore()
 const router = useRouter()
 
-const {
-  tenant,
-  status: tenantStatus,
-  error: tenantError,
-  retry: retryTenants,
-} = useRouteTenant(() => props.tenantId)
+const { tenant, status: tenantStatus } = useRouteTenant(() => props.tenantId)
 
 // Bills per page, as the API returns them (backend billing/views.py RentEntryPagination).
 const PAGE_SIZE = 12
@@ -149,6 +145,8 @@ function addEntry() {
   router.push({ name: 'rent-entry-new', params: { tenantId: props.tenantId } })
 }
 
+useAutoRetry(() => history.value.status, load)
+
 function viewEntry(entryId: string) {
   router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
 }
@@ -182,11 +180,7 @@ function viewEntry(entryId: string) {
       </div>
     </LoadingRegion>
 
-    <RentEntriesLoadError
-      v-else-if="tenantStatus === 'error'"
-      :message="tenantError ?? ''"
-      @retry="retryTenants"
-    />
+    <SlowLoadScreen v-else-if="tenantStatus === 'error'" />
 
     <div
       v-else-if="!tenant"
@@ -218,15 +212,8 @@ function viewEntry(entryId: string) {
         </Button>
       </header>
 
-      <!-- A failed load must never look like an empty history or a zero balance. -->
-      <RentEntriesLoadError
-        v-if="history.status === 'error'"
-        :message="history.error ?? ''"
-        @retry="load"
-      />
-
       <LoadingRegion
-        v-else-if="history.status !== 'ready' && !historyShown"
+        v-if="history.status !== 'ready' && !historyShown"
         label="Loading entries…"
         data-testid="history-loading"
       >

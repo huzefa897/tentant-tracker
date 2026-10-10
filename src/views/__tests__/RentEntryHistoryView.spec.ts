@@ -6,7 +6,6 @@ import { ApiError } from '@/services/apiError'
 import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
-import { ENTRIES_LOAD_ERROR_MESSAGE } from '@/stores/rentEntry'
 import { makeEntry, makePayment, openPage } from '@/test/rentEntries'
 import { fakeReceipts } from '@/test/mocks/receiptService'
 import { downloadReceiptPdf } from '@/utils/receiptDownload'
@@ -258,19 +257,24 @@ describe('RentEntryHistoryView', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-new'))
   })
 
-  it('shows a load error, not an empty history or zero totals, then retries', async () => {
-    fakeEntries.entries = [october]
-    getEntries.mockRejectedValueOnce(new ApiError('unknown'))
-    await openHistory()
+  it('keeps the skeleton on a load error so it never looks like no entries, then auto-retries', async () => {
+    vi.useFakeTimers()
+    try {
+      fakeEntries.entries = [october]
+      getEntries.mockRejectedValueOnce(new ApiError('unknown'))
+      await openHistory()
 
-    expect(view!.get('[role="alert"]').text()).toContain(ENTRIES_LOAD_ERROR_MESSAGE)
-    expect(view!.text()).not.toContain('No rent entries yet.')
-    expect(view!.find('section[aria-labelledby="entry-totals-heading"]').exists()).toBe(false)
+      expect(view!.find('[data-testid="history-loading"]').exists()).toBe(true)
+      expect(view!.text()).not.toContain('No rent entries yet.')
+      expect(view!.find('section[aria-labelledby="entry-totals-heading"]').exists()).toBe(false)
 
-    await button('Retry').trigger('click')
-    await flushPromises()
+      vi.advanceTimersByTime(5000)
+      await flushPromises()
 
-    expect(rows().map((row) => row[0])).toEqual(['October 2026'])
+      expect(rows().map((row) => row[0])).toEqual(['October 2026'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows Tenant not found for an unknown tenant', async () => {
@@ -409,20 +413,24 @@ describe('RentEntryHistoryView when the URL changes in place', () => {
 })
 
 describe('RentEntryHistoryView when tenants fail to load', () => {
-  it('shows the error with Retry instead of Tenant not found, then recovers', async () => {
-    fakeEntries.entries = [september]
-    view = await openPage('/tenants/tenant-001/entries', () => {
-      // The tenancy request fails once; Retry succeeds.
-      vi.mocked(tenantService.getTenant).mockRejectedValueOnce(new Error('boom'))
-    })
+  it('shows the slow-load screen instead of Tenant not found, then auto-retries', async () => {
+    vi.useFakeTimers()
+    try {
+      fakeEntries.entries = [september]
+      view = await openPage('/tenants/tenant-001/entries', () => {
+        vi.mocked(tenantService.getTenant).mockRejectedValueOnce(new Error('boom'))
+      })
 
-    expect(view.get('[role="alert"]').text()).toContain('Unable to load tenants. Please try again.')
-    expect(view.text()).not.toContain('Tenant not found')
+      expect(view.text()).toContain("It's taking longer than usual")
+      expect(view.text()).not.toContain('Tenant not found')
 
-    await button('Retry').trigger('click')
-    await flushPromises()
+      vi.advanceTimersByTime(10_000)
+      await flushPromises()
 
-    expect(view.get('[data-testid="tenant-chip"]').text()).toBe('Shaik Zahid Ali · Flat 202')
-    expect(rows().map((row) => row[0])).toEqual(['September 2026'])
+      expect(view.get('[data-testid="tenant-chip"]').text()).toBe('Shaik Zahid Ali · Flat 202')
+      expect(rows().map((row) => row[0])).toEqual(['September 2026'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
