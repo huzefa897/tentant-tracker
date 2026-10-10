@@ -185,6 +185,11 @@ class _Importer:
         entry = self.existing(source_id, Kind.BILL, fingerprint, label)
         if entry is False:
             return
+        # Imported before and voided in the app since: it counts for nothing now, so it can't
+        # take payments or be reconciled as saved.
+        if entry is not None and entry.status == RentEntry.Status.VOID:
+            self.reject(f"{label}: it was voided in the app since it was imported")
+            return
         if entry is None:
             if not tenancy_covers_month(tenancy, bill.billing_month):
                 self.reject(f"{label}: {bill.billing_month:%Y-%m} is outside the tenancy's dates")

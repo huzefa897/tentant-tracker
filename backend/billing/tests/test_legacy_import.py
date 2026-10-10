@@ -13,7 +13,7 @@ from django.test import TestCase
 from billing.legacy_import import import_ledger
 from billing.legacy_ledger import LedgerError, parse_ledger, parse_mapping
 from billing.models import LegacyRecord, Payment, Receipt, RentEntry
-from billing.services import record_payment
+from billing.services import record_payment, reverse_payment, void_rent_entry
 
 from .factories import make_property, make_tenancy, make_user
 from .test_payments_api import TODAY, make_entry, make_payment
@@ -291,6 +291,21 @@ class ImportLedgerTests(TestCase):
         self.assertFalse(report.saved)
         self.assertIn("changed since it was imported", report.rejected[0])
         self.assertEqual(Payment.objects.get(entry__billing_month=date(2026, 8, 1)).amount, 15750)
+
+    def test_a_rerun_refuses_a_bill_voided_in_the_app_since_it_was_imported(self):
+        self.run_import()
+        owner = make_user("owner", name="Huzefa")
+        self.property.memberships.create(user=owner, role="owner")
+        september = RentEntry.objects.get(billing_month=date(2026, 9, 1))
+        reverse_payment(payment_id=september.payments.get().pk, actor=owner, reason="Wrong bill")
+        void_rent_entry(entry_id=september.pk, actor=owner, reason="Entered by mistake")
+
+        # Its payment already has an import record, so nothing new is imported for it.
+        report = self.run_import()
+
+        self.assertFalse(report.saved)
+        self.assertEqual(len(report.rejected), 1)
+        self.assertIn("voided in the app since it was imported", report.rejected[0])
 
     def test_refuses_a_month_with_a_bill_made_in_the_app_and_imports_nothing(self):
         make_entry(self.tenancy, self.user, month=date(2026, 9, 1))
