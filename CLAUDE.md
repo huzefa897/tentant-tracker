@@ -23,6 +23,8 @@ Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). PostgreS
 - `pipenv run makemigrate` — `makemigrations` (alias `makemigrations`); `pipenv run migrate` — apply them
 - `pipenv run test` — Django tests (needs the database up); `pipenv run check`; `pipenv run dbcheck` prints `postgresql`
 
+Or run everything in Docker with live reload: `docker compose --profile app up` (app on http://localhost:5173, Django on :8000; needs `backend/.env`, see `backend/README.md`).
+
 Before calling backend work done: `pipenv run check && pipenv run python manage.py makemigrations --check --dry-run && pipenv run test`. CI's `backend` job runs the same against a Postgres service.
 
 ## How the app works: read the docs

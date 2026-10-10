@@ -23,6 +23,20 @@ pipenv run start
 - Health: http://127.0.0.1:8000/api/v1/health/ → `{"status": "ok"}` (app only; not a database check)
 - Admin: http://127.0.0.1:8000/admin/
 
+## Or: everything in Docker
+
+`compose.yaml` can also run Django and the Vue dev server in containers, with live reload, so you need neither pipenv nor Node on your machine:
+
+```bash
+cp backend/.env.example backend/.env    # set DJANGO_SECRET_KEY and FIREBASE_PROJECT_ID
+docker compose --profile app up         # app: http://localhost:5173, Django: http://localhost:8000
+```
+
+- The VITE_* values come from the root `.env`, as with `npm run dev`. For phone sign-in, copy the service-account key's fields into `backend/.env`, one variable each (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL` and the rest; `.env.example` shows how): the container can't see a key file's path on your machine. Without them, sign-in answers 503.
+- The backend container migrates on start and runs as your user (uid 1000 by default; otherwise `export UID GID=$(id -g)` first), so new migrations belong to you: `docker compose --profile app exec backend python manage.py makemigrations`. Other commands the same way (`… exec backend python manage.py createsuperuser`, `… test`).
+- Rebuild after changing `Pipfile.lock` (`docker compose --profile app up --build`); `node_modules` lives in a volume and is reinstalled from `package-lock.json` on each start.
+- Ports 5173 and 8000 are the ones the host dev servers use: stop those first. `docker compose --profile app down` stops it all (keeping the database).
+
 ## Scripts
 
 | Command | Runs |
