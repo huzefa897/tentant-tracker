@@ -139,8 +139,8 @@ If the database is lost or must go back to a backup:
 A free alternative to running a server: [render.yaml](../render.yaml) is a Render Blueprint for the API (Docker, free plan) and the Vue app (a static site), with the database on Supabase's free plan. Render's own free PostgreSQL isn't used: it's deleted after 30 days and has no backups.
 
 ```
- browser ──▶ rent-tracker.onrender.com       (static site: the built app, security headers)
-        └──▶ rent-tracker-api.onrender.com   (Django + Gunicorn) ──TLS──▶ Supabase (session pooler)
+ browser ──▶ rent-tracker-sqh5.onrender.com        (static site: the built app, security headers)
+        └──▶ rent-tracker-api-bcwo.onrender.com    (Django + Gunicorn) ──TLS──▶ Supabase (session pooler)
 ```
 
 How it differs from the single server:
@@ -148,7 +148,7 @@ How it differs from the single server:
 - **Two origins.** The app calls the API's own URL (`VITE_API_BASE_URL`), which lets the app's origin through CORS (`CORS_ALLOWED_ORIGINS`). Render doesn't document forwarding a static site's `/api` to another service, so the one-origin layout isn't used.
 - **Migrations run on start** (`backend/render-start.sh`): the free plan has no pre-deploy step. A no-op when there's nothing new; fine with the single instance the free plan allows.
 - **No shell.** Admin logins and the Sheet import ([data-import.md](data-import.md)) run from your machine against Supabase (below).
-- **Sleeps after 15 minutes without traffic** and takes about a minute to wake. An uptime monitor calling `https://rent-tracker-api.onrender.com/api/v1/ready/` every 14 minutes keeps it awake, and its database query keeps the Supabase project from pausing (it pauses after 7 days without activity; a paused project can be restored, with its data, for 90 days). A month awake uses most of the free plan's 750 instance hours, which is enough for this one service; the static site doesn't use them.
+- **Sleeps after 15 minutes without traffic** and takes about a minute to wake. An uptime monitor calling `https://rent-tracker-api-bcwo.onrender.com/api/v1/ready/` every 14 minutes keeps it awake, and its database query keeps the Supabase project from pausing (it pauses after 7 days without activity; a paused project can be restored, with its data, for 90 days). A month awake uses most of the free plan's 750 instance hours, which is enough for this one service; the static site doesn't use them.
 - **Health checks:** Render calls `/api/v1/health/` every few seconds, so `DJANGO_THROTTLE_HEALTH` is raised to 120/minute there (counted in memory, never in the database). Its checks are reported to send `Host: localhost:<port>`, so `localhost` is in `DJANGO_ALLOWED_HOSTS`. If a deploy never goes live, look for `DisallowedHost` in the logs.
 - **Backups are yours to run.** Supabase's free plan has none, and `scripts/backup-db.sh` needs the single server. Take a daily `pg_dump` from another machine using the session pooler's details, encrypt it, and copy it off-site (e.g. `rclone` with a `crypt` remote). Never keep an unencrypted dump anywhere public, such as this public repository's CI artifacts. Test a restore as in [Testing a backup](#testing-a-backup).
 
@@ -158,8 +158,8 @@ How it differs from the single server:
    - **Turn off the Data API** (Project Settings > API > Data API): it publishes every table in the `public` schema over REST, and Django's tables have no PostgreSQL row-level security, so the project's public (anon) key would read every record ([security.md](security.md) item 3). Django is the only client.
    - **Connect > Session pooler** gives the host, port 5432 and user (`postgres.<project-ref>`) for the API. Not the direct connection (IPv6-only on the free plan, which Render can't reach) and not the transaction pooler on port 6543 (no prepared statements, and the app's payment locking needs a session).
 2. **Render:** New > Blueprint, pick the repository. It reads `render.yaml` and asks for each `sync: false` value: the Supabase connection, `DJANGO_ADMIN_PATH`, the Firebase project and service-account key's fields (as in `backend/.env.example`; the private key can be pasted with its `\n`s), and the Firebase web config.
-3. **Names:** the Blueprint assumes the services get `rent-tracker` and `rent-tracker-api.onrender.com`. If Render adds a suffix, update every URL in `render.yaml` that mentions them (`DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS`, `VITE_API_BASE_URL` and the Content-Security-Policy), or set your own domains.
-4. **Firebase:** Authentication > Settings > Authorized domains: add the static site's domain. In `render.yaml`'s Content-Security-Policy, replace `YOUR-PROJECT` with the auth domain's project.
+3. **Names:** Render assigns each service's `onrender.com` name when the Blueprint is created, adding a suffix when the name is taken. `render.yaml` holds the names it assigned (`rent-tracker-sqh5` and `rent-tracker-api-bcwo`). If a service is recreated and gets another name, update every URL in `render.yaml` that mentions them (`DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS`, `VITE_API_BASE_URL` and the Content-Security-Policy), or set your own domains.
+4. **Firebase:** Authentication > Settings > Authorized domains: add the static site's domain. `render.yaml`'s Content-Security-Policy names the Firebase auth domain in `frame-src`; change it if the project changes.
 5. **An admin login,** from your machine with the backend image (or pipenv), pointing at Supabase:
 
    ```bash
@@ -170,7 +170,7 @@ How it differs from the single server:
      -e POSTGRES_SSLMODE=require rent-tracker-backend python manage.py createsuperuser
    ```
 
-   Admin is at `https://rent-tracker-api.onrender.com/<DJANGO_ADMIN_PATH>`.
+   Admin is at `https://rent-tracker-api-bcwo.onrender.com/<DJANGO_ADMIN_PATH>`.
 
 6. **The uptime monitor** (above), then the [checks after a deploy](#checks-after-a-deploy), with the static site's URL for the app and the API's for `/api/…`.
 
