@@ -1,10 +1,13 @@
 from datetime import date
 from io import StringIO
 
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone
 
 from billing.models import Payment
+from properties.models import Property, Tenancy
 from billing.summary import ledger_summary
 
 from .factories import make_property, make_tenancy, make_user
@@ -70,6 +73,42 @@ class LedgerSummaryTests(TestCase):
 
         self.assertEqual(before["total paid"], after["total paid"])
         self.assertNotEqual(before["bills digest"], after["bills digest"])
+
+    def test_changed_details_change_it_with_the_same_counts(self):
+        changes = {
+            "people digest": lambda: get_user_model()
+            .objects.filter(pk=self.user.pk)
+            .update(phone_number="+919000000099"),
+            "properties digest": lambda: Property.objects.update(address="Another address"),
+            "tenancies digest": lambda: Tenancy.objects.update(rent_amount="16000.00"),
+        }
+        for digest, change in changes.items():
+            with self.subTest(digest=digest):
+                before = summary()
+                change()
+
+                after = summary()
+
+                self.assertNotEqual(before[digest], after[digest])
+                self.assertEqual(
+                    {k: v for k, v in before.items() if "digest" not in k},
+                    {k: v for k, v in after.items() if "digest" not in k},
+                )
+
+    def test_signing_in_to_admin_does_not_change_it(self):
+        before = summary()
+        get_user_model().objects.filter(pk=self.user.pk).update(last_login=timezone.now())
+
+        self.assertEqual(before, summary())
+
+    def test_prints_hashes_never_details(self):
+        out = StringIO()
+        call_command("ledger_summary", stdout=out)
+
+        for detail in (self.tenancy.name, self.tenancy.mobile_number, self.tenancy.property.name):
+            with self.subTest(detail=detail):
+                self.assertTrue(detail)
+                self.assertNotIn(detail, out.getvalue())
 
     def test_prints_one_line_per_figure(self):
         out = StringIO()

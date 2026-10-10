@@ -1,6 +1,7 @@
 """A summary of everything the database holds that matters for recovery: counts, money totals
-and checksums. Two databases with the same summary hold the same people, access, bills,
-payments and receipts (scripts/restore-test.sh compares a restored backup with the live one).
+and checksums. Two databases with the same summary hold the same people, properties, access,
+tenancies, bills, payments and receipts, down to their details (scripts/restore-test.sh
+compares a restored backup with the live one).
 
 Only counts, totals and hashes: never names, phone numbers or amounts per person.
 """
@@ -20,6 +21,19 @@ RECEIPT_FIELDS = [
     for field in Receipt._meta.get_fields()
     if field.concrete and field.name not in ("id", "payment", "issued_by")
 ]
+
+
+def _fields(model, leave_out=()) -> list[str]:
+    """Every stored column of a model (foreign keys as their ids), so a field added later is
+    covered without changing this file."""
+    return [f.attname for f in model._meta.concrete_fields if f.name not in leave_out]
+
+
+# People's details, contact numbers, Firebase links and password hashes, but not last_login:
+# it changes whenever someone signs in to admin, which a restore test shouldn't report.
+PERSON_FIELDS = _fields(get_user_model(), leave_out=("last_login",))
+PROPERTY_FIELDS = _fields(Property)
+TENANCY_FIELDS = _fields(Tenancy)
 
 
 def _digest(rows) -> str:
@@ -45,10 +59,13 @@ def ledger_summary() -> list[tuple[str, str]]:
 
     return [
         ("people", str(get_user_model().objects.count())),
+        ("people digest", _digest(get_user_model().objects.values_list(*PERSON_FIELDS))),
         ("properties", str(Property.objects.count())),
+        ("properties digest", _digest(Property.objects.values_list(*PROPERTY_FIELDS))),
         ("memberships", str(memberships.count())),
         ("memberships digest", _digest(memberships)),
         ("tenancies", str(Tenancy.objects.count())),
+        ("tenancies digest", _digest(Tenancy.objects.values_list(*TENANCY_FIELDS))),
         ("bills", str(len(entries))),
         ("payments", str(Payment.objects.count())),
         ("receipts", str(Receipt.objects.count())),
