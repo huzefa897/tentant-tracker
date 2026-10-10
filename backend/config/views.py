@@ -13,7 +13,8 @@ from rest_framework.response import Response
 logger = logging.getLogger(__name__)
 
 
-@api_view(["GET"])
+# HEAD too: uptime monitors (UptimeRobot's free plan) check with HEAD requests.
+@api_view(["GET", "HEAD"])
 @authentication_classes([])  # Never depends on Firebase, even if a token is sent.
 @permission_classes([AllowAny])
 # Limited per address before the view, in memory (config/throttling.py
@@ -24,7 +25,7 @@ def health_check(request):
     return Response({"status": "ok"})
 
 
-@api_view(["GET"])
+@api_view(["GET", "HEAD"])
 @authentication_classes([])
 @permission_classes([AllowAny])
 @throttle_classes([])

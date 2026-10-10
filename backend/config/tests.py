@@ -67,6 +67,11 @@ class HealthCheckTests(TestCase):
 
         self.assertEqual(client.get("/api/v1/health/").status_code, 200)
 
+    def test_answers_head_requests_from_uptime_monitors(self):
+        response = APIClient().head("/api/v1/health/")
+
+        self.assertEqual(response.status_code, 200)
+
     def test_rejects_other_methods(self):
         response = APIClient().post("/api/v1/health/")
 
@@ -98,6 +103,25 @@ class ReadinessCheckTests(TestCase):
         client.credentials(HTTP_AUTHORIZATION="Bearer not-checked")
 
         self.assertEqual(client.get("/api/v1/ready/").status_code, 200)
+
+    def test_answers_head_requests_from_uptime_monitors(self):
+        response = APIClient().head("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_head_reports_503_when_the_database_is_unavailable(self):
+        with (
+            mock.patch("config.views.connection.cursor", side_effect=OperationalError("down")),
+            self.assertLogs("config.views", "WARNING"),
+        ):
+            response = APIClient().head("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 503)
+
+    def test_rejects_other_methods(self):
+        response = APIClient().post("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 405)
 
 
 def unreachable_counts():
