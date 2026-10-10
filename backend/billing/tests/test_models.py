@@ -9,6 +9,7 @@ from django.db.models import ProtectedError
 from django.forms.models import model_to_dict
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from billing.models import RentEntry, tenancy_covers_month
 from properties.models import Tenancy, TenancyHasBillsError
@@ -38,14 +39,61 @@ class RentEntryConstraintTests(TestCase):
             self.make_entry(**fields)
         self.assertIn(constraint, str(raised.exception))
 
-    def test_one_bill_per_tenancy_and_month(self):
+    def void_fields(self, reason="Wrong electricity units"):
+        return {
+            "status": "void",
+            "voided_at": timezone.now(),
+            "voided_by": self.user,
+            "void_reason": reason,
+        }
+
+    def test_one_active_bill_per_tenancy_and_month(self):
         self.make_entry()
 
-        self.assert_rejected("unique_tenancy_billing_month")
+        self.assert_rejected("unique_active_tenancy_billing_month")
         # Another month, or another tenancy's same month, is fine.
         self.make_entry(billing_month=date(2026, 11, 1))
         other = make_tenancy(self.tenancy.property, flat_number="301")
         self.make_entry(tenancy=other)
+
+    def test_void_bills_stay_beside_the_months_active_one(self):
+        self.make_entry(**self.void_fields())
+        self.make_entry(**self.void_fields("Entered twice"))
+        self.make_entry()
+
+        self.assert_rejected("unique_active_tenancy_billing_month")
+        self.assertEqual(RentEntry.objects.filter(tenancy=self.tenancy).count(), 3)
+        self.assertEqual(RentEntry.objects.active().count(), 1)
+
+    def test_a_void_bill_records_who_voided_it_when_and_why(self):
+        for missing in ("voided_at", "voided_by", "void_reason"):
+            with self.subTest(missing=missing):
+                fields = self.void_fields()
+                fields[missing] = "" if missing == "void_reason" else None
+                self.assert_rejected("rent_entry_void_details_match_status", **fields)
+
+    def test_an_active_bill_has_no_void_details(self):
+        for field, value in self.void_fields().items():
+            if field == "status":
+                continue
+            with self.subTest(field=field):
+                self.assert_rejected("rent_entry_void_details_match_status", **{field: value})
+
+    def test_a_bill_cannot_replace_itself(self):
+        entry = self.make_entry(**self.void_fields())
+
+        with self.assertRaises(IntegrityError) as raised, transaction.atomic():
+            RentEntry.objects.filter(pk=entry.pk).update(replaces_entry=entry)
+        self.assertIn("rent_entry_not_replacing_itself", str(raised.exception))
+
+    def test_a_bill_is_replaced_at_most_once(self):
+        original = self.make_entry(**self.void_fields())
+        self.make_entry(replaces_entry=original)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make_entry(
+                replaces_entry=original, billing_month=date(2026, 11, 1)
+            )
 
     def test_rent_must_be_positive(self):
         self.assert_rejected("rent_entry_rent_amount_positive", rent_amount=Decimal("0"))

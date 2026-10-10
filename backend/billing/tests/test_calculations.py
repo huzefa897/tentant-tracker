@@ -51,6 +51,7 @@ class CalculationTests(SimpleTestCase):
             electricity_units=D("75.000"),
             electricity_rate=D("6.00"),
             water_amount=D("300.00"),
+            status="active",
         )
 
         amounts = entry_amounts(entry, D("0"))
@@ -69,6 +70,7 @@ class CalculationTests(SimpleTestCase):
             electricity_rate=D("6.00"),
             water_amount=D("300.00"),
             paid_total=D("13000.00"),
+            status="active",
         )
 
         amounts = entry_amounts(entry)
@@ -76,3 +78,18 @@ class CalculationTests(SimpleTestCase):
         self.assertEqual(amounts.total_paid, D("13000.00"))
         self.assertEqual(amounts.outstanding_amount, D("2750.00"))
         self.assertEqual(amounts.payment_status, "partially_paid")
+
+    def test_a_void_bill_keeps_its_charges_but_owes_nothing(self):
+        entry = SimpleNamespace(
+            rent_amount=D("15000.00"),
+            electricity_units=D("75.000"),
+            electricity_rate=D("6.00"),
+            water_amount=D("300.00"),
+            status="void",
+        )
+
+        amounts = entry_amounts(entry, D("0"))
+
+        self.assertEqual(amounts.total_due, D("15750.00"))
+        self.assertEqual(amounts.outstanding_amount, D("0.00"))
+        self.assertIsNone(amounts.payment_status)

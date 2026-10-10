@@ -38,6 +38,7 @@ class LedgerSummaryTests(TestCase):
                 "memberships": "1",
                 "tenancies": "1",
                 "bills": "2",
+                "void bills": "0",
                 "payments": "2",
                 "payment reversals": "0",
                 "receipts": "0",

@@ -27,6 +27,10 @@ MONEY = DecimalField(max_digits=12, decimal_places=2)
 
 
 class RentEntryQuerySet(models.QuerySet):
+    def active(self):
+        """Bills that count: a void bill is kept as history but owes nothing."""
+        return self.filter(status=RentEntry.Status.ACTIVE)
+
     def with_amounts(self):
         """Annotates each bill's effective payments sum (`paid_total`) and total due
         (`due_total`) in the query itself, so a list of bills needs no query per bill and can be
@@ -52,13 +56,15 @@ class RentEntryQuerySet(models.QuerySet):
         )
 
     def with_payment_status(self, status: str):
-        """Bills in one payment status (calculations.PaymentStatus). Needs with_amounts()."""
+        """Active bills in one payment status (calculations.PaymentStatus): a void bill has
+        none. Needs with_amounts()."""
+        bills = self.active()
         if status == "unpaid":
-            return self.filter(paid_total=0)
+            return bills.filter(paid_total=0)
         if status == "partially_paid":
-            return self.filter(paid_total__gt=0, paid_total__lt=F("due_total"))
+            return bills.filter(paid_total__gt=0, paid_total__lt=F("due_total"))
         if status == "paid":
-            return self.filter(paid_total__gte=F("due_total"))
+            return bills.filter(paid_total__gte=F("due_total"))
         raise ValueError(f"Unknown payment status: {status}")
 
 
@@ -67,8 +73,17 @@ class RentEntry(models.Model):
 
     Rent and electricity rate are copied from the tenancy when the bill is created: they're
     historical values, so changing the tenancy later never changes a saved bill. Totals, paid,
-    outstanding and status are derived (billing/calculations.py), never stored.
+    outstanding and payment status are derived (billing/calculations.py), never stored.
+
+    A bill is never edited or deleted. One that shouldn't exist is voided (status, voided_at,
+    voided_by, void_reason); one with wrong charges is voided and replaced by a new bill for
+    the same month (replaces_entry). A void bill keeps its charges as history and counts
+    towards nothing.
     """
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        VOID = "void", "Void"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # PROTECT: removing an occupant must never erase their billing history.
@@ -91,6 +106,25 @@ class RentEntry(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    status = models.CharField(max_length=6, choices=Status.choices, default=Status.ACTIVE)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    void_reason = models.CharField(max_length=500, blank=True)
+    # The void bill this one corrects. One-to-one: a bill is replaced at most once.
+    replaces_entry = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="replaced_by",
+    )
+
     objects = RentEntryQuerySet.as_manager()
 
     # Retry protection for creating the bill (the Idempotency-Key header). A retry with the same
@@ -105,10 +139,32 @@ class RentEntry(models.Model):
         # The API validates first for readable errors; these protect the stored data,
         # including against concurrent requests.
         constraints = [
+            # One active bill per tenancy and month; void ones stay beside it as history.
             models.UniqueConstraint(
                 fields=["tenancy", "billing_month"],
-                name="unique_tenancy_billing_month",
+                condition=Q(status="active"),
+                name="unique_active_tenancy_billing_month",
                 violation_error_message="An entry already exists for this tenancy and month.",
+            ),
+            # Void exactly when it records who voided it, when and why.
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        status="active",
+                        voided_at__isnull=True,
+                        voided_by__isnull=True,
+                        void_reason="",
+                    )
+                    | (
+                        Q(status="void", voided_at__isnull=False, voided_by__isnull=False)
+                        & ~Q(void_reason="")
+                    )
+                ),
+                name="rent_entry_void_details_match_status",
+            ),
+            models.CheckConstraint(
+                condition=~Q(replaces_entry=F("id")),
+                name="rent_entry_not_replacing_itself",
             ),
             models.CheckConstraint(
                 condition=Q(rent_amount__gt=0),

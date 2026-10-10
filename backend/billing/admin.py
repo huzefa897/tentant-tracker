@@ -8,8 +8,8 @@ class ViewOnlyAdminMixin:
     """Bills, payments and receipts are created through the app's API, which copies the
     tenancy's charges, checks occupancy and locks the bill so payments never exceed it.
     Changing them here would bypass those rules and the balances built on them. Corrections
-    (reversing a payment, which voids its receipt) go through the app too, so who did it,
-    when and why are recorded with them."""
+    (reversing a payment, which voids its receipt; voiding or correcting a bill) go through the
+    app too, so who did it, when and why are recorded with them."""
 
     def has_add_permission(self, request, obj=None):
         return False
@@ -46,13 +46,14 @@ class RentEntryAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
     list_display = (
         "tenancy",
         "billing_month",
+        "status",
         "rent_amount",
         "total_due",
         "total_paid",
         "outstanding",
         "created_by",
     )
-    list_filter = ("tenancy__property",)
+    list_filter = ("tenancy__property", "status")
     list_select_related = ("tenancy", "created_by")
     search_fields = ("tenancy__name", "tenancy__flat_number")
     date_hierarchy = "billing_month"
@@ -70,6 +71,12 @@ class RentEntryAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
         "notes",
         "created_by",
         "created_at",
+        "status",
+        "voided_at",
+        "voided_by",
+        "void_reason",
+        "replaces_entry",
+        "replaced_by",
     )
     readonly_fields = fields
     inlines = (PaymentInline,)
@@ -89,6 +96,13 @@ class RentEntryAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
     @admin.display(description="Outstanding (₹)")
     def outstanding(self, obj):
         return entry_amounts(obj).outstanding_amount
+
+    @admin.display(description="Replaced by")
+    def replaced_by(self, obj):
+        try:
+            return obj.replaced_by
+        except RentEntry.DoesNotExist:
+            return None
 
 
 @admin.register(Payment)

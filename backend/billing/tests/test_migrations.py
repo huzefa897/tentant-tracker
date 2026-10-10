@@ -8,7 +8,12 @@ from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
 from billing.models import Receipt, RentEntry
-from billing.services import issue_payment_receipt, record_payment, reverse_payment
+from billing.services import (
+    issue_payment_receipt,
+    record_payment,
+    reverse_payment,
+    void_rent_entry,
+)
 
 from .factories import make_property, make_tenancy, make_user
 
@@ -106,3 +111,37 @@ class PaymentReversalRollbackTests(TransactionTestCase):
         with connection.cursor() as cursor:
             tables = connection.introspection.table_names(cursor)
         self.assertNotIn("billing_paymentreversal", tables)
+
+
+class BillVoidRollbackTests(TransactionTestCase):
+    """Undoing billing.0009 would drop the bills' status, so void bills would count again."""
+
+    def setUp(self):
+        self.user = make_user()
+        self.receipt = issue_in_new_property(self.user, "Property A", role="owner")
+        self.entry = self.receipt.payment.entry
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def migrate_back(self):
+        MigrationExecutor(connection).migrate(
+            [("billing", "0008_payment_reversal_and_receipt_void")]
+        )
+
+    def test_rolling_back_stops_while_a_bill_is_void(self):
+        reverse_payment(payment_id=self.receipt.payment_id, actor=self.user, reason="Mistake")
+        void_rent_entry(entry_id=self.entry.pk, actor=self.user, reason="Entered twice")
+
+        with self.assertRaisesMessage(IrreversibleError, "1 void bill(s)"):
+            self.migrate_back()
+
+        self.assertEqual(RentEntry.objects.get(pk=self.entry.pk).status, "void")
+
+    def test_rolling_back_works_without_void_bills(self):
+        self.migrate_back()
+
+        with connection.cursor() as cursor:
+            table = connection.introspection.get_table_description(cursor, "billing_rententry")
+        self.assertNotIn("status", [column.name for column in table])
