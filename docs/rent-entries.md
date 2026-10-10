@@ -2,16 +2,38 @@
 
 ## Backend
 
-**Bills are rent entries** (`billing.RentEntry`): one per tenancy and billing month (stored as the first of the month), `PROTECT`ed from tenancy deletion.
+**Bills are rent entries** (`billing.RentEntry`): one **active** bill per tenancy and billing month (stored as the first of the month), `PROTECT`ed from tenancy deletion. Void bills stay beside it as history ([Correcting a bill](#correcting-a-bill)).
 
 - Rent and electricity rate are copied from the tenancy when the bill is created and never change after. Totals, paid, outstanding and status are derived in `billing/calculations.py` with `Decimal` (electricity rounded to paise, half up, **then** added to rent and water) and never stored. Paid counts only payments that weren't reversed ([payments-and-receipts.md](payments-and-receipts.md#corrections-reversing-a-payment)), so a reversal can make a paid bill partially paid or unpaid again.
-- Database constraints back every rule (unique month, rent > 0, units/rate/water ≥ 0, first of month).
-- The API (`/api/v1/properties/{id}/tenancies/{id}/entries/`, list/create, and `.../{entryId}/`) is scoped through `properties_for_user` then the tenancy, so others' bills 404; there's no update or delete.
+- Database constraints back every rule (one active bill per month, a conditional unique constraint `unique_active_tenancy_billing_month`; rent > 0, units/rate/water ≥ 0, first of month; void details present exactly when void).
+- The API (`/api/v1/properties/{id}/tenancies/{id}/entries/`, list/create, and `.../{entryId}/`) is scoped through `properties_for_user` then the tenancy, so others' bills 404; there's no update or delete: a bill is voided or corrected instead.
 - Creation goes through `billing/services.py` `create_rent_entry`, which locks the tenancy, rechecks that the month overlaps the occupancy (no proration), and assigns the rate, tenancy and creator itself. The rent is optional and defaults to the tenancy's. The serializer refuses unknown, server-assigned and payment fields rather than ignoring them.
-- A duplicate month is 409 `duplicate_billing_month`, including when the unique constraint catches a race (only that constraint, matched by name, outside the failed transaction).
-- Lists are newest month first, 12 per page, with `?year=` (0001–9999), `?billing_month=` and `?payment_status=` (applied before paging; payments are summed in the list's own query by `RentEntry.objects.with_amounts()`, never once per bill); a malformed filter is a 400, never a 500.
+- A duplicate month (one with an active bill) is 409 `duplicate_billing_month`, including when the unique constraint catches a race (only that constraint, matched by name, outside the failed transaction). A month whose only bills are void can have a new one.
+- Lists are newest month first, 12 per page, with `?status=` (`active`, the default, so a caller that doesn't ask never sees void bills; `void`; `all`), `?year=` (0001–9999), `?billing_month=` and `?payment_status=` (active bills only; applied before paging; payments are summed in the list's own query by `RentEntry.objects.with_amounts()`, never once per bill); a malformed filter is a 400, never a 500.
 - A bill can be created **with an initial payment** (`initialPayment`), in one transaction through the same `record_payment` lock as any payment ([payments-and-receipts.md](payments-and-receipts.md)): both are saved or neither. Bill creation takes an optional `Idempotency-Key` (required with an initial payment, which uses the same key): a retry returns the bill it created (200), compared against a fingerprint of the original request (`creation_fingerprint`), never its current balance, so later payments never make a genuine retry conflict.
 - Concurrency tests (`billing/tests/test_concurrency.py`) need PostgreSQL.
+
+## Correcting a bill
+
+A bill is never edited or deleted. Two owner-only actions correct one; both only change the app's records, never money:
+
+| Action           | When                                                     | Result                                                                            |
+| ---------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **Void bill**    | The bill shouldn't exist (entered twice, wrong tenancy)  | The bill becomes void; its month can have a new bill                              |
+| **Correct bill** | Its charges are wrong (e.g. October's electricity units) | The bill becomes void and its replacement, for the same month, is created with it |
+
+**Payments first.** A bill is voided or corrected only when none of its payments still count. Otherwise the owner reverses each one first ([payments-and-receipts.md](payments-and-receipts.md#corrections-reversing-a-payment); that voids its receipt), then corrects the bill, then records the payments again against the replacement, deliberately. Payments are never moved, and a reversal refunds nothing.
+
+### Backend
+
+- Lifecycle fields on `RentEntry`: `status` (`active` | `void`), `voided_at`, `voided_by`, `void_reason` (a check constraint requires all three exactly when void) and `replaces_entry` (a `PROTECT`ed one-to-one to the void bill it replaces, so a bill is replaced at most once; reverse `replaced_by`). The original's charges, creator and timestamp never change.
+- **Void bills count towards nothing.** `calculations.entry_amounts` keeps a void bill's `total_due` (to show) but gives it outstanding 0 and no payment status (`null` in the API, never "paid" or "unpaid"). `RentEntry.objects.active()` is what totals, the `?payment_status=` filter, the duplicate-month checks, a receipt's previous-month balance, the legacy import and `ledger_summary`'s money totals use (it counts void bills separately).
+- Only owners (`Capability.CORRECT_BILLS`); a manager gets 403, someone without access 404. Checked in the view and again inside the service's transaction.
+- **`void_rent_entry(entry_id, actor, reason)`**: locks the bill, rechecks access, refuses while payments count (`UnreversedPaymentsError`), voids it. A bill has one void, so a retry with the same reason returns it; another reason is `VoidConflictError`.
+- **`correct_rent_entry(entry_id, actor, reason, validated_data, idempotency_key)`**: one transaction. Locks the bill, rechecks access, returns the key's earlier correction for a retry (matched on a fingerprint of the bill, reason and charges; anything else is `IdempotencyConflictError`), refuses a void bill (`EntryVoidError`), payments that count, or a replacement identical to the original (`NothingToCorrectError`), then locks the tenancy (NO KEY), voids the original and creates the replacement with the original's tenancy, month and electricity rate (never today's tenancy defaults) and the new rent, units, water and notes. Any failure, including the database refusing the replacement, rolls both back: the original stays active. The unique constraint is the last guard against a second active bill.
+- **Lock order**, shared by every operation on an existing bill (payments, reversals, receipts, voids, corrections): the bill, its payments, its tenancy, its property. Creating a bill locks its tenancy and no existing bill, so the two never wait in a circle; a creation waiting behind a correction then finds the replacement and is refused. Under the bill's lock no payment can be recorded or reversed, and `record_payment` refuses a void bill (`EntryVoidError`). Concurrency tests in `billing/tests/test_concurrency.py`.
+- API: `POST .../entries/{entryId}/void/` with `{"reason"}`: 201 with the bill, 200 for a retry, 409 `void_conflict` or `unreversed_payments`. `POST .../entries/{entryId}/correction/` with `{"reason", "rentAmount", "electricityUnits", "waterAmount", "notes"}` and a required `Idempotency-Key`: 201 with `{original, replacement}`, 200 for a retry; 409 `entry_void`, `unreversed_payments` or `idempotency_conflict`; 400 when nothing changed. The rate, month and tenancy are refused. Every bill in the API has `status`, `voidedAt`, `voidedByName`, `voidReason`, `replacesEntryId` and `replacedByEntryId`. A payment on a void bill is 409 `entry_void`.
+- Read-only in admin (status filter, void details and both links). Migration `0009` added these; undoing it stops while any bill is void.
 
 ## App: service and store
 
