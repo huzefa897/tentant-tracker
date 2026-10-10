@@ -147,4 +147,83 @@ describe('useAutoRetry', () => {
     vi.advanceTimersByTime(30_000)
     expect(retry).not.toHaveBeenCalled()
   })
+
+  describe('online event', () => {
+    it('retries immediately when the browser comes back online', async () => {
+      const { retry } = makeWrapper('error')
+      await flushPromises()
+
+      window.dispatchEvent(new Event('online'))
+      expect(retry).toHaveBeenCalledOnce()
+    })
+
+    it('does not retry on online event when status is not error', async () => {
+      const { retry } = makeWrapper('loading')
+      await flushPromises()
+
+      window.dispatchEvent(new Event('online'))
+      expect(retry).not.toHaveBeenCalled()
+    })
+
+    it('cancels the pending timer when online fires', async () => {
+      const { retry } = makeWrapper('error')
+      await flushPromises()
+
+      vi.advanceTimersByTime(3_000)
+      window.dispatchEvent(new Event('online'))
+      expect(retry).toHaveBeenCalledOnce()
+
+      vi.advanceTimersByTime(10_000)
+      expect(retry).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('visibilitychange event', () => {
+    afterEach(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        writable: true,
+        configurable: true,
+      })
+    })
+
+    it('retries immediately when the tab becomes visible', async () => {
+      const { retry } = makeWrapper('error')
+      await flushPromises()
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        writable: true,
+        configurable: true,
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+      expect(retry).toHaveBeenCalledOnce()
+    })
+
+    it('does not retry when the tab is hidden', async () => {
+      const { retry } = makeWrapper('error')
+      await flushPromises()
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'hidden',
+        writable: true,
+        configurable: true,
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+      expect(retry).not.toHaveBeenCalled()
+    })
+
+    it('does not retry on visibilitychange when status is not error', async () => {
+      const { retry } = makeWrapper('loading')
+      await flushPromises()
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        writable: true,
+        configurable: true,
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+      expect(retry).not.toHaveBeenCalled()
+    })
+  })
 })
