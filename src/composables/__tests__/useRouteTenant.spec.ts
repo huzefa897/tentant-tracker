@@ -185,4 +185,21 @@ describe('useRouteTenant', () => {
     await flushPromises()
     expect(getTenant).toHaveBeenCalledTimes(2)
   })
+
+  it('honors a rate limit recorded after its retry timer was scheduled', async () => {
+    getTenant.mockRejectedValueOnce(new ApiError('unavailable'))
+    mountWith(ref('tenant-001'))
+    await flushPromises()
+
+    vi.advanceTimersByTime(1_000)
+    noteRateLimited('45')
+
+    vi.advanceTimersByTime(44_999)
+    await flushPromises()
+    expect(getTenant).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(1)
+    await flushPromises()
+    expect(getTenant).toHaveBeenCalledTimes(2)
+  })
 })

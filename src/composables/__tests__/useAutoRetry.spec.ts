@@ -274,6 +274,20 @@ describe('useAutoRetry', () => {
       expect(retry).toHaveBeenCalledOnce()
     })
 
+    it('honors a rate limit recorded after the retry timer was scheduled', async () => {
+      const { retry } = makeWrapper('error')
+      await flushPromises()
+
+      vi.advanceTimersByTime(1_000)
+      noteRateLimited('60')
+
+      vi.advanceTimersByTime(59_999)
+      expect(retry).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(1)
+      expect(retry).toHaveBeenCalledOnce()
+    })
+
     it('does not retry early on online or visibilitychange events', async () => {
       noteRateLimited('60')
       const { retry } = makeWrapper('error')

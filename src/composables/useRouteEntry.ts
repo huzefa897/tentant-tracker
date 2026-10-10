@@ -41,6 +41,16 @@ export function useRouteEntry(
     }
   }
 
+  function runScheduledRetry() {
+    retryTimer = null
+    const wait = rateLimitWaitMs()
+    if (wait > 0) {
+      retryTimer = setTimeout(runScheduledRetry, wait)
+      return
+    }
+    void load()
+  }
+
   async function load() {
     stopRetry()
     const seq = ++loadSeq
@@ -57,7 +67,9 @@ export function useRouteEntry(
       error.value = entryLoadErrorMessage(err)
       loadState.value = 'error'
       retryable.value = canRetry
-      if (canRetry) retryTimer = setTimeout(load, Math.max(RETRY_MS, rateLimitWaitMs()))
+      if (canRetry) {
+        retryTimer = setTimeout(runScheduledRetry, Math.max(RETRY_MS, rateLimitWaitMs()))
+      }
     }
   }
 

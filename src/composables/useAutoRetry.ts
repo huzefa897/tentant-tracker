@@ -29,11 +29,24 @@ export function useAutoRetry(
     }
   }
 
+  function runScheduledRetry() {
+    timerId = null
+    if (toValue(status) !== 'error' || !toValue(retryable)) return
+
+    const wait = rateLimitWaitMs()
+    if (wait > 0) {
+      timerId = setTimeout(runScheduledRetry, wait)
+      return
+    }
+
+    retry()
+  }
+
   function scheduleRetry() {
     if (!toValue(retryable)) return
     const backoff = Math.min(INITIAL_MS * 2 ** attempt, MAX_MS)
     attempt++
-    timerId = setTimeout(retry, Math.max(backoff, rateLimitWaitMs()))
+    timerId = setTimeout(runScheduledRetry, Math.max(backoff, rateLimitWaitMs()))
   }
 
   function retryNow() {

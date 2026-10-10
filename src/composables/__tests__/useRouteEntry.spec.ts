@@ -166,4 +166,21 @@ describe('useRouteEntry', () => {
     await flushPromises()
     expect(getEntry).toHaveBeenCalledTimes(2)
   })
+
+  it('honors a rate limit recorded after its retry timer was scheduled', async () => {
+    getEntry.mockRejectedValueOnce(new ApiError('unavailable'))
+    mountWith(ref('tenant-001'), ref('sep'))
+    await flushPromises()
+
+    vi.advanceTimersByTime(1_000)
+    noteRateLimited('45')
+
+    vi.advanceTimersByTime(44_999)
+    await flushPromises()
+    expect(getEntry).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(1)
+    await flushPromises()
+    expect(getEntry).toHaveBeenCalledTimes(2)
+  })
 })
