@@ -106,8 +106,10 @@ function setPaymentDialogOpen(open: boolean) {
 // While a payment save is in flight the page stays, on this entry: the save's outcome decides
 // whether its key is kept for a retry. Signing out is the exception, since the session has
 // already ended (and the store forgets the keys).
-onBeforeRouteLeave((to) => !savingPayment.value || Boolean(to.meta.guestOnly))
-onBeforeRouteUpdate((to) => !savingPayment.value || Boolean(to.meta.guestOnly))
+// The same while a reversal is in flight, so its dialog and result stay on this entry.
+const busy = () => savingPayment.value || savingReversal.value
+onBeforeRouteLeave((to) => !busy() || Boolean(to.meta.guestOnly))
+onBeforeRouteUpdate((to) => !busy() || Boolean(to.meta.guestOnly))
 
 // The backend records the payment and returns the bill's new balance; only then does the
 // confirmation appear. On failure the dialog stays open with the entered values.
@@ -206,7 +208,7 @@ watch(
     paymentError.value = null
     confirmation.value = null
     offerReplacement.value = false
-    if (!savingReversal.value) reversingPayment.value = null
+    reversingPayment.value = null
     resetReceiptDownload()
     loadPayments()
   },
@@ -252,7 +254,7 @@ function goToHistory() {
         v-if="tenant && from !== 'dashboard'"
         variant="ghost"
         class="h-11 text-muted-foreground"
-        :disabled="savingPayment"
+        :disabled="savingPayment || savingReversal"
         @click="goToHistory"
       >
         <ArrowLeft aria-hidden="true" />
@@ -262,7 +264,7 @@ function goToHistory() {
         v-else
         variant="ghost"
         class="h-11 text-muted-foreground"
-        :disabled="savingPayment"
+        :disabled="savingPayment || savingReversal"
         @click="backToDashboard"
       >
         <ArrowLeft aria-hidden="true" />

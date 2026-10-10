@@ -782,6 +782,31 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
         expect(section('payment')['Total paid']).toBe('₹10,000')
       })
 
+      it('stays on this entry, with the dialog open, while a reversal is in flight', async () => {
+        fakeEntries.entries = [entry, makeEntry({ id: 'aug', billingMonth: '2026-08' })]
+        let finish!: () => void
+        const reverse = reversePaymentApi.getMockImplementation()!
+        reversePaymentApi.mockImplementationOnce(async (...args) => {
+          await new Promise<void>((resolve) => (finish = resolve))
+          return reverse(...args)
+        })
+        await openDetails('tenant-001', 'sep')
+        await openReversal()
+        await dialog().get('#reversal-reason').setValue(REASON)
+        await dialog().get('form').trigger('submit')
+        await flushPromises()
+
+        expect(button('Back to Previous Entries').attributes('disabled')).toBeDefined()
+        await router.push('/tenants/tenant-001/entries/aug')
+        await flushPromises()
+        expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
+        expect(body.find('[role="dialog"]').exists()).toBe(true)
+
+        finish()
+        await flushPromises()
+        expect(view!.get('[role="status"]').text()).toBe('Payment of ₹10,000 reversed.')
+      })
+
       it('never offers reversing to a manager', async () => {
         vi.mocked(accessService.getMe).mockResolvedValue(
           identityWith([{ ...testProperty, role: 'manager' }]),
