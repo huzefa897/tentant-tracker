@@ -14,7 +14,7 @@ Feature rules live in their own docs: sign-in and property access in [auth-and-a
 - Scope every property query through `properties/queries.py` `properties_for_user` (filter the queryset, so others' records 404 and never appear in lists), not object permissions alone.
 - Role permissions live in `properties/roles.py` (`role_can`), never in Django Groups (hidden: they're global, not per property).
 - Every API request is rate limited (per address before authentication, then per person, writes more strictly; `config/throttling.py`), and admin login failures are throttled (`config/middleware.py`). Production settings (HTTPS, HSTS, secure cookies, admin path, logging) come from the environment. Details and the rules for changes: [security.md](security.md).
-- **Health:** `/api/v1/health/` says the app responds; `/api/v1/ready/` also checks the database (503 `{"status": "unavailable"}`, nothing more, when it can't). Every `/api/` response carries `Cache-Control: no-store, private`.
+- **Health:** `/api/v1/health/` says the app responds; `/api/v1/ready/` also checks the database (503 `{"status": "unavailable"}`, nothing more, when it can't). Both are public and safe to ping from an uptime monitor: they have their own per-address limit, counted in memory so pings never load the database ([security.md](security.md) item 12). Every `/api/` response carries `Cache-Control: no-store, private`.
 - **Production** runs the `backend/Dockerfile` image (Gunicorn, WhiteNoise for admin's static files) behind Caddy: [deployment.md](deployment.md). Management commands: `ledger_summary` (counts, totals and checksums, compared by the restore test), `sheet_to_ledger` and `import_legacy_ledger` ([data-import.md](data-import.md)).
 
 ## Talking to it from the app

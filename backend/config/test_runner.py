@@ -13,7 +13,10 @@ class TestRunner(DiscoverRunner):
     def setup_test_environment(self, **kwargs):
         super().setup_test_environment(**kwargs)
         self._dummy_cache = override_settings(
-            CACHES={"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}}
+            CACHES={
+                alias: {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}
+                for alias in ("default", "health")
+            }
         )
         self._dummy_cache.enable()
         for name in ("", "django"):

@@ -34,7 +34,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 2. Server-side access, always
 
-- DRF requires authentication by default (`IsAuthenticated` + `FirebaseAuthentication`). A public endpoint opts out explicitly with `AllowAny` and `authentication_classes([])`; only `/api/v1/health/` does today.
+- DRF requires authentication by default (`IsAuthenticated` + `FirebaseAuthentication`). A public endpoint opts out explicitly with `AllowAny` and `authentication_classes([])`; only `/api/v1/health/` and `/api/v1/ready/` do today.
 - Every request is checked on the server: never trust a UID, phone number, role, property, tenancy, rate or total from the request. The server derives them from the verified token and the database.
 - Role permissions are checked with `properties/roles.py` `role_can` on every write.
 
@@ -120,9 +120,11 @@ For any future upload:
 
 Every API request is limited (`config/throttling.py`); over a limit is 429 with `Retry-After`, and the app says to wait a minute (`ApiError` `'rate-limited'`, `RATE_LIMITED_MESSAGE`). There are three limits:
 
-- **Per address, before authentication** (`ApiRateLimitMiddleware`, `DJANGO_THROTTLE_ADDRESS`, default 300/minute). It covers every `/api/` request. It's middleware because DRF checks its throttles only after authentication and permissions, so requests with no token or a bad one would otherwise never be counted.
+- **Per address, before authentication** (`ApiRateLimitMiddleware`, `DJANGO_THROTTLE_ADDRESS`, default 300/minute). It covers every `/api/` request except the health and readiness checks (below). It's middleware because DRF checks its throttles only after authentication and permissions, so requests with no token or a bad one would otherwise never be counted.
 - **Per signed-in person** (`UserRateThrottle`, `DJANGO_THROTTLE_USER`, default 300/minute).
 - **Writes per person** (`WriteRateThrottle`, `DJANGO_THROTTLE_WRITES`, default 30/minute), e.g. creating bills.
+
+**The public health and readiness checks** (`/api/v1/health/`, `/api/v1/ready/`) have their own, stricter limit instead (`HealthCheckRateThrottle`, `DJANGO_THROTTLE_HEALTH`, default 10/minute per address, shared by the two), and no per-person limits. Their counts are always kept in the process's memory (the `health` cache, bounded to 1,000 addresses), never in PostgreSQL, so a flood of pings costs no database work: health makes no queries at all, readiness only its `SELECT 1`. Each worker counts separately, so the effective limit is up to `WEB_CONCURRENCY` times the rate. An uptime monitor every few minutes, and Docker's own check every 30 seconds, are far below it.
 
 Admin login is throttled separately (item 1). OTP abuse is limited by Firebase and reCAPTCHA; consider Firebase App Check.
 
@@ -131,8 +133,9 @@ In production:
 - **Proxies:** behind a proxy, set `DJANGO_NUM_PROXIES` to how many there are, so each client's own address is read from `X-Forwarded-For`. Without it, every client shares the proxy's address. It defaults to `0`, which ignores `X-Forwarded-For`: clients can forge that header, so it's only trusted for the proxies you declare (never `None`, which would make DRF trust the whole header and let anyone dodge the limits). This applies to the admin login throttle too.
 - **Shared counts:** the default local-memory cache is per process, so with N worker processes a person effectively gets N times each limit. With more than one process, set `DJANGO_SHARED_CACHE=true` to keep counts in PostgreSQL (Django's database cache, table `django_cache`; run `manage.py createcachetable` once per database). Redis isn't used (decided 2026-10-07).
 - **Proxy limits:** Caddy has no rate limiting without a plugin, so the app's limits are the ones that apply. Add proxy limits if traffic ever calls for them.
+- **Floods from many addresses:** per-address limits stop one client, not a distributed attack, which still reaches the server and uses its bandwidth and Caddy's connections before any limit applies. Protection from that is at the network edge (e.g. a proxying CDN such as Cloudflare in front of the domain), not in the app.
 
-The limits **fail open**: if the counts can't be read (the database is down, or `createcachetable` wasn't run), the request goes through and a warning is logged, so a rate limit never takes the app down and readiness can still report the database as unavailable.
+The database-backed limits **fail open**: if the counts can't be read (the database is down, or `createcachetable` wasn't run), the request goes through and a warning is logged, so a rate limit never takes the app down and readiness can still report the database as unavailable.
 
 Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry over between tests. The rate-limit tests turn a real cache back on.
 

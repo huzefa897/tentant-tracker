@@ -190,6 +190,14 @@ CACHES = {
         if env_bool("DJANGO_SHARED_CACHE")
         else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
     ),
+    # The health and readiness checks' counts: always this process's memory, never PostgreSQL,
+    # so a flood of pings can't load the database just to be counted (config/throttling.py).
+    # Bounded: the oldest entries are dropped past MAX_ENTRIES.
+    "health": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "health-checks",
+        "OPTIONS": {"MAX_ENTRIES": 1000},
+    },
 }
 
 # Plain console logs; the host collects them. Never log tokens, Authorization headers, OTPs,
@@ -235,6 +243,9 @@ REST_FRAMEWORK = {
         "address": os.getenv("DJANGO_THROTTLE_ADDRESS", "300/minute"),
         "user": os.getenv("DJANGO_THROTTLE_USER", "300/minute"),
         "writes": os.getenv("DJANGO_THROTTLE_WRITES", "30/minute"),
+        # /health/ and /ready/, per address and process: room for monitors (and Docker's own
+        # check every 30 seconds), not for floods.
+        "health": os.getenv("DJANGO_THROTTLE_HEALTH", "10/minute"),
     },
     # How many proxies sit in front of Django, so a client's address is read from
     # X-Forwarded-For rather than the proxy's. 0 (the default) ignores X-Forwarded-For, which

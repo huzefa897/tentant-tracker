@@ -1,5 +1,6 @@
 import logging
 
+from django.core.cache import caches
 from django.db import DatabaseError
 from django.http import JsonResponse
 from rest_framework import throttling
@@ -47,6 +48,26 @@ class AddressRateThrottle(FailOpenMixin, throttling.SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
 
 
+class HealthCheckRateThrottle(throttling.SimpleRateThrottle):
+    """The public health and readiness checks, per address: a stricter limit of their own,
+    counted in this process's memory (the "health" cache), never in the shared PostgreSQL
+    cache, so pinging them in a flood costs no database work. Each Gunicorn worker counts
+    separately, so the effective limit is up to WEB_CONCURRENCY times the rate."""
+
+    scope = "health"
+
+    @property
+    def cache(self):
+        return caches["health"]
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
+
+
+# Public, unauthenticated paths limited by HealthCheckRateThrottle instead of the address limit.
+HEALTH_CHECK_PATHS = frozenset({"/api/v1/health/", "/api/v1/ready/"})
+
+
 class ApiRateLimitMiddleware:
     """Limits all API requests per address before authentication. DRF checks its throttles
     after authentication and permissions, so without this a request with no or a bad token
@@ -57,7 +78,10 @@ class ApiRateLimitMiddleware:
 
     def __call__(self, request):
         if request.path.startswith("/api/"):
-            throttle = AddressRateThrottle()
+            if request.path in HEALTH_CHECK_PATHS:
+                throttle = HealthCheckRateThrottle()
+            else:
+                throttle = AddressRateThrottle()
             if not throttle.allow_request(request, None):
                 wait = throttle.wait()
                 response = JsonResponse(
