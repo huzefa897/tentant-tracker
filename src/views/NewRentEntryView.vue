@@ -35,7 +35,12 @@ const props = defineProps<{
 const rentEntryStore = useRentEntryStore()
 const router = useRouter()
 
-const { tenant, status: tenantStatus } = useRouteTenant(() => props.tenantId)
+const {
+  tenant,
+  status: tenantStatus,
+  error: tenantError,
+  retryable: tenantRetryable,
+} = useRouteTenant(() => props.tenantId)
 
 const saving = ref(false)
 const savedEntry = ref<RentEntry | null>(null)
@@ -165,7 +170,11 @@ function handleDialogOpenChange(open: boolean) {
       </div>
     </LoadingRegion>
 
-    <SlowLoadScreen v-else-if="tenantStatus === 'error'" />
+    <SlowLoadScreen
+      v-else-if="tenantStatus === 'error'"
+      :error="tenantError"
+      :retryable="tenantRetryable"
+    />
 
     <template v-else-if="!tenant">
       <div

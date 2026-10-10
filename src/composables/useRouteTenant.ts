@@ -1,5 +1,6 @@
 import { computed, onUnmounted, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 
+import { isRetryableError } from '@/services/apiError'
 import { tenantErrorMessage, useTenantStore } from '@/stores/tenant'
 
 const RETRY_MS = 10_000
@@ -27,6 +28,7 @@ export function useRouteTenant(tenantId: MaybeRefOrGetter<string>) {
   // Only the latest load (for the current id) may change state.
   let loadSeq = 0
   let retryTimer: ReturnType<typeof setTimeout> | null = null
+  const retryable = ref(true)
 
   function stopRetry() {
     if (retryTimer !== null) {
@@ -40,22 +42,34 @@ export function useRouteTenant(tenantId: MaybeRefOrGetter<string>) {
     const seq = ++loadSeq
     loadState.value = 'loading'
     error.value = null
+    retryable.value = true
 
     try {
       await tenantStore.loadTenant(toValue(tenantId))
       if (seq === loadSeq) loadState.value = 'done'
     } catch (err) {
       if (seq !== loadSeq) return
+      const canRetry = isRetryableError(err)
       error.value = tenantErrorMessage(err)
       loadState.value = 'error'
-      retryTimer = setTimeout(load, RETRY_MS)
+      retryable.value = canRetry
+      if (canRetry) retryTimer = setTimeout(load, RETRY_MS)
     }
   }
 
   // The router reuses the page when only the id changes, so load again then. Synchronously, so
   // the new id never shows as 'missing' before its load starts.
   watch(() => toValue(tenantId), load, { immediate: true, flush: 'sync' })
-  onUnmounted(stopRetry)
+  onUnmounted(() => {
+    loadSeq++ // prevents any in-flight load from scheduling a retry after unmount
+    stopRetry()
+  })
 
-  return { tenant, status, error: computed(() => error.value), retry: load }
+  return {
+    tenant,
+    status,
+    error: computed(() => error.value),
+    retryable: computed(() => retryable.value),
+    retry: load,
+  }
 }

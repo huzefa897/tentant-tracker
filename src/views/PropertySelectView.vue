@@ -26,6 +26,7 @@ onMounted(() => {
 useAutoRetry(
   () => accessStore.status,
   () => accessStore.load(),
+  () => accessStore.retryable,
 )
 
 // Shown so the owner knows which account to grant access to.
@@ -78,7 +79,11 @@ async function handleSelect(propertyId: string) {
         <SkeletonRows bordered :rows="2" />
       </LoadingRegion>
 
-      <SlowLoadScreen v-else-if="accessStore.status === 'error'" />
+      <SlowLoadScreen
+        v-else-if="accessStore.status === 'error'"
+        :error="accessStore.error"
+        :retryable="accessStore.retryable"
+      />
 
       <div
         v-else-if="accessStore.properties.length === 0"

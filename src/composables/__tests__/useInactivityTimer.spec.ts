@@ -141,4 +141,35 @@ describe('useInactivityTimer', () => {
     await flushPromises()
     expect(mockLogout).toHaveBeenCalledOnce()
   })
+
+  it('signs out immediately when an activity event fires after the inactivity deadline has passed', async () => {
+    await signIn()
+    mountTimer()
+
+    // Simulate the device sleeping past the deadline without running the timer
+    // (browsers suspend setTimeout during sleep; JS resumes before the callback fires).
+    vi.setSystemTime(Date.now() + INACTIVITY_MS + 1_000)
+
+    window.dispatchEvent(new Event('click'))
+    await flushPromises()
+
+    expect(mockLogout).toHaveBeenCalledOnce()
+  })
+
+  it('signs out immediately when the tab becomes visible after the inactivity deadline has passed', async () => {
+    await signIn()
+    mountTimer()
+
+    vi.setSystemTime(Date.now() + INACTIVITY_MS + 1_000)
+
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'visible',
+      writable: true,
+      configurable: true,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await flushPromises()
+
+    expect(mockLogout).toHaveBeenCalledOnce()
+  })
 })

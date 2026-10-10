@@ -4,20 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAutoRetry } from '@/composables/useAutoRetry'
 
-function makeWrapper(initialStatus: string) {
+function makeWrapper(initialStatus: string, retryable = true) {
   const status = ref(initialStatus)
+  const retryableRef = ref(retryable)
   const retry = vi.fn()
 
   const Comp = defineComponent({
     setup() {
-      useAutoRetry(status, retry)
+      useAutoRetry(status, retry, retryableRef)
       return {}
     },
     template: '<div/>',
   })
 
   const wrapper = mount(Comp)
-  return { status, retry, wrapper }
+  return { status, retryable: retryableRef, retry, wrapper }
 }
 
 describe('useAutoRetry', () => {
@@ -215,6 +216,37 @@ describe('useAutoRetry', () => {
 
     it('does not retry on visibilitychange when status is not error', async () => {
       const { retry } = makeWrapper('loading')
+      await flushPromises()
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        writable: true,
+        configurable: true,
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+      expect(retry).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('retryable=false', () => {
+    it('does not schedule a timer when retryable is false', async () => {
+      const { retry } = makeWrapper('error', false)
+      await flushPromises()
+
+      vi.advanceTimersByTime(30_000)
+      expect(retry).not.toHaveBeenCalled()
+    })
+
+    it('does not retry on online event when retryable is false', async () => {
+      const { retry } = makeWrapper('error', false)
+      await flushPromises()
+
+      window.dispatchEvent(new Event('online'))
+      expect(retry).not.toHaveBeenCalled()
+    })
+
+    it('does not retry on visibilitychange event when retryable is false', async () => {
+      const { retry } = makeWrapper('error', false)
       await flushPromises()
 
       Object.defineProperty(document, 'visibilityState', {

@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, ref, type Ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useRouteEntry } from '@/composables/useRouteEntry'
 import { ApiError } from '@/services/apiError'
@@ -23,7 +23,7 @@ const getEntry = vi.mocked(rentEntryService.getEntry)
 
 function mountWith(tenantId: Ref<string>, entryId: Ref<string>) {
   let result!: ReturnType<typeof useRouteEntry>
-  mount(
+  const wrapper = mount(
     defineComponent({
       setup() {
         result = useRouteEntry(tenantId, entryId)
@@ -31,10 +31,11 @@ function mountWith(tenantId: Ref<string>, entryId: Ref<string>) {
       },
     }),
   )
-  return result
+  return { ...result, wrapper }
 }
 
 beforeEach(async () => {
+  vi.useFakeTimers()
   resetAuthService()
   resetAccessService()
   resetRentEntryService()
@@ -48,6 +49,10 @@ beforeEach(async () => {
   signInAs()
   await useAuthStore().init()
   await useAccessStore().load()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('useRouteEntry', () => {
@@ -88,13 +93,54 @@ describe('useRouteEntry', () => {
 
   it('loads again when the ids in the URL change', async () => {
     const entryId = ref('sep')
-    const entry = mountWith(ref('tenant-001'), entryId)
+    const { status, entry } = mountWith(ref('tenant-001'), entryId)
     await flushPromises()
 
     entryId.value = 'oct'
-    expect(entry.status.value).toBe('loading')
+    expect(status.value).toBe('loading')
     await flushPromises()
 
-    expect(entry.entry.value?.billingMonth).toBe('2026-10')
+    expect(entry.value?.billingMonth).toBe('2026-10')
+  })
+
+  it('does not schedule a retry when unmount happens while a load is in flight', async () => {
+    let rejectLoad!: () => void
+    getEntry.mockReturnValueOnce(
+      new Promise((_, reject) => (rejectLoad = () => reject(new Error('network')))),
+    )
+    const { wrapper } = mountWith(ref('tenant-001'), ref('sep'))
+
+    wrapper.unmount()
+    rejectLoad()
+    await flushPromises()
+
+    vi.advanceTimersByTime(30_000)
+    // getEntry was called once on mount; it must not be called again after unmount
+    expect(getEntry).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry and marks retryable=false on unauthorized errors', async () => {
+    getEntry.mockRejectedValueOnce(new ApiError('unauthorized'))
+    const { status, retryable } = mountWith(ref('tenant-001'), ref('sep'))
+    await flushPromises()
+
+    expect(status.value).toBe('error')
+    expect(retryable.value).toBe(false)
+
+    vi.advanceTimersByTime(30_000)
+    expect(getEntry).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries and marks retryable=true on transient errors', async () => {
+    getEntry.mockRejectedValueOnce(new ApiError('unavailable'))
+    const { status, retryable } = mountWith(ref('tenant-001'), ref('sep'))
+    await flushPromises()
+
+    expect(status.value).toBe('error')
+    expect(retryable.value).toBe(true)
+
+    vi.advanceTimersByTime(10_000)
+    await flushPromises()
+    expect(getEntry).toHaveBeenCalledTimes(2)
   })
 })

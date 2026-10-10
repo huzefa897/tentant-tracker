@@ -9,7 +9,13 @@ const MAX_MS = 30_000
 // leaves 'error' for anything other than 'loading' (i.e. on success or idle).
 // Also retries immediately when the browser comes back online or the tab
 // becomes visible — no need to wait for the next timer tick.
-export function useAutoRetry(status: MaybeRefOrGetter<string>, retry: () => void) {
+// Pass retryable=false (or a getter that returns false) to suppress all retries
+// for non-transient failures that require user action (e.g. 401/403).
+export function useAutoRetry(
+  status: MaybeRefOrGetter<string>,
+  retry: () => void,
+  retryable: MaybeRefOrGetter<boolean> = true,
+) {
   let timerId: ReturnType<typeof setTimeout> | null = null
   let attempt = 0
 
@@ -21,6 +27,7 @@ export function useAutoRetry(status: MaybeRefOrGetter<string>, retry: () => void
   }
 
   function scheduleRetry() {
+    if (!toValue(retryable)) return
     const delay = Math.min(INITIAL_MS * 2 ** attempt, MAX_MS)
     attempt++
     timerId = setTimeout(retry, delay)
@@ -28,6 +35,7 @@ export function useAutoRetry(status: MaybeRefOrGetter<string>, retry: () => void
 
   function retryNow() {
     if (toValue(status) !== 'error') return
+    if (!toValue(retryable)) return
     stop()
     retry()
   }

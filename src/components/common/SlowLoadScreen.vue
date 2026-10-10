@@ -3,6 +3,14 @@ import { RefreshCw } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 
+const props = withDefaults(
+  defineProps<{
+    error?: string | null
+    retryable?: boolean
+  }>(),
+  { error: null, retryable: true },
+)
+
 function reload() {
   window.location.reload()
 }
@@ -157,11 +165,17 @@ function reload() {
     </div>
 
     <div class="space-y-2" role="status" aria-live="polite">
-      <p class="text-xl font-bold tracking-tight">It's taking longer than usual</p>
-      <p class="text-sm text-muted-foreground">
-        We're still trying to connect and fetch your data.
+      <p class="text-xl font-bold tracking-tight">
+        {{ props.retryable ? "It's taking longer than usual" : 'Something went wrong' }}
       </p>
-      <p class="text-sm text-muted-foreground">Retrying automatically in the background.</p>
+      <p class="text-sm text-muted-foreground">
+        {{
+          props.error != null ? props.error : "We're still trying to connect and fetch your data."
+        }}
+      </p>
+      <p v-if="props.retryable" class="text-sm text-muted-foreground">
+        Retrying automatically in the background.
+      </p>
     </div>
 
     <Button class="h-11 px-6" @click="reload">

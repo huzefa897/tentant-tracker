@@ -29,7 +29,12 @@ const props = defineProps<{
 const rentEntryStore = useRentEntryStore()
 const router = useRouter()
 
-const { tenant, status: tenantStatus } = useRouteTenant(() => props.tenantId)
+const {
+  tenant,
+  status: tenantStatus,
+  error: tenantError,
+  retryable: tenantRetryable,
+} = useRouteTenant(() => props.tenantId)
 
 // Bills per page, as the API returns them (backend billing/views.py RentEntryPagination).
 const PAGE_SIZE = 12
@@ -180,7 +185,11 @@ function viewEntry(entryId: string) {
       </div>
     </LoadingRegion>
 
-    <SlowLoadScreen v-else-if="tenantStatus === 'error'" />
+    <SlowLoadScreen
+      v-else-if="tenantStatus === 'error'"
+      :error="tenantError"
+      :retryable="tenantRetryable"
+    />
 
     <div
       v-else-if="!tenant"

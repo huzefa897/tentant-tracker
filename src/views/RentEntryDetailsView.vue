@@ -42,11 +42,21 @@ const rentEntryStore = useRentEntryStore()
 const tenantStore = useTenantStore()
 const router = useRouter()
 
-const { tenant, status: tenantStatus } = useRouteTenant(() => props.tenantId)
+const {
+  tenant,
+  status: tenantStatus,
+  error: tenantError,
+  retryable: tenantRetryable,
+} = useRouteTenant(() => props.tenantId)
 
 // Loaded from the backend by its URL, matched on both ids, so it survives a refresh and never
 // shows under another tenant.
-const { entry, status: entryStatus } = useRouteEntry(
+const {
+  entry,
+  status: entryStatus,
+  error: entryError,
+  retryable: entryRetryable,
+} = useRouteEntry(
   () => props.tenantId,
   () => props.entryId,
 )
@@ -226,7 +236,11 @@ function goToHistory() {
       </div>
     </LoadingRegion>
 
-    <SlowLoadScreen v-else-if="tenantStatus === 'error'" />
+    <SlowLoadScreen
+      v-else-if="tenantStatus === 'error'"
+      :error="tenantError"
+      :retryable="tenantRetryable"
+    />
 
     <div
       v-else-if="!tenant"
@@ -240,7 +254,11 @@ function goToHistory() {
       <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to Dashboard</Button>
     </div>
 
-    <SlowLoadScreen v-else-if="entryStatus === 'error'" />
+    <SlowLoadScreen
+      v-else-if="entryStatus === 'error'"
+      :error="entryError"
+      :retryable="entryRetryable"
+    />
 
     <div
       v-else-if="!entry"
