@@ -8,6 +8,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { Check, ChevronDown, LoaderCircle, Search } from '@lucide/vue'
 import type { AcceptableValue } from 'reka-ui'
 
+import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import { Button } from '@/components/ui/button'
 import {
   Combobox,
@@ -19,6 +20,7 @@ import {
   ComboboxTrigger,
   ComboboxViewport,
 } from '@/components/ui/combobox'
+import { Skeleton } from '@/components/ui/skeleton'
 import type { TenantListStatus } from '@/stores/tenant'
 import type { Tenant } from '@/types/tenant'
 
@@ -127,15 +129,18 @@ const emptySearch = () => ''
         aria-label="Search tenants"
       />
 
-      <div
+      <LoadingRegion
         v-if="status === 'loading'"
-        class="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground"
-        role="status"
+        label="Loading tenants…"
         data-testid="tenants-loading"
       >
-        <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
-        Loading tenants…
-      </div>
+        <div class="space-y-1 p-1">
+          <div v-for="row in 3" :key="row" class="space-y-1.5 px-2 py-2">
+            <Skeleton class="h-4 w-40" />
+            <Skeleton class="h-3 w-16" />
+          </div>
+        </div>
+      </LoadingRegion>
       <p
         v-else-if="status === 'error'"
         class="px-3 py-3 text-center text-sm text-destructive"

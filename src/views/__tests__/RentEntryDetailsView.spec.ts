@@ -88,6 +88,34 @@ afterEach(() => {
 })
 
 describe('RentEntryDetailsView', () => {
+  it('holds the page’s shape with a skeleton while the bill loads', async () => {
+    let finish!: () => void
+    const fakeGet = getEntry.getMockImplementation()!
+    getEntry.mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => (finish = resolve))
+      return fakeGet(...args)
+    })
+    await openDetails('tenant-001', 'sep')
+
+    const loading = view!.get('[data-testid="entry-loading"]')
+    expect(loading.attributes('role')).toBe('status')
+    expect(loading.text()).toBe('Loading entry…')
+    expect(loading.findAll('[data-slot="skeleton"]').length).toBeGreaterThan(0)
+
+    finish()
+    await flushPromises()
+    expect(view!.find('[data-testid="entry-loading"]').exists()).toBe(false)
+    expect(view!.get('h1').text()).toBe('September 2026')
+  })
+
+  it('shows skeleton rows while the bill’s payments load', async () => {
+    getPayments.mockReturnValueOnce(new Promise(() => {}))
+    await openDetails('tenant-001', 'sep')
+
+    expect(view!.get('[data-testid="payments-loading"]').text()).toBe('Loading payments…')
+    expect(view!.text()).not.toContain('No payments recorded')
+  })
+
   it('loads the bill from the API when opened by URL, as after a refresh', async () => {
     await openDetails('tenant-001', 'sep')
 

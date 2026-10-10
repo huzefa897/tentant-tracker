@@ -3,11 +3,15 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, ChevronLeft, ChevronRight, History, Plus, User } from '@lucide/vue'
 
+import LoadingRegion from '@/components/common/LoadingRegion.vue'
+import SkeletonRows from '@/components/common/SkeletonRows.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import RentEntryFilters from '@/components/rent/RentEntryFilters.vue'
 import RentEntryHistory from '@/components/rent/RentEntryHistory.vue'
 import RentEntryTotals from '@/components/rent/RentEntryTotals.vue'
+import TenantChipSkeleton from '@/components/tenant/TenantChipSkeleton.vue'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
@@ -40,6 +44,12 @@ const page = ref(1)
 
 const filtered = computed(() => selectedYear.value !== 'all' || selectedStatus.value !== 'all')
 
+// After this tenant's first page has shown, a reload (another filter or page) keeps the filters
+// on screen and puts skeleton rows where the bills were, as many as there were, so the page
+// doesn't jump.
+const historyShown = ref(false)
+const skeletonRows = ref(4)
+
 // The backend filters (before paging) and pages; this page asks for what's shown.
 function load() {
   rentEntryStore.loadHistory(props.tenantId, {
@@ -67,6 +77,7 @@ watch(
   () => props.tenantId,
   () => {
     resetReceiptDownload()
+    historyShown.value = false
     selectedYear.value = 'all'
     selectedStatus.value = 'all'
     page.value = 1
@@ -91,6 +102,15 @@ function goToPage(next: number) {
 
 const history = computed(() => rentEntryStore.history)
 const entries = computed(() => history.value.entries)
+
+watch(
+  () => history.value.status === 'ready' && history.value.tenantId === props.tenantId,
+  (ready) => {
+    if (!ready) return
+    historyShown.value = true
+    skeletonRows.value = Math.min(Math.max(entries.value.length, 1), PAGE_SIZE)
+  },
+)
 const pageCount = computed(() => Math.max(1, Math.ceil(history.value.count / PAGE_SIZE)))
 
 // Years the tenancy covers, newest first: bills can only be for months it overlaps.
@@ -143,7 +163,24 @@ function viewEntry(entryId: string) {
       </Button>
     </template>
 
-    <p v-if="tenantStatus === 'loading'" class="text-muted-foreground" role="status">Loading…</p>
+    <!-- The page's own shape while it loads, so nothing jumps when the bills arrive. -->
+    <LoadingRegion
+      v-if="tenantStatus === 'loading'"
+      label="Loading entries…"
+      data-testid="history-loading"
+    >
+      <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p class="text-3xl font-bold tracking-tight sm:text-4xl">Previous Entries</p>
+          <TenantChipSkeleton />
+        </div>
+        <Skeleton class="h-11 w-44" />
+      </div>
+      <div class="space-y-6">
+        <Skeleton class="h-[4.25rem] w-full max-w-lg" />
+        <SkeletonRows bordered />
+      </div>
+    </LoadingRegion>
 
     <RentEntriesLoadError
       v-else-if="tenantStatus === 'error'"
@@ -188,12 +225,19 @@ function viewEntry(entryId: string) {
         @retry="load"
       />
 
-      <p v-else-if="history.status !== 'ready'" class="text-muted-foreground" role="status">
-        Loading entries…
-      </p>
+      <LoadingRegion
+        v-else-if="history.status !== 'ready' && !historyShown"
+        label="Loading entries…"
+        data-testid="history-loading"
+      >
+        <div class="space-y-6">
+          <Skeleton class="h-[4.25rem] w-full max-w-lg" />
+          <SkeletonRows bordered />
+        </div>
+      </LoadingRegion>
 
       <div
-        v-else-if="history.count === 0 && !filtered"
+        v-else-if="history.status === 'ready' && history.count === 0 && !filtered"
         class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
       >
         <div
@@ -219,10 +263,27 @@ function viewEntry(entryId: string) {
             v-model:status="selectedStatus"
             :years="years"
           />
-          <RentEntryTotals v-if="entries.length > 0" :totals="totals" />
+          <RentEntryTotals
+            v-if="history.status === 'ready' && entries.length > 0"
+            :totals="totals"
+          />
+          <!-- Holds the totals' space while another page or filter loads. -->
+          <Skeleton
+            v-else-if="history.status !== 'ready'"
+            class="h-[18.5rem] sm:h-28"
+            aria-hidden="true"
+          />
         </div>
 
-        <template v-if="entries.length > 0">
+        <LoadingRegion
+          v-if="history.status !== 'ready'"
+          label="Loading entries…"
+          data-testid="history-loading"
+        >
+          <SkeletonRows bordered :rows="skeletonRows" />
+        </LoadingRegion>
+
+        <template v-else-if="entries.length > 0">
           <p v-if="receiptError" class="text-sm text-destructive" role="alert">
             {{ receiptError }}
           </p>

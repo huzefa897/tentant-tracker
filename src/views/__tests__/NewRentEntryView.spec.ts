@@ -94,6 +94,17 @@ afterEach(() => {
 })
 
 describe('NewRentEntryView', () => {
+  it('holds the form’s shape with a skeleton while the tenant loads', async () => {
+    app = await openPage('/tenants/tenant-001/entries/new', () => {
+      vi.mocked(tenantService.getTenant).mockReturnValueOnce(new Promise(() => {}))
+    })
+
+    const loading = app.get('[data-testid="tenant-loading"]')
+    expect(loading.attributes('role')).toBe('status')
+    expect(loading.get('.sr-only').text()).toBe('Loading tenant…')
+    expect(app.find('form').exists()).toBe(false)
+  })
+
   it('loads the tenant and shows the form for the tenant in the URL', async () => {
     await openEntryPage('tenant-002')
 

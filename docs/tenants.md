@@ -19,4 +19,4 @@ Pages opened by URL load their tenant through the detail API (`loadTenant`, any 
 
 ## Dashboard
 
-The dashboard never auto-selects a tenant. Below the selected tenant's name it shows their latest bill by billing month (`LatestEntryCard`, via `TenantDetails`' `latest-entry` slot) and their bill count, from the first page of their bills (`loadSummary`, reloaded whenever a tenant is selected): nothing while loading or when they have none, and an error with Retry when it fails. Format money with `utils/currency.ts` (`formatINR`) and days with `utils/date.ts` (`formatOrdinal`).
+The dashboard never auto-selects a tenant. Below the selected tenant's name it shows their latest bill by billing month (`LatestEntryCard`, via `TenantDetails`' `latest-entry` slot) and their bill count, from the first page of their bills (`loadSummary`, reloaded whenever a tenant is selected): a skeleton of the card while loading, nothing when they have none, and an error with Retry when it fails. Format money with `utils/currency.ts` (`formatINR`) and days with `utils/date.ts` (`formatOrdinal`).
