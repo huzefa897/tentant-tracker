@@ -159,7 +159,7 @@ How it differs from the single server:
    - **Connect > Session pooler** gives the host, port 5432 and user (`postgres.<project-ref>`) for the API. Not the direct connection (IPv6-only on the free plan, which Render can't reach) and not the transaction pooler on port 6543 (no prepared statements, and the app's payment locking needs a session).
 2. **Render:** New > Blueprint, pick the repository. It reads `render.yaml` and asks for each `sync: false` value: the Supabase connection, `DJANGO_ADMIN_PATH`, the Firebase project and service-account key's fields (as in `backend/.env.example`; the private key can be pasted with its `\n`s), and the Firebase web config.
 3. **Names:** Render assigns each service's `onrender.com` name when the Blueprint is created, adding a suffix when the name is taken. `render.yaml` holds the names it assigned (`rent-tracker-sqh5` and `rent-tracker-api-bcwo`). If a service is recreated and gets another name, update every URL in `render.yaml` that mentions them (`DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS`, `VITE_API_BASE_URL` and the Content-Security-Policy), or set your own domains.
-4. **Firebase:** Authentication > Settings > Authorized domains: add the static site's domain. In `render.yaml`'s Content-Security-Policy, replace `YOUR-PROJECT` with the auth domain's project.
+4. **Firebase:** Authentication > Settings > Authorized domains: add the static site's domain. `render.yaml`'s Content-Security-Policy names the Firebase auth domain in `frame-src`; change it if the project changes.
 5. **An admin login,** from your machine with the backend image (or pipenv), pointing at Supabase:
 
    ```bash
