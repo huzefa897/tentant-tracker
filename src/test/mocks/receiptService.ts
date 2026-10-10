@@ -55,7 +55,9 @@ export function resetReceiptService() {
         })
         fakeReceipts.set(paymentId, receipt)
         fakeEntries.payments = fakeEntries.payments.map((p) =>
-          p.id === paymentId ? { ...p, receipt: { id, reference: receipt.reference } } : p,
+          p.id === paymentId
+            ? { ...p, receipt: { id, reference: receipt.reference, status: 'issued' as const } }
+            : p,
         )
         return { receipt, created: true }
       },

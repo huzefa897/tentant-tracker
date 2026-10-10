@@ -27,7 +27,16 @@ const paymentDto = {
   paidDate: '2026-10-05',
   notes: 'Bank transfer',
   createdAt: '2026-10-05T08:00:00Z',
+  status: 'recorded',
+  reversal: null,
   receipt: null,
+}
+
+const reversalDto = {
+  id: '9a2b4c6d-0000-4000-8000-000000000501',
+  reason: 'Entered ₹3,000 instead of ₹300.',
+  createdAt: '2026-10-07T08:00:00Z',
+  createdByName: 'Huzefa',
 }
 
 const entryDto = {
@@ -78,14 +87,29 @@ describe('parsePayment', () => {
       paidDate: '2026-10-05',
       notes: 'Bank transfer',
       createdAt: '2026-10-05T08:00:00Z',
+      status: 'recorded',
+      reversal: null,
       receipt: null,
     })
   })
 
   it('maps the receipt issued for it', () => {
-    const receipt = { id: 'r-1', reference: 'Shaik_Zahid_Ali_202_Rent_October 2026' }
+    const receipt = {
+      id: 'r-1',
+      reference: 'Shaik_Zahid_Ali_202_Rent_October 2026',
+      status: 'void',
+    }
 
     expect(toPayment(parsePayment({ ...paymentDto, receipt })).receipt).toEqual(receipt)
+  })
+
+  it('maps a reversed payment with who reversed it and why', () => {
+    const payment = toPayment(
+      parsePayment({ ...paymentDto, status: 'reversed', reversal: reversalDto }),
+    )
+
+    expect(payment.status).toBe('reversed')
+    expect(payment.reversal).toEqual(reversalDto)
   })
 
   it.each([
@@ -96,7 +120,15 @@ describe('parsePayment', () => {
     ['a timestamp as the paid date', { paidDate: '2026-10-05T00:00:00Z' }],
     ['missing notes', { notes: null }],
     ['no receipt field', { receipt: undefined }],
-    ['a receipt without a reference', { receipt: { id: 'r-1', reference: '' } }],
+    ['a receipt without a reference', { receipt: { id: 'r-1', reference: '', status: 'issued' } }],
+    ['a receipt without a status', { receipt: { id: 'r-1', reference: 'R' } }],
+    ['an unknown status', { status: 'refunded' }],
+    ['a reversed payment without its reversal', { status: 'reversed', reversal: null }],
+    [
+      'a reversal without a reason',
+      { status: 'reversed', reversal: { ...reversalDto, reason: '' } },
+    ],
+    ['a recorded payment with a reversal', { reversal: reversalDto }],
   ])('rejects %s', (_, change) => {
     expect(() => parsePayment({ ...paymentDto, ...change })).toThrow(ApiError)
   })
@@ -210,5 +242,67 @@ describe('paymentService', () => {
     await expect(
       paymentService.getPayments(PROPERTY_ID, TENANCY_ID, ENTRY_ID),
     ).rejects.toMatchObject({ kind: 'not-found' })
+  })
+
+  describe('reversePayment', () => {
+    const PAYMENT = { id: paymentDto.id, entryId: ENTRY_ID }
+    const reversed = { ...paymentDto, status: 'reversed', reversal: reversalDto }
+    const unpaid = { ...entryDto, totalPaid: '0.00', outstandingAmount: '15750.00' }
+
+    it('sends the reason and returns the reversed payment and the bill without it', async () => {
+      const post = vi
+        .spyOn(api, 'post')
+        .mockResolvedValue({ status: 201, data: { payment: reversed, entry: unpaid } })
+
+      const result = await paymentService.reversePayment(
+        PROPERTY_ID,
+        TENANCY_ID,
+        PAYMENT,
+        reversalDto.reason,
+      )
+
+      expect(post).toHaveBeenCalledWith(`${PAYMENTS_URL}${paymentDto.id}/reversal/`, {
+        reason: reversalDto.reason,
+      })
+      expect(result.payment).toMatchObject({ status: 'reversed', reversal: reversalDto })
+      expect(result.entry).toMatchObject({ totalPaid: 0, outstanding: 15750 })
+      expect(result.replayed).toBe(false)
+    })
+
+    it('says when it had already been reversed for that reason (a retry)', async () => {
+      vi.spyOn(api, 'post').mockResolvedValue({
+        status: 200,
+        data: { payment: reversed, entry: unpaid },
+      })
+
+      const result = await paymentService.reversePayment(PROPERTY_ID, TENANCY_ID, PAYMENT, 'x')
+
+      expect(result.replayed).toBe(true)
+    })
+
+    it('reports a refusal or another reason as app errors', async () => {
+      vi.spyOn(api, 'post').mockRejectedValueOnce(httpError(403, { detail: 'No.' }))
+      await expect(
+        paymentService.reversePayment(PROPERTY_ID, TENANCY_ID, PAYMENT, 'x'),
+      ).rejects.toMatchObject({ kind: 'forbidden' })
+
+      vi.spyOn(api, 'post').mockRejectedValueOnce(
+        httpError(409, { code: 'reversal_conflict', detail: 'Already reversed.' }),
+      )
+      await expect(
+        paymentService.reversePayment(PROPERTY_ID, TENANCY_ID, PAYMENT, 'x'),
+      ).rejects.toMatchObject({ kind: 'conflict', code: 'reversal_conflict' })
+    })
+
+    it('reports a response without a reversed payment as invalid', async () => {
+      vi.spyOn(api, 'post').mockResolvedValue({
+        status: 201,
+        data: { payment: { ...reversed, reversal: null }, entry: unpaid },
+      })
+
+      await expect(
+        paymentService.reversePayment(PROPERTY_ID, TENANCY_ID, PAYMENT, 'x'),
+      ).rejects.toMatchObject({ kind: 'invalid-response' })
+    })
   })
 })

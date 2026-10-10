@@ -6,6 +6,10 @@ export interface ReceiptIssuer {
   receivedBy: string // the person who issued it; '' when they have no name
 }
 
+// issued: confirms its payment. void: the payment was reversed, so it confirms nothing; its
+// reference and snapshot are kept as issued.
+export type ReceiptStatus = 'issued' | 'void'
+
 // Confirms one Payment. A snapshot Django saved when it was issued, so later payments, or
 // changes to the tenant or property, never change it: every download uses it exactly as saved.
 // The bill figures are as they stood right after this payment (payments recorded before it,
@@ -50,13 +54,19 @@ export interface PaymentReceipt {
   paymentAmount: number
   paidDate: string // YYYY-MM-DD
   paymentNotes: string
+
+  // Not part of the snapshot: set once if the payment is reversed.
+  status: ReceiptStatus
+  voidedAt: string | null // ISO timestamp
+  voidReason: string // '' while issued
 }
 
 // What a payment says about its receipt: enough to offer "Download receipt" rather than
-// "Issue receipt".
+// "Issue receipt", and to say it's void.
 export interface ReceiptSummary {
   id: string
   reference: string
+  status: ReceiptStatus
 }
 
 // What issuing returns. created: false when the payment already had this receipt (a repeat or

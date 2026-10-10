@@ -104,3 +104,16 @@ export function parsePaymentDraft(
     },
   }
 }
+
+export const REVERSAL_REASON_MAX_LENGTH = 500
+
+// Why a payment is being reversed: required (after trimming), at most 500 characters, as the
+// backend checks. null when it's fine.
+export function validateReversalReason(reason: string): string | null {
+  const trimmed = reason.trim()
+  if (trimmed === '') return 'Say why this payment is being reversed.'
+  if (trimmed.length > REVERSAL_REASON_MAX_LENGTH) {
+    return `The reason must be ${REVERSAL_REASON_MAX_LENGTH} characters or fewer.`
+  }
+  return null
+}

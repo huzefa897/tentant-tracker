@@ -6,11 +6,15 @@ import { outstandingFromConflict, paymentService } from '@/services/payment.serv
 import { receiptConfigurationProblem, receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { useAccessStore } from '@/stores/access'
-import type { Payment, PaymentInput, RecordedPayment } from '@/types/payment'
+import type { Payment, PaymentInput, RecordedPayment, ReversedPayment } from '@/types/payment'
 import type { PaymentReceipt } from '@/types/receipt'
 import type { NewRentEntrySubmission, PaymentStatus, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
-import { validatePaymentDraft, validatePaymentInput } from '@/utils/paymentValidation'
+import {
+  validatePaymentDraft,
+  validatePaymentInput,
+  validateReversalReason,
+} from '@/utils/paymentValidation'
 import { validateRentEntryInput } from '@/utils/rentEntryValidation'
 
 export type EntryListStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -31,6 +35,11 @@ export const PAYMENT_UNCONFIRMED_MESSAGE =
 export const PAYMENT_KEY_CONFLICT_MESSAGE =
   'A payment from your earlier attempt was already recorded. Check the payment history before recording another.'
 export const RECEIPT_ERROR_MESSAGE = 'Unable to get the receipt. Please try again.'
+export const REVERSAL_ERROR_MESSAGE = 'Unable to reverse the payment. Please try again.'
+export const REVERSAL_UNCONFIRMED_MESSAGE =
+  "We couldn't confirm whether the payment was reversed. Try again with the same reason: it won't be reversed twice."
+export const REVERSAL_CONFLICT_MESSAGE =
+  'This payment was already reversed for another reason. Its payment history has been refreshed.'
 export const RECEIPT_UNCONFIRMED_MESSAGE =
   "We couldn't confirm whether the receipt was issued. Try again: it won't issue a second one."
 
@@ -119,6 +128,18 @@ export class ReceiptError extends Error {
   }
 }
 
+// A payment that couldn't be reversed: nothing changed, unless uncertain (no usable response),
+// when it may have been; trying again with the same reason is safe either way.
+export class PaymentReversalError extends Error {
+  constructor(
+    message: string,
+    readonly uncertain = false,
+  ) {
+    super(message)
+    this.name = 'PaymentReversalError'
+  }
+}
+
 // notFound: what's missing on a 404, the payment unless said otherwise.
 function receiptErrorMessage(
   err: unknown,
@@ -126,6 +147,9 @@ function receiptErrorMessage(
 ): string {
   const problem = receiptConfigurationProblem(err)
   if (problem) return problem
+  if (err instanceof ApiError && err.code === 'payment_reversed') {
+    return 'This payment has been reversed, so it has no receipt.'
+  }
   const kind = err instanceof ApiError ? err.kind : 'unknown'
   if (kind === 'forbidden') return "You don't have permission to issue receipts for this property."
   if (kind === 'not-found') return notFound
@@ -203,7 +227,8 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
   // leaving the page after an uncertain save (no response) never loses it: the next attempt,
   // whenever it comes, is a retry the backend recognises.
   const paymentKeys = new Map<string, string>()
-  // Issued receipts by payment id. Snapshots never change, so one loaded is reused.
+  // Issued receipts by payment id. Snapshots never change, so one loaded is reused while the
+  // payment still says it has that receipt in that status (reversing a payment voids it).
   const receipts = new Map<string, PaymentReceipt>()
 
   function nextSummarySeq(tenantId: string): number {
@@ -589,7 +614,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
   // response, returns the same receipt. Throws ReceiptError; the payment is never changed.
   async function getReceipt(tenantId: string, payment: Payment): Promise<PaymentReceipt> {
     const cached = receipts.get(payment.id)
-    if (cached) return cached
+    if (cached && cached.status === (payment.receipt?.status ?? cached.status)) return cached
 
     const propertyId = requireProperty()
     const gen = generation
@@ -643,7 +668,8 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       }
     }
 
-    const latest = list[0]
+    // Reversed payments don't count towards the bill, so they're never its latest receipt.
+    const latest = list.find((payment) => payment.status === 'recorded')
     if (!latest) throw new ReceiptError('No payments have been recorded for this entry yet.')
     return getReceipt(tenantId, latest)
   }
@@ -656,10 +682,89 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       [entryId]: {
         ...current,
         payments: current.payments.map((item) =>
-          item.id === paymentId && !item.receipt
-            ? { ...item, receipt: { id: receipt.id, reference: receipt.reference } }
+          item.id === paymentId && item.receipt?.status !== receipt.status
+            ? {
+                ...item,
+                receipt: { id: receipt.id, reference: receipt.reference, status: receipt.status },
+              }
             : item,
         ),
+      },
+    }
+  }
+
+  // Reverses a payment recorded by mistake (owners only; the backend checks). Its response (the
+  // payment, now reversed, and the bill's figures without it) is shown wherever the bill
+  // appears, and the history reloaded; its receipt is now void, so a cached copy is dropped.
+  // On failure nothing changes here: throws PaymentReversalError with a message.
+  async function reversePayment(
+    tenantId: string,
+    payment: Payment,
+    reason: string,
+  ): Promise<ReversedPayment> {
+    const problem = validateReversalReason(reason)
+    if (problem) throw new PaymentReversalError(problem)
+
+    const propertyId = requireProperty()
+    const gen = generation
+
+    try {
+      const reversed = await paymentService.reversePayment(
+        propertyId,
+        tenantId,
+        payment,
+        reason.trim(),
+      )
+      if (gen === generation) {
+        receipts.delete(payment.id)
+        update(reversed.entry)
+        replacePayment(reversed.payment)
+        void loadPayments(tenantId, payment.entryId)
+      }
+      return reversed
+    } catch (err) {
+      const kind = err instanceof ApiError ? err.kind : 'unknown'
+
+      // The payment identifies its only reversal, so the same reason again is a safe retry.
+      if (isUncertainFailure(err))
+        throw new PaymentReversalError(REVERSAL_UNCONFIRMED_MESSAGE, true)
+      if (err instanceof ApiError && err.code === 'reversal_conflict') {
+        // Someone reversed it already: show that.
+        void refreshAfterConflict(tenantId, payment.entryId, gen)
+        throw new PaymentReversalError(REVERSAL_CONFLICT_MESSAGE)
+      }
+      if (err instanceof ApiError && kind === 'invalid-request') {
+        throw new PaymentReversalError(
+          firstFieldError(err) ?? 'This reason is not valid. Check it and try again.',
+        )
+      }
+      if (kind === 'forbidden') {
+        throw new PaymentReversalError("Only the property's owners can reverse payments.")
+      }
+      if (kind === 'not-found') {
+        throw new PaymentReversalError(
+          "This payment can't be found. It may no longer be available.",
+        )
+      }
+      if (kind === 'rate-limited') throw new PaymentReversalError(RATE_LIMITED_MESSAGE)
+      if (kind === 'unauthorized') {
+        throw new PaymentReversalError(
+          "Your sign-in couldn't be verified. Log out and sign in again.",
+        )
+      }
+      throw new PaymentReversalError(REVERSAL_ERROR_MESSAGE)
+    }
+  }
+
+  // A payment as the backend now returns it, in its bill's loaded history.
+  function replacePayment(payment: Payment) {
+    const current = payments.value[payment.entryId]
+    if (!current) return
+    payments.value = {
+      ...payments.value,
+      [payment.entryId]: {
+        ...current,
+        payments: current.payments.map((item) => (item.id === payment.id ? payment : item)),
       },
     }
   }
@@ -710,6 +815,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     forgetPaymentKey,
     getReceipt,
     getLatestReceipt,
+    reversePayment,
     reset,
   }
 })

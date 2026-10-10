@@ -39,9 +39,12 @@ export function onResetRentEntryService(hook: () => void) {
   resetHooks.push(hook)
 }
 
-// The bill with its figures recalculated from its payments, as the backend returns it.
+// The bill with its figures recalculated from its payments, as the backend returns it:
+// reversed payments don't count.
 export function withPayments(entry: RentEntry): RentEntry {
-  const totalPaid = sumPayments(fakeEntries.payments.filter((p) => p.entryId === entry.id))
+  const totalPaid = sumPayments(
+    fakeEntries.payments.filter((p) => p.entryId === entry.id && p.status === 'recorded'),
+  )
   return {
     ...entry,
     totalPaid,
@@ -172,6 +175,8 @@ export function resetRentEntryService() {
             entryId: entry.id,
             ...initialPayment,
             createdAt: new Date().toISOString(),
+            status: 'recorded',
+            reversal: null,
             receipt: null,
           })
         }

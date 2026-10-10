@@ -52,6 +52,8 @@ export function makePayment(overrides: Partial<Payment> = {}): Payment {
     paidDate: '2026-10-03',
     notes: '',
     createdAt: '2026-10-03T06:00:00.000Z',
+    status: 'recorded',
+    reversal: null,
     receipt: null,
     ...overrides,
   }
@@ -95,6 +97,9 @@ export function makeReceipt(overrides: Partial<PaymentReceipt> = {}): PaymentRec
     paymentAmount: 10000,
     paidDate: '2026-10-03',
     paymentNotes: '',
+    status: 'issued',
+    voidedAt: null,
+    voidReason: '',
     ...overrides,
   }
 }

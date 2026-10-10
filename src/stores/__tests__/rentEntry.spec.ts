@@ -17,8 +17,11 @@ import {
   EntrySaveError,
   PAYMENT_KEY_CONFLICT_MESSAGE,
   PAYMENT_UNCONFIRMED_MESSAGE,
+  PaymentReversalError,
   PaymentSaveError,
   RECEIPT_ERROR_MESSAGE,
+  REVERSAL_CONFLICT_MESSAGE,
+  REVERSAL_UNCONFIRMED_MESSAGE,
   RECEIPT_UNCONFIRMED_MESSAGE,
   ReceiptError,
   SAVE_UNCONFIRMED_MESSAGE,
@@ -26,6 +29,7 @@ import {
 } from '@/stores/rentEntry'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
+import { REVERSED_BY } from '@/test/mocks/paymentService'
 import { fakeReceipts } from '@/test/mocks/receiptService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { makeEntry, makePayment } from '@/test/rentEntries'
@@ -729,6 +733,7 @@ describe('receipts', () => {
     expect(store.payments.sep!.payments[0]!.receipt).toEqual({
       id: receipt.id,
       reference: receipt.reference,
+      status: 'issued',
     })
   })
 
@@ -790,7 +795,11 @@ describe('receipts', () => {
     const payment = makePayment({
       id: 'p-1',
       entryId: 'sep',
-      receipt: { id: 'r-1', reference: 'Shaik_Zahid_Ali_202_Rent_September 2026' },
+      receipt: {
+        id: 'r-1',
+        reference: 'Shaik_Zahid_Ali_202_Rent_September 2026',
+        status: 'issued',
+      },
     })
 
     const error = await receiptError(store.getReceipt('tenant-001', payment))
@@ -911,6 +920,188 @@ describe('receipts', () => {
     await store.getReceipt('tenant-001', payment)
 
     expect(issueReceipt).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('reversing payments', () => {
+  const reversePayment = vi.mocked(paymentService.reversePayment)
+  const REASON = 'Entered ₹10,000 instead of ₹1,000.'
+
+  beforeEach(() => {
+    // ₹15,750 due, ₹10,000 of it recorded by mistake.
+    fakeEntries.entries = [september]
+    addFakePayment(makePayment({ id: 'p-1', entryId: 'sep', amount: 10000 }))
+  })
+
+  async function loaded() {
+    const store = await withProperty()
+    await store.loadEntry('tenant-001', 'sep')
+    await store.loadPayments('tenant-001', 'sep')
+    return store
+  }
+
+  async function reversalError(promise: Promise<unknown>): Promise<PaymentReversalError> {
+    const error = await promise.then(
+      () => null,
+      (err: unknown) => err,
+    )
+    expect(error).toBeInstanceOf(PaymentReversalError)
+    return error as PaymentReversalError
+  }
+
+  it('shows the backend’s balance without the payment, and the payment as reversed', async () => {
+    const store = await loaded()
+    const payment = store.payments.sep!.payments[0]!
+
+    const result = await store.reversePayment('tenant-001', payment, `  ${REASON} `)
+
+    expect(reversePayment).toHaveBeenCalledWith(testProperty.id, 'tenant-001', payment, REASON)
+    expect(result.replayed).toBe(false)
+    expect(store.getEntry('tenant-001', 'sep')).toMatchObject({
+      totalPaid: 0,
+      outstanding: 15750,
+      status: 'unpaid',
+    })
+    await flushPromises()
+    expect(store.payments.sep!.payments[0]).toMatchObject({
+      id: 'p-1',
+      amount: 10000,
+      status: 'reversed',
+      reversal: { reason: REASON, createdByName: REVERSED_BY },
+    })
+  })
+
+  it('gets the receipt again once it’s void, rather than the copy from before', async () => {
+    const store = await loaded()
+    const issued = await store.getReceipt('tenant-001', store.payments.sep!.payments[0]!)
+    expect(issued.status).toBe('issued')
+
+    await store.reversePayment('tenant-001', store.payments.sep!.payments[0]!, REASON)
+    await flushPromises()
+    const receipt = await store.getReceipt('tenant-001', store.payments.sep!.payments[0]!)
+
+    expect(receipt).toMatchObject({ status: 'void', voidReason: REASON, paymentAmount: 10000 })
+    expect(store.payments.sep!.payments[0]!.receipt?.status).toBe('void')
+  })
+
+  it('reloads a receipt someone else voided since it was cached', async () => {
+    const store = await loaded()
+    await store.getReceipt('tenant-001', store.payments.sep!.payments[0]!)
+    // Reversed elsewhere: the reloaded history says the receipt is void.
+    await paymentService.reversePayment(
+      testProperty.id,
+      'tenant-001',
+      makePayment({ id: 'p-1', entryId: 'sep' }),
+      REASON,
+    )
+    await store.loadPayments('tenant-001', 'sep')
+
+    const receipt = await store.getReceipt('tenant-001', store.payments.sep!.payments[0]!)
+
+    expect(receipt.status).toBe('void')
+  })
+
+  it('offers the latest receipt of a payment that still counts', async () => {
+    addFakePayment(makePayment({ id: 'p-2', entryId: 'sep', amount: 1000, paidDate: '2026-10-01' }))
+    const store = await loaded()
+    await store.reversePayment('tenant-001', store.payments.sep!.payments[0]!, REASON)
+
+    const receipt = await store.getLatestReceipt('tenant-001', 'sep')
+
+    expect(receipt.paymentId).toBe('p-2')
+  })
+
+  it('says a bill whose payments were all reversed has no receipt', async () => {
+    const store = await loaded()
+    await store.reversePayment('tenant-001', store.payments.sep!.payments[0]!, REASON)
+
+    await expect(store.getLatestReceipt('tenant-001', 'sep')).rejects.toThrow(
+      'No payments have been recorded for this entry yet.',
+    )
+  })
+
+  it('refuses an empty or long reason without calling the API', async () => {
+    const store = await loaded()
+    const payment = store.payments.sep!.payments[0]!
+
+    expect((await reversalError(store.reversePayment('tenant-001', payment, '  '))).message).toBe(
+      'Say why this payment is being reversed.',
+    )
+    expect(
+      (await reversalError(store.reversePayment('tenant-001', payment, 'x'.repeat(501)))).message,
+    ).toBe('The reason must be 500 characters or fewer.')
+    expect(reversePayment).not.toHaveBeenCalled()
+  })
+
+  it('says a lost response is safe to retry, and the retry reverses it once', async () => {
+    const store = await loaded()
+    const payment = store.payments.sep!.payments[0]!
+    reversePayment.mockImplementationOnce(async (...args) => {
+      await vi.mocked(paymentService.reversePayment).getMockImplementation()!(...args)
+      throw new ApiError('network')
+    })
+
+    const error = await reversalError(store.reversePayment('tenant-001', payment, REASON))
+    const retried = await store.reversePayment('tenant-001', payment, REASON)
+
+    expect(error).toMatchObject({ message: REVERSAL_UNCONFIRMED_MESSAGE, uncertain: true })
+    expect(retried.replayed).toBe(true)
+    expect(store.getEntry('tenant-001', 'sep')?.totalPaid).toBe(0)
+  })
+
+  it('says when it was already reversed for another reason, and shows that', async () => {
+    const store = await loaded()
+    const payment = store.payments.sep!.payments[0]!
+    await paymentService.reversePayment(testProperty.id, 'tenant-001', payment, 'Wrong bill.')
+
+    const error = await reversalError(store.reversePayment('tenant-001', payment, REASON))
+    await flushPromises()
+
+    expect(error).toMatchObject({ message: REVERSAL_CONFLICT_MESSAGE, uncertain: false })
+    expect(store.payments.sep!.payments[0]!.reversal?.reason).toBe('Wrong bill.')
+    expect(store.getEntry('tenant-001', 'sep')?.totalPaid).toBe(0)
+  })
+
+  it('says only owners can reverse when the backend refuses, and changes nothing', async () => {
+    const store = await loaded()
+    reversePayment.mockRejectedValueOnce(new ApiError('forbidden'))
+
+    const error = await reversalError(
+      store.reversePayment('tenant-001', store.payments.sep!.payments[0]!, REASON),
+    )
+
+    expect(error.message).toBe("Only the property's owners can reverse payments.")
+    expect(store.payments.sep!.payments[0]!.status).toBe('recorded')
+    expect(store.getEntry('tenant-001', 'sep')?.totalPaid).toBe(10000)
+  })
+
+  it('shows the backend’s reason for a rejected reason', async () => {
+    const store = await loaded()
+    reversePayment.mockRejectedValueOnce(
+      new ApiError('invalid-request', 'x', null, {
+        reason: 'The reason must be 500 characters or fewer.',
+      }),
+    )
+
+    const error = await reversalError(
+      store.reversePayment('tenant-001', store.payments.sep!.payments[0]!, REASON),
+    )
+
+    expect(error.message).toBe('The reason must be 500 characters or fewer.')
+  })
+
+  it('ignores a reversal that answers after the property changed', async () => {
+    const annex = { ...testProperty, id: 'property-annex', name: 'Annex' }
+    const store = await withProperty([testProperty, annex])
+    await store.loadEntry('tenant-001', 'sep')
+    await store.loadPayments('tenant-001', 'sep')
+    const pending = store.reversePayment('tenant-001', store.payments.sep!.payments[0]!, REASON)
+
+    useAccessStore().selectProperty(annex.id)
+    await pending
+
+    expect(store.payments).toEqual({})
+    expect(store.getEntry('tenant-001', 'sep')).toBeNull()
   })
 })
 
