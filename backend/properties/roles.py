@@ -16,12 +16,14 @@ class Capability(StrEnum):
     MANAGE_TENANTS = "manage_tenants"
     RECORD_PAYMENTS = "record_payments"  # rent entries and payments
     ISSUE_RECEIPTS = "issue_receipts"
+    REVERSE_PAYMENTS = "reverse_payments"  # correct a payment recorded by mistake
 
 
 Role = PropertyMembership.Role
 
 ROLE_CAPABILITIES: dict[str, frozenset[Capability]] = {
     Role.OWNER: frozenset(Capability),
+    # Managers record payments but can't reverse them: corrections are the owners'.
     Role.MANAGER: frozenset(
         {
             Capability.MANAGE_TENANTS,

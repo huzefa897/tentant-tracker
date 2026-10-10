@@ -9,12 +9,14 @@ from django.db import connection, transaction
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
 from billing.calculations import entry_amounts
-from billing.models import Payment, Receipt, RentEntry
+from billing.models import Payment, PaymentReversal, Receipt, RentEntry
 from billing.services import (
     DuplicateBillingMonthError,
+    PaymentReversedError,
     create_rent_entry,
     issue_payment_receipt,
     record_payment,
+    reverse_payment,
 )
 
 from properties.models import Property, Tenancy
@@ -391,3 +393,109 @@ class ConcurrentReceiptTests(TransactionTestCase):
 
         self.assertEqual(receipt.tenant_name, "Shaik Zahid")
         self.assertEqual(receipt.reference, "Shaik_Zahid_202_Rent_September 2026")
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class ConcurrentReversalTests(TransactionTestCase):
+    """Reversals on separate connections: the bill's lock, then the payment's, taken by both
+    reversal and receipt issuance, must leave one reversal and no valid receipt for it."""
+
+    REASON = "Entered ₹10,000 instead of ₹1,000."
+
+    def setUp(self):
+        self.user = make_user()
+        self.tenancy = make_tenancy(make_property(member=self.user, role="owner"))
+        self.entry = make_bill(self.tenancy, self.user)
+        self.payment = record_payment(
+            entry_id=self.entry.pk,
+            actor=self.user,
+            idempotency_key=uuid.uuid4(),
+            validated_data=PAYMENT,
+        ).payment
+
+    def reverse(self, _=None):
+        result = reverse_payment(payment_id=self.payment.pk, actor=self.user, reason=self.REASON)
+        return "created" if result.created else "returned"
+
+    def issue(self, _=None):
+        return issue_payment_receipt(payment_id=self.payment.pk, actor=self.user).receipt
+
+    def run_in_thread(self, action):
+        """Starts action on its own connection, and returns a function that waits for it and
+        gives its outcome (a value, or the exception)."""
+        outcome = {}
+
+        def run():
+            try:
+                outcome["value"] = action()
+            except Exception as error:  # noqa: BLE001 - returned to the test
+                outcome["value"] = error
+            finally:
+                connection.close()
+
+        thread = threading.Thread(target=run)
+        thread.start()
+
+        def result():
+            thread.join(timeout=30)
+            return outcome["value"]
+
+        return result
+
+    def test_simultaneous_matching_reversals_make_one(self):
+        outcomes = run_simultaneously(4, self.reverse)
+
+        self.assertEqual(sorted(outcomes), ["created"] + ["returned"] * 3)
+        self.assertEqual(PaymentReversal.objects.count(), 1)
+        self.assertEqual(entry_amounts(self.entry).total_paid, Decimal("0.00"))
+
+    def test_the_unique_column_decides_when_both_reach_the_insert(self):
+        # As if both found no reversal before either saved: the insert itself must refuse.
+        with mock.patch("billing.services.PaymentReversal.objects.filter") as filter_:
+            filter_.return_value.first.return_value = None
+            outcomes = run_simultaneously(2, self.reverse)
+
+        self.assertEqual(sorted(outcomes), ["created", "returned"])
+        self.assertEqual(PaymentReversal.objects.count(), 1)
+
+    def test_a_reversal_waits_for_a_receipt_being_issued_and_voids_it(self):
+        with transaction.atomic():
+            self.issue()
+            reversed_ = self.run_in_thread(self.reverse)
+            wait_until_another_connection_waits_on_a_lock()
+
+        self.assertEqual(reversed_(), "created")
+        self.assertIsNotNone(Receipt.objects.get(payment=self.payment).voided_at)
+
+    def test_a_receipt_waits_for_a_reversal_and_is_refused(self):
+        with transaction.atomic():
+            self.reverse()
+            issued = self.run_in_thread(self.issue)
+            wait_until_another_connection_waits_on_a_lock()
+
+        self.assertIsInstance(issued(), PaymentReversedError)
+        self.assertFalse(Receipt.objects.exists())
+
+    def test_simultaneous_issuance_and_reversal_leave_no_valid_receipt(self):
+        outcomes = run_simultaneously(2, lambda i: self.reverse() if i else self.issue())
+
+        self.assertEqual(PaymentReversal.objects.count(), 1)
+        self.assertEqual(outcomes[1], "created")
+        self.assertFalse(Receipt.objects.filter(payment=self.payment, voided_at=None).exists())
+
+    def test_a_payment_waiting_on_the_bill_sees_the_reversal(self):
+        # ₹10,000 of ₹15,750 paid; the reversal frees the whole bill for the waiting payment.
+        with transaction.atomic():
+            self.reverse()
+            paid = self.run_in_thread(
+                lambda: record_payment(
+                    entry_id=self.entry.pk,
+                    actor=self.user,
+                    idempotency_key=uuid.uuid4(),
+                    validated_data={**PAYMENT, "amount": Decimal("15750.00")},
+                )
+            )
+            wait_until_another_connection_waits_on_a_lock()
+
+        self.assertTrue(paid().created)
+        self.assertEqual(entry_amounts(self.entry).payment_status, "paid")

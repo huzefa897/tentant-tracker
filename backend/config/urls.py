@@ -4,7 +4,12 @@ from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 
 from accounts.views import me
-from billing.views import PaymentViewSet, ReceiptViewSet, RentEntryViewSet
+from billing.views import (
+    PaymentReversalViewSet,
+    PaymentViewSet,
+    ReceiptViewSet,
+    RentEntryViewSet,
+)
 from properties.views import PropertyViewSet, TenancyViewSet
 
 from .views import health_check, readiness_check
@@ -20,6 +25,7 @@ rent_entry_list = RentEntryViewSet.as_view({"get": "list", "post": "create"})
 rent_entry_detail = RentEntryViewSet.as_view({"get": "retrieve"})
 payment_list = PaymentViewSet.as_view({"get": "list", "post": "create"})
 payment_receipt = ReceiptViewSet.as_view({"get": "retrieve", "post": "create"})
+payment_reversal = PaymentReversalViewSet.as_view({"post": "create"})
 
 urlpatterns = [
     path(settings.ADMIN_PATH, admin.site.urls),
@@ -55,6 +61,11 @@ urlpatterns = [
         "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/entries/<uuid:entry_id>/payments/<uuid:payment_id>/receipt/",
         payment_receipt,
         name="payment-receipt",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/entries/<uuid:entry_id>/payments/<uuid:payment_id>/reversal/",
+        payment_reversal,
+        name="payment-reversal",
     ),
     path("api/v1/", include(router.urls)),
 ]

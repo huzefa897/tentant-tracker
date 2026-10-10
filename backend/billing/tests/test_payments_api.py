@@ -89,6 +89,8 @@ class RecordPaymentTests(PaymentApiTestCase):
                 "amount": "3000.00",
                 "paidDate": "2026-10-05",
                 "notes": "Bank transfer",
+                "status": "recorded",
+                "reversal": None,
                 "receipt": None,
             },
         )
@@ -365,7 +367,17 @@ class PaymentHistoryTests(PaymentApiTestCase):
         )
         self.assertEqual(
             set(response.json()[0]),
-            {"id", "entryId", "amount", "paidDate", "notes", "createdAt", "receipt"},
+            {
+                "id",
+                "entryId",
+                "amount",
+                "paidDate",
+                "notes",
+                "createdAt",
+                "status",
+                "reversal",
+                "receipt",
+            },
         )
 
     def test_payments_are_read_only(self):

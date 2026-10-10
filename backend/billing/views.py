@@ -15,6 +15,7 @@ from .models import Payment, Receipt, RentEntry
 from .serializers import (
     BillingMonthField,
     PaymentCreateSerializer,
+    PaymentReversalCreateSerializer,
     PaymentSerializer,
     ReceiptSerializer,
     RentEntryCreateSerializer,
@@ -28,11 +29,15 @@ from .services import (
     PaymentExceedsOutstandingError,
     PaymentNotAllowedError,
     PaymentNotFoundError,
+    PaymentReversedError,
     ReceiptConfigurationIncompleteError,
     ReceiptNotAllowedError,
+    ReversalConflictError,
+    ReversalNotAllowedError,
     create_rent_entry,
     issue_payment_receipt,
     record_payment,
+    reverse_payment,
 )
 
 # 0001–9999: Django builds a date from the year, and there is no year 0.
@@ -75,6 +80,24 @@ class PaymentExceedsOutstanding(exceptions.APIException):
                 "outstandingAmount": str(outstanding),
             }
         )
+
+
+class PaymentReversed(exceptions.APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = {
+        "code": "payment_reversed",
+        "detail": "This payment has been reversed, so it can't have a receipt.",
+    }
+    default_code = "payment_reversed"
+
+
+class ReversalConflict(exceptions.APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = {
+        "code": "reversal_conflict",
+        "detail": "This payment was already reversed with a different reason.",
+    }
+    default_code = "reversal_conflict"
 
 
 class ReceiptConfigurationIncomplete(exceptions.APIException):
@@ -138,6 +161,11 @@ class ScopedLookupMixin:
                 Payment.objects.filter(entry=self.get_entry()), pk=self.kwargs["payment_id"]
             )
         return self._payment
+
+
+def payment_with_details(payment_id) -> Payment:
+    """A payment as the API shows it, its receipt and reversal in the same query."""
+    return Payment.objects.select_related("receipt", "reversal__created_by").get(pk=payment_id)
 
 
 class RentEntryPagination(PageNumberPagination):
@@ -246,26 +274,27 @@ class RentEntryViewSet(
 class PaymentViewSet(
     ScopedLookupMixin, mixins.ListModelMixin, mixins.CreateModelMixin, viewsets.GenericViewSet
 ):
-    """A bill's payments: list and record. No update or delete: editing and reversing
-    payments need their own rules.
+    """A bill's payments: list and record. No update or delete: a mistake is corrected by
+    reversing the payment (PaymentReversalViewSet) and recording its replacement.
 
     List: newest paid date first, then newest recorded, then id; every payment of the bill
-    (bills have few), unpaginated.
+    (bills have few), reversed ones included (marked, not counted), unpaginated.
 
     Create needs an Idempotency-Key header (a UUID). A new key records the payment (201); a
     retry with the same key, bill and details returns that payment (200); the same key with
     anything else is 409 idempotency_conflict. Either way the response has the payment and the
-    bill's current balance.
+    bill's current balance. A retry of a payment reversed since returns it as it is now,
+    reversed: it's never recorded again.
     """
 
     serializer_class = PaymentSerializer
     pagination_class = None
 
     def get_queryset(self):
-        # Receipts in the same query, never once per payment.
+        # Receipts and reversals in the same query, never once per payment.
         return (
             Payment.objects.filter(entry=self.get_entry())
-            .select_related("receipt")
+            .select_related("receipt", "reversal__created_by")
             .order_by("-paid_date", "-sequence", "id")
         )
 
@@ -294,11 +323,11 @@ class PaymentViewSet(
         except PaymentExceedsOutstandingError as error:
             raise PaymentExceedsOutstanding(error.outstanding) from None
 
-        # The balance as it is now: on a retry it may include later payments.
+        # The balance as it is now: on a retry it may include later payments or reversals.
         current = RentEntry.objects.with_amounts().get(pk=entry.pk)
         return Response(
             {
-                "payment": PaymentSerializer(result.payment).data,
+                "payment": PaymentSerializer(payment_with_details(result.payment.pk)).data,
                 "entry": RentEntrySerializer(current).data,
             },
             status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
@@ -306,9 +335,10 @@ class PaymentViewSet(
 
 
 class ReceiptViewSet(ScopedLookupMixin, viewsets.GenericViewSet):
-    """A payment's receipt: POST issues it (201), or returns the one already issued (200);
-    GET returns it, or 404 if none was issued (a GET never issues one). The body is empty:
-    everything on the receipt comes from the stored records. No update or delete.
+    """A payment's receipt: POST issues it (201), or returns the one already issued (200), void
+    or not; a reversed payment without one is 409 payment_reversed. GET returns it, or 404 if
+    none was issued (a GET never issues one). The body is empty: everything on the receipt
+    comes from the stored records. No update or delete.
 
     No Idempotency-Key: the payment identifies the only receipt it can have, so a retry
     returns that receipt.
@@ -339,8 +369,53 @@ class ReceiptViewSet(ScopedLookupMixin, viewsets.GenericViewSet):
             raise exceptions.PermissionDenied("Your role can't issue receipts.") from None
         except ReceiptConfigurationIncompleteError as error:
             raise ReceiptConfigurationIncomplete(error.detail) from None
+        except PaymentReversedError:
+            raise PaymentReversed() from None
 
         return Response(
             ReceiptSerializer(result.receipt).data,
+            status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
+        )
+
+
+class PaymentReversalViewSet(ScopedLookupMixin, viewsets.GenericViewSet):
+    """Reverses a payment recorded by mistake: POST {"reason": "..."} (owners only; a manager
+    is 403). 201 with {payment, entry}: the payment, now reversed, and the bill's balance
+    without it. Its receipt, if any, is voided. A retry with the same reason returns the same
+    (200); another reason is 409 reversal_conflict.
+
+    No Idempotency-Key: the payment identifies the only reversal it can have.
+    """
+
+    pagination_class = None
+
+    def create(self, request, *args, **kwargs):
+        payment = self.get_payment()
+        if not role_can(self.get_property().role, Capability.REVERSE_PAYMENTS):
+            raise exceptions.PermissionDenied("Only the property's owners can reverse payments.")
+
+        serializer = PaymentReversalCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = reverse_payment(
+                payment_id=payment.pk,
+                actor=request.user,
+                reason=serializer.validated_data["reason"],
+            )
+        except PaymentNotFoundError:
+            raise exceptions.NotFound() from None
+        except ReversalNotAllowedError:
+            raise exceptions.PermissionDenied(
+                "Only the property's owners can reverse payments."
+            ) from None
+        except ReversalConflictError:
+            raise ReversalConflict() from None
+
+        return Response(
+            {
+                "payment": PaymentSerializer(payment_with_details(payment.pk)).data,
+                "entry": RentEntrySerializer(result.entry).data,
+            },
             status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
         )
