@@ -43,6 +43,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 - **In the app (done):** every query is scoped through `properties/queries.py` `properties_for_user`, then the tenancy, then its bills. The queryset is filtered, so another property's records 404 and never appear in lists. Object permissions alone are not enough.
 - A tenancy with bills can't move to another property, so bills never change scope ([tenants.md](tenants.md)).
 - **PostgreSQL RLS** isn't used: the app connects as one database role. Adding RLS policies would be defence in depth, needing a per-request setting of the user on the connection. Not planned; revisit if anything other than Django gets database access.
+- **On a hosted PostgreSQL with its own API** (Supabase): turn that API off. Supabase's Data API publishes the `public` schema to anyone with the project's public key, and without RLS that's every record ([deployment.md](deployment.md#render-and-supabase)).
 
 ## 4. Hash passwords
 
@@ -158,7 +159,7 @@ Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry ov
 - **Email:** the app sends none yet. The backend is console in development and SMTP otherwise (`DJANGO_EMAIL_BACKEND`).
 - **CI** runs `manage.py check --deploy --fail-level WARNING` with production-like settings, so a setting that weakens production fails the build.
 - **Database connections over the internet** use TLS: `POSTGRES_SSLMODE=require` (libpq's `sslmode`) refuses an unencrypted connection. Unset, the default (`prefer`) only encrypts when the server offers it, which is fine on one machine or Docker network. `require` doesn't verify the server's certificate; `verify-full` with the provider's CA certificate would.
-- **In production** `compose.prod.yaml` sets all of these (DEBUG off, the HTTPS redirect, HSTS, secure cookies, the proxy settings, shared rate-limit counts), from `.env.production` where they vary ([deployment.md](deployment.md)).
+- **In production** `compose.prod.yaml` sets all of these (DEBUG off, the HTTPS redirect, HSTS, secure cookies, the proxy settings, shared rate-limit counts), from `.env.production` where they vary ([deployment.md](deployment.md)). On Render, `render.yaml` sets the same ones.
 - **Caching:** every `/api/` response carries `Cache-Control: no-store, private` (`ApiNoStoreMiddleware`), so no browser, proxy or CDN keeps people's records.
 
 ## 15. Patch dependencies

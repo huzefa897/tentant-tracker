@@ -1,6 +1,6 @@
 # Deployment, backups and recovery
 
-How the app runs in production, how to release a new version, and how to get the data back if something goes wrong. The settings rules are in [security.md](security.md); importing the owners' Google Sheet is in [data-import.md](data-import.md).
+How the app runs in production, how to release a new version, and how to get the data back if something goes wrong. Everything below is the single-server setup ([compose.prod.yaml](../compose.prod.yaml)); the free-hosting alternative is [Render and Supabase](#render-and-supabase) at the end. The settings rules are in [security.md](security.md); importing the owners' Google Sheet is in [data-import.md](data-import.md).
 
 ## The layout
 
@@ -133,3 +133,47 @@ If the database is lost or must go back to a backup:
 - **Secrets**: `.env.production` and the service-account key. Keep a copy in a password manager. A lost key can be replaced from the Firebase console (then delete the old one there); a lost `DJANGO_SECRET_KEY` can be replaced (admin sessions end); the database password can be reset in PostgreSQL.
 - **Certificates**: Caddy gets new ones by itself.
 - **The code**: it's in Git; `deploy/releases.log` says which commit was running.
+
+## Render and Supabase
+
+A free alternative to running a server: [render.yaml](../render.yaml) is a Render Blueprint for the API (Docker, free plan) and the Vue app (a static site), with the database on Supabase's free plan. Render's own free PostgreSQL isn't used: it's deleted after 30 days and has no backups.
+
+```
+ browser ──▶ rent-tracker.onrender.com       (static site: the built app, security headers)
+        └──▶ rent-tracker-api.onrender.com   (Django + Gunicorn) ──TLS──▶ Supabase (session pooler)
+```
+
+How it differs from the single server:
+
+- **Two origins.** The app calls the API's own URL (`VITE_API_BASE_URL`), which lets the app's origin through CORS (`CORS_ALLOWED_ORIGINS`). Render doesn't document forwarding a static site's `/api` to another service, so the one-origin layout isn't used.
+- **Migrations run on start** (`backend/render-start.sh`): the free plan has no pre-deploy step. A no-op when there's nothing new; fine with the single instance the free plan allows.
+- **No shell.** Admin logins and the Sheet import ([data-import.md](data-import.md)) run from your machine against Supabase (below).
+- **Sleeps after 15 minutes without traffic** and takes about a minute to wake. An uptime monitor calling `https://rent-tracker-api.onrender.com/api/v1/ready/` every 14 minutes keeps it awake, and its database query keeps the Supabase project from pausing (it pauses after 7 days without activity; a paused project can be restored, with its data, for 90 days). A month awake uses most of the free plan's 750 instance hours, which is enough for this one service; the static site doesn't use them.
+- **Health checks:** Render calls `/api/v1/health/` every few seconds, so `DJANGO_THROTTLE_HEALTH` is raised to 120/minute there (counted in memory, never in the database). Its checks are reported to send `Host: localhost:<port>`, so `localhost` is in `DJANGO_ALLOWED_HOSTS`. If a deploy never goes live, look for `DisallowedHost` in the logs.
+- **Backups are yours to run.** Supabase's free plan has none, and `scripts/backup-db.sh` needs the single server. Take a daily `pg_dump` from another machine using the session pooler's details, encrypt it, and copy it off-site (e.g. `rclone` with a `crypt` remote). Never keep an unencrypted dump anywhere public, such as this public repository's CI artifacts. Test a restore as in [Testing a backup](#testing-a-backup).
+
+### Setting it up
+
+1. **Supabase:** create a project (pick the region nearest India).
+   - **Turn off the Data API** (Project Settings > API > Data API): it publishes every table in the `public` schema over REST, and Django's tables have no PostgreSQL row-level security, so the project's public (anon) key would read every record ([security.md](security.md) item 3). Django is the only client.
+   - **Connect > Session pooler** gives the host, port 5432 and user (`postgres.<project-ref>`) for the API. Not the direct connection (IPv6-only on the free plan, which Render can't reach) and not the transaction pooler on port 6543 (no prepared statements, and the app's payment locking needs a session).
+2. **Render:** New > Blueprint, pick the repository. It reads `render.yaml` and asks for each `sync: false` value: the Supabase connection, `DJANGO_ADMIN_PATH`, the Firebase project and service-account key's fields (as in `backend/.env.example`; the private key can be pasted with its `\n`s), and the Firebase web config.
+3. **Names:** the Blueprint assumes the services get `rent-tracker` and `rent-tracker-api.onrender.com`. If Render adds a suffix, update every URL in `render.yaml` that mentions them (`DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS`, `VITE_API_BASE_URL` and the Content-Security-Policy), or set your own domains.
+4. **Firebase:** Authentication > Settings > Authorized domains: add the static site's domain. In `render.yaml`'s Content-Security-Policy, replace `YOUR-PROJECT` with the auth domain's project.
+5. **An admin login,** from your machine with the backend image (or pipenv), pointing at Supabase:
+
+   ```bash
+   docker build -t rent-tracker-backend backend
+   docker run --rm -it -e DJANGO_SECRET_KEY=unused -e FIREBASE_PROJECT_ID=<project> \
+     -e POSTGRES_HOST=<pooler host> -e POSTGRES_PORT=5432 -e POSTGRES_DB=postgres \
+     -e POSTGRES_USER=postgres.<project-ref> -e POSTGRES_PASSWORD=<password> \
+     -e POSTGRES_SSLMODE=require rent-tracker-backend python manage.py createsuperuser
+   ```
+
+   Admin is at `https://rent-tracker-api.onrender.com/<DJANGO_ADMIN_PATH>`.
+6. **The uptime monitor** (above), then the [checks after a deploy](#checks-after-a-deploy), with the static site's URL for the app and the API's for `/api/…`.
+
+Releases deploy themselves: each service rebuilds when a commit to `main` touching it passes CI (`autoDeployTrigger: checksPass`). Render keeps the two previous deploys for rollback on the free plan; it doesn't undo migrations ([Rolling back](#rolling-back) applies).
+
+**To check before relying on it:** `DJANGO_NUM_PROXIES` is `3`, the number of proxies users have measured in front of Render services, not a documented figure. Render appends to `X-Forwarded-For` without clearing it, so too high a number lets clients choose their own address for the rate limits, and too low makes everyone share one. Check that requests from two networks (say, Wi-Fi and mobile data) are counted separately, e.g. by running down a low `DJANGO_THROTTLE_ADDRESS` from one of them.
+
