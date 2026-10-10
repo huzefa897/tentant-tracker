@@ -54,6 +54,12 @@ const entryDto = {
   paymentStatus: 'partially_paid',
   notes: '',
   createdAt: '2026-10-01T06:00:00Z',
+  status: 'active',
+  voidedAt: null,
+  voidedByName: null,
+  voidReason: '',
+  replacesEntryId: null,
+  replacedByEntryId: null,
 }
 
 const input: PaymentInput = {

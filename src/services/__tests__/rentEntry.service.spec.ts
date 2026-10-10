@@ -8,9 +8,14 @@ import {
   parseRentEntryPage,
   rentEntryService,
   toCreateRentEntryDto,
+  toEntryCorrectionDto,
   toRentEntry,
 } from '@/services/rentEntry.service'
-import type { NewRentEntrySubmission, RentEntryInput } from '@/types/rentEntry'
+import type {
+  EntryCorrectionInput,
+  NewRentEntrySubmission,
+  RentEntryInput,
+} from '@/types/rentEntry'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 
@@ -33,6 +38,37 @@ const dto = {
   paymentStatus: 'unpaid',
   notes: 'October charges',
   createdAt: '2026-10-05T12:30:00+05:30',
+  status: 'active',
+  voidedAt: null,
+  voidedByName: null,
+  voidReason: '',
+  replacesEntryId: null,
+  replacedByEntryId: null,
+}
+
+const REPLACEMENT_ID = '5d0c9b2a-0000-4000-8000-000000000202'
+
+// The same bill, voided by a correction.
+const voidDto = {
+  ...dto,
+  outstandingAmount: '0.00',
+  paymentStatus: null,
+  status: 'void',
+  voidedAt: '2026-10-08T10:00:00+05:30',
+  voidedByName: 'Huzefa',
+  voidReason: 'Electricity units were wrong',
+  replacedByEntryId: REPLACEMENT_ID,
+}
+
+// Its replacement.
+const replacementDto = {
+  ...dto,
+  id: REPLACEMENT_ID,
+  electricityUnits: '80.000',
+  electricityAmount: '480.00',
+  totalDue: '15780.00',
+  outstandingAmount: '15780.00',
+  replacesEntryId: dto.id,
 }
 
 const input: RentEntryInput = {
@@ -84,6 +120,25 @@ describe('toRentEntry', () => {
       status: 'unpaid',
       notes: 'October charges',
       createdAt: '2026-10-05T12:30:00+05:30',
+      billStatus: 'active',
+      voided: null,
+      replacesEntryId: null,
+      replacedByEntryId: null,
+    })
+  })
+
+  it('maps a void bill: no payment status, who voided it, when and why, and its replacement', () => {
+    expect(toRentEntry(parseRentEntry(voidDto))).toMatchObject({
+      billStatus: 'void',
+      status: null,
+      outstanding: 0,
+      totalDue: 15750,
+      voided: {
+        at: '2026-10-08T10:00:00+05:30',
+        byName: 'Huzefa',
+        reason: 'Electricity units were wrong',
+      },
+      replacedByEntryId: REPLACEMENT_ID,
     })
   })
 })
@@ -98,6 +153,13 @@ describe('parseRentEntry', () => {
     ['units with two decimals', { electricityUnits: '75.00' }],
     ['an unknown status', { paymentStatus: 'overdue' }],
     ['missing notes', { notes: null }],
+    ['an unknown bill status', { status: 'deleted' }],
+    ['an active bill without a payment status', { paymentStatus: null }],
+    ['an active bill with void details', { voidedAt: '2026-10-08T10:00:00+05:30' }],
+    ['a void bill with a payment status', { ...voidDto, paymentStatus: 'unpaid' }],
+    ['a void bill without its reason', { ...voidDto, voidReason: '' }],
+    ['a void bill without who voided it', { ...voidDto, voidedByName: null }],
+    ['an empty replacement id', { replacesEntryId: '' }],
   ])('rejects %s', (_, change) => {
     expect(() => parseRentEntry({ ...dto, ...change })).toThrow(ApiError)
   })
@@ -189,7 +251,7 @@ describe('rentEntryService', () => {
     })
   })
 
-  it('lists bills with the year, month, status and page filters', async () => {
+  it('lists bills with the bill status, year, month, payment status and page filters', async () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue({ data: page([dto]) })
 
     await rentEntryService.getEntries(PROPERTY_ID, TENANCY_ID)
@@ -201,6 +263,10 @@ describe('rentEntryService', () => {
     })
 
     expect(get).toHaveBeenNthCalledWith(1, ENTRIES_URL, { params: {} })
+    await rentEntryService.getEntries(PROPERTY_ID, TENANCY_ID, { billStatus: 'active' })
+    expect(get).toHaveBeenLastCalledWith(ENTRIES_URL, { params: {} })
+    await rentEntryService.getEntries(PROPERTY_ID, TENANCY_ID, { billStatus: 'all' })
+    expect(get).toHaveBeenLastCalledWith(ENTRIES_URL, { params: { status: 'all' } })
     expect(get).toHaveBeenNthCalledWith(2, ENTRIES_URL, {
       params: {
         year: '2026',
@@ -235,6 +301,125 @@ describe('rentEntryService', () => {
 
     await expect(rentEntryService.getEntry(PROPERTY_ID, TENANCY_ID, dto.id)).rejects.toMatchObject({
       kind: 'invalid-response',
+    })
+  })
+
+  describe('voidEntry', () => {
+    const VOID_URL = `${ENTRIES_URL}${dto.id}/void/`
+
+    it('sends the reason and returns the bill, void', async () => {
+      const post = vi.spyOn(api, 'post').mockResolvedValue({ status: 201, data: voidDto })
+
+      const result = await rentEntryService.voidEntry(PROPERTY_ID, TENANCY_ID, dto.id, 'Twice')
+
+      expect(post).toHaveBeenCalledWith(VOID_URL, { reason: 'Twice' })
+      expect(result).toMatchObject({ entry: { billStatus: 'void' }, replayed: false })
+    })
+
+    it('says when it was already void for that reason (a retry)', async () => {
+      vi.spyOn(api, 'post').mockResolvedValue({ status: 200, data: voidDto })
+
+      const result = await rentEntryService.voidEntry(PROPERTY_ID, TENANCY_ID, dto.id, 'Twice')
+
+      expect(result.replayed).toBe(true)
+    })
+
+    it('reports payments that still count as a conflict with its code', async () => {
+      vi.spyOn(api, 'post').mockRejectedValue(
+        httpError(409, { code: 'unreversed_payments', detail: 'Reverse them first.' }),
+      )
+
+      await expect(
+        rentEntryService.voidEntry(PROPERTY_ID, TENANCY_ID, dto.id, 'Twice'),
+      ).rejects.toMatchObject({ kind: 'conflict', code: 'unreversed_payments' })
+    })
+
+    it('refuses a response that isn’t void', async () => {
+      vi.spyOn(api, 'post').mockResolvedValue({ status: 201, data: dto })
+
+      await expect(
+        rentEntryService.voidEntry(PROPERTY_ID, TENANCY_ID, dto.id, 'Twice'),
+      ).rejects.toMatchObject({ kind: 'invalid-response' })
+    })
+  })
+
+  describe('correctEntry', () => {
+    const CORRECTION_URL = `${ENTRIES_URL}${dto.id}/correction/`
+    const correction: EntryCorrectionInput = {
+      rentAmount: 15000,
+      electricityUnits: 80,
+      waterAmount: 300.5,
+      notes: '',
+      reason: 'Units were wrong',
+    }
+
+    it('sends decimal strings, never the rate or month', () => {
+      expect(toEntryCorrectionDto(correction)).toEqual({
+        reason: 'Units were wrong',
+        rentAmount: '15000.00',
+        electricityUnits: '80.000',
+        waterAmount: '300.50',
+        notes: '',
+      })
+    })
+
+    it('sends the correction with its idempotency key and returns both bills', async () => {
+      const post = vi.spyOn(api, 'post').mockResolvedValue({
+        status: 201,
+        data: { original: voidDto, replacement: replacementDto },
+      })
+
+      const result = await rentEntryService.correctEntry(
+        PROPERTY_ID,
+        TENANCY_ID,
+        dto.id,
+        correction,
+        KEY,
+      )
+
+      expect(post).toHaveBeenCalledWith(CORRECTION_URL, toEntryCorrectionDto(correction), {
+        headers: { 'Idempotency-Key': KEY },
+      })
+      expect(result.original).toMatchObject({ id: dto.id, billStatus: 'void' })
+      expect(result.replacement).toMatchObject({
+        id: REPLACEMENT_ID,
+        billStatus: 'active',
+        replacesEntryId: dto.id,
+        totalDue: 15780,
+      })
+      expect(result.replayed).toBe(false)
+    })
+
+    it('says when the backend had already made it (a retry)', async () => {
+      vi.spyOn(api, 'post').mockResolvedValue({
+        status: 200,
+        data: { original: voidDto, replacement: replacementDto },
+      })
+
+      const result = await rentEntryService.correctEntry(
+        PROPERTY_ID,
+        TENANCY_ID,
+        dto.id,
+        correction,
+        KEY,
+      )
+
+      expect(result.replayed).toBe(true)
+    })
+
+    it.each([
+      ['an original that isn’t void', { original: dto, replacement: replacementDto }],
+      [
+        'an unlinked replacement',
+        { original: voidDto, replacement: { ...replacementDto, replacesEntryId: null } },
+      ],
+      ['a missing replacement', { original: voidDto }],
+    ])('refuses %s', async (_, data) => {
+      vi.spyOn(api, 'post').mockResolvedValue({ status: 201, data })
+
+      await expect(
+        rentEntryService.correctEntry(PROPERTY_ID, TENANCY_ID, dto.id, correction, KEY),
+      ).rejects.toMatchObject({ kind: 'invalid-response' })
     })
   })
 })

@@ -80,6 +80,9 @@ export function resetPaymentService() {
           }
         }
 
+        if (entry.billStatus === 'void') {
+          throw new ApiError('conflict', 'Conflict', 'entry_void')
+        }
         if (toPaise(input.amount) > toPaise(entry.outstanding)) {
           throw exceedsOutstanding(entry.outstanding)
         }

@@ -11,8 +11,12 @@ import { rentEntryService } from '@/services/rentEntry.service'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
 import {
+  CORRECTION_KEY_CONFLICT_MESSAGE,
+  CORRECTION_UNCONFIRMED_MESSAGE,
   DUPLICATE_ENTRY_MESSAGE,
   ENTRIES_LOAD_ERROR_MESSAGE,
+  ENTRY_ALREADY_VOID_MESSAGE,
+  EntryCorrectionError,
   ENTRY_KEY_CONFLICT_MESSAGE,
   EntrySaveError,
   PAYMENT_KEY_CONFLICT_MESSAGE,
@@ -25,6 +29,9 @@ import {
   RECEIPT_UNCONFIRMED_MESSAGE,
   ReceiptError,
   SAVE_UNCONFIRMED_MESSAGE,
+  UNREVERSED_PAYMENTS_MESSAGE,
+  VOID_CONFLICT_MESSAGE,
+  VOID_UNCONFIRMED_MESSAGE,
   useRentEntryStore,
 } from '@/stores/rentEntry'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
@@ -34,7 +41,12 @@ import { fakeReceipts } from '@/test/mocks/receiptService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { makeEntry, makePayment } from '@/test/rentEntries'
 import type { PaymentInput } from '@/types/payment'
-import type { NewRentEntrySubmission, RentEntryInput, RentEntryPage } from '@/types/rentEntry'
+import type {
+  EntryCorrectionInput,
+  NewRentEntrySubmission,
+  RentEntryInput,
+  RentEntryPage,
+} from '@/types/rentEntry'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
@@ -122,6 +134,7 @@ describe('loadHistory', () => {
     await store.loadHistory('tenant-001', {})
 
     expect(getEntries).toHaveBeenCalledWith(testProperty.id, 'tenant-001', {
+      billStatus: 'active',
       year: undefined,
       page: 1,
     })
@@ -1162,6 +1175,253 @@ describe('reversing payments', () => {
 
     expect(store.payments).toEqual({})
     expect(store.getEntry('tenant-001', 'sep')).toBeNull()
+  })
+})
+
+describe('correcting bills', () => {
+  const voidEntryApi = vi.mocked(rentEntryService.voidEntry)
+  const correctEntryApi = vi.mocked(rentEntryService.correctEntry)
+  const REASON = 'Electricity units were entered as 750 instead of 75.'
+  // October with 750 units: ₹15,000 + 750 × ₹6 + ₹300 = ₹19,800.
+  const wrong = makeEntry({ id: 'oct', billingMonth: '2026-10', electricityUnits: 750 })
+  const corrected: EntryCorrectionInput = {
+    rentAmount: 15000,
+    electricityUnits: 75,
+    waterAmount: 300,
+    notes: '',
+    reason: REASON,
+  }
+
+  beforeEach(() => {
+    fakeEntries.entries = [wrong, september]
+  })
+
+  async function loaded() {
+    const store = await withProperty()
+    await store.loadEntry('tenant-001', 'oct')
+    await store.loadHistory('tenant-001', {})
+    await store.loadSummary('tenant-001')
+    return store
+  }
+
+  async function correctionError(promise: Promise<unknown>): Promise<EntryCorrectionError> {
+    const error = await promise.then(
+      () => null,
+      (err: unknown) => err,
+    )
+    expect(error).toBeInstanceOf(EntryCorrectionError)
+    return error as EntryCorrectionError
+  }
+
+  describe('voidEntry', () => {
+    it('shows the bill as void, drops it from the history and reloads the summary', async () => {
+      const store = await loaded()
+      expect(store.summaries['tenant-001']!.latest?.id).toBe('oct')
+
+      const result = await store.voidEntry('tenant-001', wrong, `  ${REASON} `)
+
+      expect(voidEntryApi).toHaveBeenCalledWith(testProperty.id, 'tenant-001', 'oct', REASON)
+      expect(result.replayed).toBe(false)
+      expect(store.getEntry('tenant-001', 'oct')).toMatchObject({
+        billStatus: 'void',
+        status: null,
+        outstanding: 0,
+        voided: { reason: REASON },
+      })
+      // The summary is forgotten for the dashboard to reload; the history reloads without it.
+      expect(store.summaries['tenant-001']).toBeUndefined()
+      await flushPromises()
+      expect(store.history.entries.map((entry) => entry.id)).toEqual(['sep'])
+    })
+
+    it('keeps a void bill in a history that shows void bills', async () => {
+      const store = await withProperty()
+      await store.loadHistory('tenant-001', { includeVoid: true })
+
+      await store.voidEntry('tenant-001', wrong, REASON)
+      await flushPromises()
+
+      expect(store.history.includeVoid).toBe(true)
+      expect(store.history.entries.map((e) => [e.id, e.billStatus])).toEqual([
+        ['oct', 'void'],
+        ['sep', 'active'],
+      ])
+    })
+
+    it('refuses an empty reason without asking the backend', async () => {
+      const store = await loaded()
+
+      const error = await correctionError(store.voidEntry('tenant-001', wrong, '  '))
+
+      expect(error.message).toBe('Say why this bill is being voided.')
+      expect(voidEntryApi).not.toHaveBeenCalled()
+    })
+
+    it('says to reverse the payments first, and reloads them', async () => {
+      addFakePayment(makePayment({ id: 'p-1', entryId: 'oct', amount: 1000 }))
+      const store = await loaded()
+      getPayments.mockClear()
+
+      const error = await correctionError(store.voidEntry('tenant-001', wrong, REASON))
+
+      expect(error.message).toBe(UNREVERSED_PAYMENTS_MESSAGE)
+      expect(error.uncertain).toBe(false)
+      await flushPromises()
+      expect(getPayments).toHaveBeenCalledWith(testProperty.id, 'tenant-001', 'oct')
+      expect(store.getEntry('tenant-001', 'oct')!.billStatus).toBe('active')
+    })
+
+    it('refreshes the bill when it was voided for another reason', async () => {
+      const store = await loaded()
+      await store.voidEntry('tenant-001', wrong, 'Entered twice')
+
+      const error = await correctionError(store.voidEntry('tenant-001', wrong, REASON))
+
+      expect(error.message).toBe(VOID_CONFLICT_MESSAGE)
+    })
+
+    it('after a lost response says to retry with the same reason and reloads the bill', async () => {
+      const store = await loaded()
+      const fakeVoid = voidEntryApi.getMockImplementation()!
+      voidEntryApi.mockImplementationOnce(async (...args) => {
+        await fakeVoid(...args)
+        throw new ApiError('network', 'Network Error')
+      })
+
+      const error = await correctionError(store.voidEntry('tenant-001', wrong, REASON))
+
+      expect(error).toMatchObject({ message: VOID_UNCONFIRMED_MESSAGE, uncertain: true })
+      await flushPromises()
+      expect(store.getEntry('tenant-001', 'oct')!.billStatus).toBe('void')
+    })
+
+    it('says only owners may, for a manager', async () => {
+      const store = await loaded()
+      voidEntryApi.mockRejectedValueOnce(new ApiError('forbidden', 'Forbidden'))
+
+      const error = await correctionError(store.voidEntry('tenant-001', wrong, REASON))
+
+      expect(error.message).toBe("Only the property's owners can void or correct bills.")
+    })
+  })
+
+  describe('correctEntry', () => {
+    it('shows both bills linked, the replacement in the history and reloads the summary', async () => {
+      const store = await loaded()
+
+      const result = await store.correctEntry('tenant-001', wrong, corrected, KEY)
+
+      expect(correctEntryApi).toHaveBeenCalledWith(
+        testProperty.id,
+        'tenant-001',
+        'oct',
+        corrected,
+        KEY,
+      )
+      const replacement = result.replacement
+      expect(replacement).toMatchObject({
+        billStatus: 'active',
+        billingMonth: '2026-10',
+        totalDue: 15750,
+        electricityRate: 6,
+        replacesEntryId: 'oct',
+      })
+      expect(store.getEntry('tenant-001', 'oct')).toMatchObject({
+        billStatus: 'void',
+        replacedByEntryId: replacement.id,
+      })
+      expect(store.getEntry('tenant-001', replacement.id)).toEqual(replacement)
+      expect(store.summaries['tenant-001']).toBeUndefined()
+      await flushPromises()
+      expect(store.history.entries.map((entry) => entry.id)).toEqual([replacement.id, 'sep'])
+    })
+
+    it('refuses an invalid or unchanged correction without asking the backend', async () => {
+      const store = await loaded()
+
+      for (const change of [
+        { reason: '' },
+        { electricityUnits: -1 },
+        { electricityUnits: 750 },
+      ] as Partial<EntryCorrectionInput>[]) {
+        await correctionError(
+          store.correctEntry('tenant-001', wrong, { ...corrected, ...change }, KEY),
+        )
+      }
+      expect(correctEntryApi).not.toHaveBeenCalled()
+    })
+
+    it('says to reverse the payments first; nothing changes', async () => {
+      addFakePayment(makePayment({ id: 'p-1', entryId: 'oct', amount: 1000 }))
+      const store = await loaded()
+
+      const error = await correctionError(store.correctEntry('tenant-001', wrong, corrected, KEY))
+
+      expect(error).toMatchObject({ message: UNREVERSED_PAYMENTS_MESSAGE, uncertain: false })
+      expect(fakeEntries.entries).toHaveLength(2)
+      expect(store.getEntry('tenant-001', 'oct')!.billStatus).toBe('active')
+    })
+
+    it('refreshes a bill voided meanwhile', async () => {
+      const store = await loaded()
+      await store.voidEntry('tenant-001', wrong, 'Entered twice')
+
+      const error = await correctionError(store.correctEntry('tenant-001', wrong, corrected, KEY))
+
+      expect(error.message).toBe(ENTRY_ALREADY_VOID_MESSAGE)
+    })
+
+    it('after a lost response keeps the key, and the retry returns the same correction', async () => {
+      const store = await loaded()
+      const fakeCorrect = correctEntryApi.getMockImplementation()!
+      correctEntryApi.mockImplementationOnce(async (...args) => {
+        await fakeCorrect(...args)
+        throw new ApiError('unavailable', 'Bad gateway')
+      })
+
+      const key = store.correctionKeyFor('oct')
+      const error = await correctionError(store.correctEntry('tenant-001', wrong, corrected, key))
+      expect(error).toMatchObject({ message: CORRECTION_UNCONFIRMED_MESSAGE, uncertain: true })
+      expect(store.correctionKeyFor('oct')).toBe(key)
+
+      const retry = await store.correctEntry('tenant-001', wrong, corrected, key)
+
+      expect(retry.replayed).toBe(true)
+      expect(fakeEntries.entries.filter((e) => e.billingMonth === '2026-10')).toHaveLength(2)
+    })
+
+    it('says when the key was used for other details', async () => {
+      const store = await loaded()
+      await store.correctEntry('tenant-001', wrong, corrected, KEY)
+
+      const error = await correctionError(
+        store.correctEntry('tenant-001', wrong, { ...corrected, waterAmount: 400 }, KEY),
+      )
+
+      expect(error.message).toBe(CORRECTION_KEY_CONFLICT_MESSAGE)
+    })
+
+    it('shows the backend’s own message for refused details', async () => {
+      const store = await loaded()
+      correctEntryApi.mockRejectedValueOnce(
+        new ApiError('invalid-request', 'Invalid', null, {
+          nonFieldErrors: 'Change at least one charge or the notes.',
+        }),
+      )
+
+      const error = await correctionError(store.correctEntry('tenant-001', wrong, corrected, KEY))
+
+      expect(error.message).toBe('Change at least one charge or the notes.')
+    })
+
+    it('gives a new key once one is forgotten', async () => {
+      const store = await withProperty()
+      const first = store.correctionKeyFor('oct')
+
+      store.forgetCorrectionKey('oct')
+
+      expect(store.correctionKeyFor('oct')).not.toBe(first)
+    })
   })
 })
 

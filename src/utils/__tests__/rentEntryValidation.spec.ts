@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest'
 
 import type { RentEntryInput } from '@/types/rentEntry'
 import {
+  CORRECTION_UNCHANGED_MESSAGE,
   getDraftTotalDue,
   NOTES_MAX_LENGTH,
+  parseEntryCorrection,
   parseRentEntryDraft,
   type RentEntryDraft,
   toAmount,
+  validateEntryCorrection,
   validateRentEntryDraft,
   validateRentEntryInput,
+  validateVoidReason,
 } from '@/utils/rentEntryValidation'
 
 function draft(overrides: Partial<RentEntryDraft> = {}): RentEntryDraft {
@@ -187,5 +191,111 @@ describe('parseRentEntryDraft', () => {
         electricityUnits: 'Enter electricity units, or use 0 if there was no consumption.',
       },
     })
+  })
+})
+
+describe('validateVoidReason', () => {
+  it('needs a reason of at most 500 characters, once trimmed', () => {
+    expect(validateVoidReason('Entered twice')).toBeNull()
+    expect(validateVoidReason('   ')).toBe('Say why this bill is being voided.')
+    expect(validateVoidReason(`  ${'x'.repeat(500)}  `)).toBeNull()
+    expect(validateVoidReason('x'.repeat(501))).toBe('The reason must be 500 characters or fewer.')
+  })
+})
+
+describe('validateEntryCorrection', () => {
+  // October, with 750 units instead of 75.
+  const original = {
+    billingMonth: '2026-10',
+    rentAmount: 15000,
+    electricityUnits: 750,
+    electricityRate: 6,
+    waterAmount: 300,
+    notes: 'October',
+  }
+  const draft = {
+    rentAmount: 15000,
+    electricityUnits: 75,
+    waterAmount: 300,
+    notes: 'October',
+    reason: 'Units were wrong',
+  }
+
+  it('accepts changed charges with a reason', () => {
+    expect(validateEntryCorrection(original, draft)).toEqual({})
+  })
+
+  it('checks the charges by the rules of a new bill', () => {
+    expect(
+      validateEntryCorrection(original, {
+        ...draft,
+        rentAmount: 0,
+        electricityUnits: '',
+        waterAmount: 1.001,
+      }),
+    ).toMatchObject({
+      rentAmount: 'Enter a rent amount greater than zero.',
+      electricityUnits: 'Enter electricity units, or use 0 if there was no consumption.',
+      waterAmount: 'Water amount can have at most 2 decimals.',
+    })
+  })
+
+  it('needs a reason', () => {
+    expect(validateEntryCorrection(original, { ...draft, reason: ' ' })).toEqual({
+      reason: 'Say why this bill is being voided.',
+    })
+  })
+
+  it('refuses a replacement that changes nothing, notes compared trimmed', () => {
+    expect(
+      validateEntryCorrection(original, { ...draft, electricityUnits: 750, notes: ' October ' }),
+    ).toEqual({ unchanged: CORRECTION_UNCHANGED_MESSAGE })
+    expect(
+      validateEntryCorrection(original, { ...draft, electricityUnits: 750, notes: 'Read late' }),
+    ).toEqual({})
+  })
+})
+
+describe('parseEntryCorrection', () => {
+  const original = {
+    billingMonth: '2026-10',
+    rentAmount: 15000,
+    electricityUnits: 750,
+    electricityRate: 6,
+    waterAmount: 300,
+    notes: '',
+  }
+
+  it('gives the correction, trimmed', () => {
+    expect(
+      parseEntryCorrection(original, {
+        rentAmount: 15000,
+        electricityUnits: 75,
+        waterAmount: 300,
+        notes: '  Read on the 1st ',
+        reason: ' Units were wrong ',
+      }),
+    ).toEqual({
+      ok: true,
+      input: {
+        rentAmount: 15000,
+        electricityUnits: 75,
+        waterAmount: 300,
+        notes: 'Read on the 1st',
+        reason: 'Units were wrong',
+      },
+    })
+  })
+
+  it('gives the errors of an invalid one', () => {
+    const parsed = parseEntryCorrection(original, {
+      rentAmount: '',
+      electricityUnits: 75,
+      waterAmount: 300,
+      notes: '',
+      reason: '',
+    })
+
+    expect(parsed.ok).toBe(false)
   })
 })

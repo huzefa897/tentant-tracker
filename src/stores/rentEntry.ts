@@ -8,14 +8,24 @@ import { rentEntryService } from '@/services/rentEntry.service'
 import { useAccessStore } from '@/stores/access'
 import type { Payment, PaymentInput, RecordedPayment, ReversedPayment } from '@/types/payment'
 import type { PaymentReceipt } from '@/types/receipt'
-import type { NewRentEntrySubmission, PaymentStatus, RentEntry } from '@/types/rentEntry'
+import type {
+  CorrectedEntry,
+  EntryCorrectionInput,
+  NewRentEntrySubmission,
+  PaymentStatus,
+  RentEntry,
+} from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import {
   validatePaymentDraft,
   validatePaymentInput,
   validateReversalReason,
 } from '@/utils/paymentValidation'
-import { validateRentEntryInput } from '@/utils/rentEntryValidation'
+import {
+  validateEntryCorrection,
+  validateRentEntryInput,
+  validateVoidReason,
+} from '@/utils/rentEntryValidation'
 
 export type EntryListStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -42,6 +52,21 @@ export const REVERSAL_CONFLICT_MESSAGE =
   'This payment was already reversed for another reason. Its payment history has been refreshed.'
 export const RECEIPT_UNCONFIRMED_MESSAGE =
   "We couldn't confirm whether the receipt was issued. Try again: it won't issue a second one."
+export const VOID_ERROR_MESSAGE = 'Unable to void the bill. Please try again.'
+export const CORRECTION_ERROR_MESSAGE =
+  'Unable to correct the bill. Your changes have been kept. Please try again.'
+export const VOID_UNCONFIRMED_MESSAGE =
+  "We couldn't confirm whether the bill was voided. Try again with the same reason: it won't be voided twice."
+export const CORRECTION_UNCONFIRMED_MESSAGE =
+  "We couldn't confirm whether the bill was corrected. Submit again to retry: it won't be corrected twice."
+export const UNREVERSED_PAYMENTS_MESSAGE =
+  'This bill still has payments that count. Reverse them first; its payments have been refreshed.'
+export const ENTRY_ALREADY_VOID_MESSAGE =
+  'This bill has already been voided. It has been refreshed.'
+export const VOID_CONFLICT_MESSAGE =
+  'This bill was already voided for another reason. It has been refreshed.'
+export const CORRECTION_KEY_CONFLICT_MESSAGE =
+  'Your earlier attempt was already saved with different details. The bill has been refreshed: check it before correcting it again.'
 
 // No response, a server error or a response we couldn't read: the request may have been
 // carried out anyway. Retrying with the same idempotency key is safe; a new key isn't.
@@ -140,6 +165,19 @@ export class PaymentReversalError extends Error {
   }
 }
 
+// A bill that couldn't be voided or corrected: nothing changed, unless uncertain (no usable
+// response), when it may have been. Retrying is safe either way: with the same reason for a
+// void, with the same idempotency key for a correction.
+export class EntryCorrectionError extends Error {
+  constructor(
+    message: string,
+    readonly uncertain = false,
+  ) {
+    super(message)
+    this.name = 'EntryCorrectionError'
+  }
+}
+
 // notFound: what's missing on a 404, the payment unless said otherwise.
 function receiptErrorMessage(
   err: unknown,
@@ -162,6 +200,8 @@ function receiptErrorMessage(
 // One page of one tenant's bills, as the history page shows it.
 export interface EntryHistory {
   tenantId: string | null
+  // Void bills listed beside the active ones.
+  includeVoid: boolean
   year: string | null
   paymentStatus: PaymentStatus | null
   page: number
@@ -191,6 +231,7 @@ export interface EntrySummary {
 function emptyHistory(): EntryHistory {
   return {
     tenantId: null,
+    includeVoid: false,
     year: null,
     paymentStatus: null,
     page: 1,
@@ -227,6 +268,8 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
   // leaving the page after an uncertain save (no response) never loses it: the next attempt,
   // whenever it comes, is a retry the backend recognises.
   const paymentKeys = new Map<string, string>()
+  // The idempotency key of each bill's pending correction, kept like the payment keys.
+  const correctionKeys = new Map<string, string>()
   // Void receipts by payment id: a void receipt never changes again, so one loaded is reused.
   // An issued one is always loaded again: someone may have reversed its payment since, and a
   // loaded history can predate that, so only the backend can say it's still valid.
@@ -260,30 +303,47 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     }
   }
 
+  // The dashboard reloads the tenant's summary with a bill saved, voided or corrected since. A
+  // summary request still in flight predates it, so its response is discarded too.
+  function forgetSummary(tenantId: string) {
+    nextSummarySeq(tenantId)
+    const next = { ...summaries.value }
+    delete next[tenantId]
+    summaries.value = next
+  }
+
   function requireProperty(): string {
     const propertyId = accessStore.selectedPropertyId
     if (!propertyId) throw new Error('Choose a property first.')
     return propertyId
   }
 
-  // One page of a tenant's bills, newest first, filtered by the backend. Also the history
-  // page's Retry.
+  // One page of a tenant's bills, newest first, filtered by the backend: active ones, and void
+  // ones too with includeVoid. Also the history page's Retry.
   async function loadHistory(
     tenantId: string,
-    options: { year?: string | null; paymentStatus?: PaymentStatus | null; page?: number },
+    options: {
+      includeVoid?: boolean
+      year?: string | null
+      paymentStatus?: PaymentStatus | null
+      page?: number
+    },
   ) {
     const propertyId = accessStore.selectedPropertyId
     if (!propertyId) return
 
     const seq = ++historySeq
     const gen = generation
+    const includeVoid = options.includeVoid ?? false
     const year = options.year ?? null
     const paymentStatus = options.paymentStatus ?? null
     const page = options.page ?? 1
-    history.value = { ...emptyHistory(), tenantId, year, paymentStatus, page, status: 'loading' }
+    const filters = { tenantId, includeVoid, year, paymentStatus, page }
+    history.value = { ...emptyHistory(), ...filters, status: 'loading' }
 
     try {
       const result = await rentEntryService.getEntries(propertyId, tenantId, {
+        billStatus: includeVoid ? 'all' : 'active',
         year: year ?? undefined,
         paymentStatus: paymentStatus ?? undefined,
         page,
@@ -292,9 +352,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
 
       remember(result.entries)
       history.value = {
-        tenantId,
-        year,
-        paymentStatus,
+        ...filters,
         page: result.page,
         entries: result.entries,
         count: result.count,
@@ -307,17 +365,15 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       if (seq !== historySeq || gen !== generation) return
       history.value = {
         ...emptyHistory(),
-        tenantId,
-        year,
-        paymentStatus,
-        page,
+        ...filters,
         status: 'error',
         error: entryLoadErrorMessage(err),
       }
     }
   }
 
-  // The tenant's newest bill and bill count (the first page is newest first). Also Retry.
+  // The tenant's newest active bill and active bill count (the first page is newest first): void
+  // bills count for nothing. Also Retry.
   async function loadSummary(tenantId: string) {
     const propertyId = accessStore.selectedPropertyId
     if (!propertyId) return
@@ -427,12 +483,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       )
       if (gen === generation) {
         remember([entry])
-        // The dashboard reloads it with this bill included. A summary request still in flight
-        // predates the bill, so its response is discarded too.
-        nextSummarySeq(input.tenantId)
-        const next = { ...summaries.value }
-        delete next[input.tenantId]
-        summaries.value = next
+        forgetSummary(input.tenantId)
       }
       return entry
     } catch (err) {
@@ -766,6 +817,139 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     }
   }
 
+  // A voided or corrected bill as the backend returned it, wherever bills are shown: the bill by
+  // id, the tenant's summary (reloaded), and their history page (reloaded with its filters, so
+  // a void bill leaves it or stays marked, and a replacement appears).
+  function afterCorrection(tenantId: string, entries: RentEntry[]) {
+    for (const entry of entries) update(entry)
+    forgetSummary(tenantId)
+    const shown = history.value
+    if (shown.tenantId === tenantId && shown.status !== 'idle') {
+      void loadHistory(tenantId, {
+        includeVoid: shown.includeVoid,
+        year: shown.year,
+        paymentStatus: shown.paymentStatus,
+        page: shown.page,
+      })
+    }
+  }
+
+  // What a refused void or correction says. Conflicts mean the bill or its payments changed
+  // since the page loaded them, so both are reloaded to show why.
+  function correctionErrorMessage(
+    err: unknown,
+    tenantId: string,
+    entryId: string,
+    gen: number,
+    fallback: string,
+  ): string {
+    const kind = err instanceof ApiError ? err.kind : 'unknown'
+    const code = err instanceof ApiError ? err.code : null
+    const conflicts: Record<string, string> = {
+      unreversed_payments: UNREVERSED_PAYMENTS_MESSAGE,
+      entry_void: ENTRY_ALREADY_VOID_MESSAGE,
+      void_conflict: VOID_CONFLICT_MESSAGE,
+      idempotency_conflict: CORRECTION_KEY_CONFLICT_MESSAGE,
+    }
+    if (code && code in conflicts) {
+      void refreshAfterConflict(tenantId, entryId, gen)
+      return conflicts[code]!
+    }
+    if (err instanceof ApiError && kind === 'invalid-request') {
+      return firstFieldError(err) ?? 'These details are not valid. Check them and try again.'
+    }
+    if (kind === 'forbidden') return "Only the property's owners can void or correct bills."
+    if (kind === 'not-found') return "This entry can't be found. It may no longer be available."
+    if (kind === 'rate-limited') return RATE_LIMITED_MESSAGE
+    if (kind === 'unauthorized')
+      return "Your sign-in couldn't be verified. Log out and sign in again."
+    return fallback
+  }
+
+  // Voids a bill that should not exist (owners only; the backend checks), once none of its
+  // payments count. Its response (the bill, now void) is shown wherever the bill appears. On
+  // failure nothing changes here, except that the bill and its payments are reloaded after a
+  // conflict or an uncertain failure: throws EntryCorrectionError with a message.
+  async function voidEntry(
+    tenantId: string,
+    entry: RentEntry,
+    reason: string,
+  ): Promise<{ entry: RentEntry; replayed: boolean }> {
+    const problem = validateVoidReason(reason)
+    if (problem) throw new EntryCorrectionError(problem)
+
+    const propertyId = requireProperty()
+    const gen = generation
+    try {
+      const result = await rentEntryService.voidEntry(propertyId, tenantId, entry.id, reason.trim())
+      if (gen === generation) afterCorrection(tenantId, [result.entry])
+      return result
+    } catch (err) {
+      // The bill has one void, so the same reason again is a safe retry.
+      if (isUncertainFailure(err)) {
+        void refreshAfterConflict(tenantId, entry.id, gen)
+        throw new EntryCorrectionError(VOID_UNCONFIRMED_MESSAGE, true)
+      }
+      throw new EntryCorrectionError(
+        correctionErrorMessage(err, tenantId, entry.id, gen, VOID_ERROR_MESSAGE),
+      )
+    }
+  }
+
+  // Voids a bill with wrong charges and creates its replacement (the backend does both or
+  // neither). Both are shown as the backend returned them. Throws EntryCorrectionError; on
+  // failure the original is unchanged and the page keeps the changes.
+  // idempotencyKey: from correctionKeyFor, reused after an uncertain failure so a retry returns
+  // the correction if the first attempt made it.
+  async function correctEntry(
+    tenantId: string,
+    original: RentEntry,
+    input: EntryCorrectionInput,
+    idempotencyKey: string,
+  ): Promise<CorrectedEntry> {
+    if (Object.keys(validateEntryCorrection(original, input)).length > 0) {
+      throw new EntryCorrectionError('This correction is not valid. Check it and try again.')
+    }
+
+    const propertyId = requireProperty()
+    const gen = generation
+    try {
+      const result = await rentEntryService.correctEntry(
+        propertyId,
+        tenantId,
+        original.id,
+        input,
+        idempotencyKey,
+      )
+      if (gen === generation) afterCorrection(tenantId, [result.original, result.replacement])
+      return result
+    } catch (err) {
+      if (isUncertainFailure(err)) {
+        void refreshAfterConflict(tenantId, original.id, gen)
+        throw new EntryCorrectionError(CORRECTION_UNCONFIRMED_MESSAGE, true)
+      }
+      throw new EntryCorrectionError(
+        correctionErrorMessage(err, tenantId, original.id, gen, CORRECTION_ERROR_MESSAGE),
+      )
+    }
+  }
+
+  // The key for the next attempt at correcting this bill: the pending one if the last attempt
+  // was uncertain, otherwise a new one.
+  function correctionKeyFor(entryId: string): string {
+    let key = correctionKeys.get(entryId)
+    if (!key) {
+      key = crypto.randomUUID()
+      correctionKeys.set(entryId, key)
+    }
+    return key
+  }
+
+  // After a success or a definite rejection: the next correction is a new one.
+  function forgetCorrectionKey(entryId: string) {
+    correctionKeys.delete(entryId)
+  }
+
   // A payment as the backend now returns it, in its bill's loaded history.
   function replacePayment(payment: Payment) {
     const current = payments.value[payment.entryId]
@@ -794,6 +978,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     summarySeq.clear()
     paymentsSeq.clear()
     paymentKeys.clear()
+    correctionKeys.clear()
     receipts.clear()
     entriesById.value = {}
     history.value = emptyHistory()
@@ -826,6 +1011,10 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     getReceipt,
     getLatestReceipt,
     reversePayment,
+    voidEntry,
+    correctEntry,
+    correctionKeyFor,
+    forgetCorrectionKey,
     reset,
   }
 })
