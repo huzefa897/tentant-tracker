@@ -23,6 +23,20 @@ pipenv run start
 - Health: http://127.0.0.1:8000/api/v1/health/ → `{"status": "ok"}` (app only; not a database check)
 - Admin: http://127.0.0.1:8000/admin/
 
+## Or: everything in Docker
+
+`compose.yaml` can also run Django and the Vue dev server in containers, with live reload, so you need neither pipenv nor Node on your machine:
+
+```bash
+cp backend/.env.example backend/.env    # set DJANGO_SECRET_KEY and FIREBASE_PROJECT_ID
+docker compose --profile app up         # app: http://localhost:5173, Django: http://localhost:8000
+```
+
+- The VITE_* values come from the root `.env`, as with `npm run dev`. For phone sign-in, copy the service-account key's fields into `backend/.env`, one variable each (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL` and the rest; `.env.example` shows how): the container can't see a key file's path on your machine. Without them, sign-in answers 503.
+- The backend container migrates on start and runs as your user (uid 1000 by default; otherwise `export UID GID=$(id -g)` first), so new migrations belong to you: `docker compose --profile app exec backend python manage.py makemigrations`. Other commands the same way (`… exec backend python manage.py createsuperuser`, `… test`).
+- Rebuild after changing `Pipfile.lock` (`docker compose --profile app up --build`); `node_modules` lives in a volume and is reinstalled from `package-lock.json` on each start.
+- Ports 5173 and 8000 are the ones the host dev servers use: stop those first. `docker compose --profile app down` stops it all (keeping the database).
+
 ## Scripts
 
 | Command | Runs |
@@ -43,7 +57,7 @@ Dependency versions are pinned in `Pipfile.lock`. Add packages with `pipenv inst
 - `docker compose down -v` deletes the `postgres_data` volume, which is the whole database.
 - `AUTH_USER_MODEL` is `accounts.User` (an `AbstractUser` with `firebase_uid` and `phone_number`). Roles go on property membership (BE Phase 2), not on the user.
 - CORS only allows the Vue dev origin and is not authentication.
-- `billing` holds rent entries (bills), one per tenancy and month, and the payments received against them. Both are created through the API (a bill can be created with an initial payment, saved together) and are view-only in admin, so nothing bypasses the checks that keep payments within the bill; there's no update or delete yet. Recording a payment locks its bill, and each request carries an `Idempotency-Key` header so a retry returns the payment already recorded instead of recording it twice. Each payment can have one **receipt**: a snapshot of the property, tenancy, bill and payment copied when it's issued (`billing/services.py` `issue_payment_receipt`, which locks the payment), so later payments or changed details never alter it. Issuing needs the property's name and address (set them in admin). Receipts are view-only in admin. Tests in `billing/tests/test_concurrency.py` run real concurrent transactions, so they need PostgreSQL.
+- `billing` holds rent entries (bills), one per tenancy and month, and the payments received against them. Both are created through the API (a bill can be created with an initial payment, saved together) and are view-only in admin, so nothing bypasses the checks that keep payments within the bill; there's no update or delete yet. Recording a payment locks its bill, and each request carries an `Idempotency-Key` header so a retry returns the payment already recorded instead of recording it twice. Each payment can have one **receipt**: a snapshot of the property, tenancy, bill and payment copied when it's issued (`billing/services.py` `issue_payment_receipt`, which locks the payment, bill, tenancy and property and reads them again before copying, so an edit that commits first is on the receipt; references are unique per property), so later payments or changed details never alter it. Issuing needs the property's name and address (set them in admin). Receipts are view-only in admin. Tests in `billing/tests/test_concurrency.py` run real concurrent transactions, so they need PostgreSQL.
 
 ## Authentication and property access
 
@@ -70,7 +84,7 @@ Admin portal access (`is_staff`/`is_superuser`, username + password) and app sig
 - Mobile numbers are E.164 (`+918341413827`), unique, and limited to the countries the app's login accepts (`accounts/phone.py`, mirroring the frontend's `utils/phoneCountries.ts`). Admin accepts spaces and dashes.
 - Firebase still sends a code to any number typed on the login page (in the allowed SMS regions); the backend is what refuses unknown numbers.
 
-Configure in `.env`: `FIREBASE_PROJECT_ID` (the Vue app's project) and `GOOGLE_APPLICATION_CREDENTIALS` (absolute path to a service-account key kept **outside** the repo). Tests mock Firebase and need neither.
+Configure in `.env`: `FIREBASE_PROJECT_ID` (the Vue app's project) and either `GOOGLE_APPLICATION_CREDENTIALS` (absolute path to a service-account key kept **outside** the repo) or the key's fields, one variable each (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY_ID`, `FIREBASE_CLIENT_ID`; used when `FIREBASE_PRIVATE_KEY` is set). Tests mock Firebase and need neither.
 
 ### Adding a person and granting access
 

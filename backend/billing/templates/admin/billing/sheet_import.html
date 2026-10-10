@@ -1,0 +1,146 @@
+{% extends "admin/base_site.html" %}
+{% load admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; <a href="{% url opts|admin_urlname:'change' original.pk %}">{{ original }}</a>
+  &rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <p>
+    Imports <strong>{{ original }}</strong>'s history from the owners' Google Sheet: each month's
+    bill, its payment and the receipt the Sheet emailed, with its original reference. It's all
+    or nothing, and running it again never creates anything twice. Take a backup first. The
+    steps are in <code>docs/data-import.md</code>.
+  </p>
+  {% if not has_tenancies %}
+    <p class="errornote">
+      This property has no tenancies yet. Add one for each tab of the Sheet first, with dates
+      covering every month in its tab.
+    </p>
+  {% endif %}
+
+  {% if conversion %}
+    <h2>What the Sheet holds</h2>
+    <table>
+      {% for name, value in conversion.totals.items %}
+        <tr><th scope="row">{{ name|capfirst }}</th><td>{{ value }}</td></tr>
+      {% endfor %}
+    </table>
+    {% if conversion.skipped_tabs %}
+      <p>Skipped tabs: {{ conversion.skipped_tabs|join:", " }}</p>
+    {% endif %}
+
+    {% if conversion.problems %}
+      <p class="errornote">
+        Nothing can be imported until these are fixed in the Sheet. Fix them, download it again
+        and upload the new file.
+      </p>
+      <ul class="errorlist">
+        {% for problem in conversion.problems %}<li>{{ problem }}</li>{% endfor %}
+      </ul>
+    {% elif not conversion.ledger.tenants %}
+      <p class="errornote">No tenant tabs were found: each needs a header row starting "Month".</p>
+    {% endif %}
+
+    {% if conversion.warnings %}
+      <h3>Check these against the Sheet ({{ conversion.warnings|length }})</h3>
+      <ul>{% for warning in conversion.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+    {% endif %}
+  {% endif %}
+
+  {% if problems %}
+    <p class="errornote">The converted Sheet couldn't be read. Upload it again.</p>
+    <ul class="errorlist">{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if upload_form %}
+    <h2>1. Upload the Sheet</h2>
+    <form method="post" enctype="multipart/form-data" action="{{ request.path }}">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="upload">
+      <fieldset class="module aligned">
+        {% for field in upload_form %}
+          <div class="form-row">
+            {{ field.errors }}
+            {{ field.label_tag }} {{ field }}
+            <div class="help">{{ field.help_text }} Up to {{ max_upload_mb }} MB; it isn't stored.</div>
+          </div>
+        {% endfor %}
+      </fieldset>
+      <div class="submit-row"><input type="submit" class="default" value="Read the Sheet"></div>
+    </form>
+  {% endif %}
+
+  {% if mapping_form %}
+    <h2>2. Match each tab to its tenancy</h2>
+    <form method="post" action="{{ request.path }}">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="check">
+      <input type="hidden" name="token" value="{{ token }}">
+      {{ mapping_form.non_field_errors }}
+      <fieldset class="module aligned">
+        {% for field in mapping_form %}
+          <div class="form-row">
+            {{ field.errors }}
+            {{ field.label_tag }} {{ field }}
+            <div class="help">{{ field.help_text }}</div>
+          </div>
+        {% endfor %}
+      </fieldset>
+      <div class="submit-row">
+        <input type="submit" class="default" value="Check (saves nothing)">
+        <a href="{{ request.path }}">Start again</a>
+      </div>
+    </form>
+  {% endif %}
+
+  {% if report %}
+    <h2>{% if report.dry_run %}Check{% else %}Import{% endif %} result</h2>
+    <table>
+      <thead><tr><th></th><th>New</th><th>Already imported</th></tr></thead>
+      <tr><th scope="row">Bills</th><td>{{ report.created.bill }}</td><td>{{ report.already.bill }}</td></tr>
+      <tr><th scope="row">Payments</th><td>{{ report.created.payment }}</td><td>{{ report.already.payment }}</td></tr>
+      <tr><th scope="row">Receipts</th><td>{{ report.created.receipt }}</td><td>{{ report.already.receipt }}</td></tr>
+    </table>
+    {% if report.reconciliation %}
+      <h3>Reconciliation</h3>
+      <table>
+        <thead><tr><th>Check</th><th>Sheet</th><th>Database</th><th></th></tr></thead>
+        {% for check, source, database in report.reconciliation %}
+          <tr>
+            <td>{{ check|capfirst }}</td><td>{{ source }}</td><td>{{ database }}</td>
+            <td>{% if source == database %}ok{% else %}<strong>MISMATCH</strong>{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+    {% if report.rejected %}
+      <p class="errornote">Nothing was saved. Fix these and check again:</p>
+      <ul class="errorlist">{% for message in report.rejected %}<li>{{ message }}</li>{% endfor %}</ul>
+    {% elif not report.reconciled %}
+      <p class="errornote">The database wouldn't match the Sheet, so nothing was saved.</p>
+    {% endif %}
+  {% endif %}
+
+  {% if checked_ok %}
+    <h2>3. Import</h2>
+    <p>Everything checks out. This imports exactly what was checked:</p>
+    <ul>
+      {% for tab, tenancy in checked_mapping %}<li>{{ tab }} &rarr; {{ tenancy }}</li>{% endfor %}
+    </ul>
+    <form method="post" action="{{ request.path }}">
+      {% csrf_token %}
+      <input type="hidden" name="step" value="import">
+      <input type="hidden" name="token" value="{{ import_token }}">
+      <div class="submit-row"><input type="submit" class="default" value="Import"></div>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

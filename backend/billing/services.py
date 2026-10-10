@@ -8,7 +8,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Max, Sum
 from django.utils import timezone
 
-from properties.models import Tenancy, business_date
+from properties.models import Property, Tenancy, business_date
 from properties.queries import properties_for_user
 from properties.roles import Capability, role_can
 
@@ -20,9 +20,6 @@ PAYMENT_KEY_CONSTRAINT = "unique_payment_idempotency_key"
 CREATION_KEY_CONSTRAINT = "unique_rent_entry_creation_key"
 # The unique column behind Receipt.payment (PostgreSQL's name for it).
 RECEIPT_PAYMENT_CONSTRAINT = "billing_receipt_payment_id_key"
-RECEIPT_REFERENCE_CONSTRAINT = "billing_receipt_reference_key"
-# Retries when another bill's receipt took the same reference at the same moment.
-REFERENCE_ATTEMPTS = 3
 
 
 class DuplicateBillingMonthError(Exception):
@@ -332,26 +329,24 @@ def _previous_month(billing_month):
     return billing_month.replace(month=billing_month.month - 1)
 
 
-def _next_reference(tenancy, entry) -> str:
-    """The bill's first receipt gets the plain reference; later ones _2, _3… Callers hold the
-    bill's lock, so a bill's receipts are numbered one at a time."""
+def _next_reference(prop, tenancy, entry) -> str:
+    """The property's first receipt for this name, flat and month gets the plain reference;
+    later ones _2, _3… Callers hold the property's lock, so its receipts are numbered one at a
+    time and the number is always free."""
     base = receipt_reference(tenancy.name, tenancy.flat_number, entry.billing_month)
     pattern = re.compile(rf"^{re.escape(base)}(?:_(\d+))?$")
     taken = [
         pattern.match(reference)
-        for reference in Receipt.objects.filter(reference__startswith=base).values_list(
-            "reference", flat=True
-        )
+        for reference in Receipt.objects.filter(
+            property=prop, reference__startswith=base
+        ).values_list("reference", flat=True)
     ]
     numbers = [int(m.group(1) or 1) for m in taken if m]
     return base if not numbers else f"{base}_{max(numbers) + 1}"
 
 
-def receipt_problem(payment: Payment) -> str | None:
+def receipt_problem(payment: Payment, tenancy: Tenancy, prop: Property) -> str | None:
     """What stops a new receipt from being issued, or None."""
-    entry = payment.entry
-    tenancy = entry.tenancy
-    prop = tenancy.property
     if not prop.name.strip():
         return "Configure the property name before issuing receipts."
     if not prop.address.strip():
@@ -363,14 +358,20 @@ def receipt_problem(payment: Payment) -> str | None:
     return None
 
 
-def receipt_snapshot(payment: Payment, actor, *, previous_outstanding) -> dict:
+def receipt_snapshot(
+    payment: Payment,
+    entry: RentEntry,
+    tenancy: Tenancy,
+    prop: Property,
+    actor,
+    *,
+    previous_outstanding,
+) -> dict:
     """Everything a receipt prints, copied from the stored records: the issuer, the tenancy, the
     bill as it stood right after this payment and the payment. previous_outstanding is what the
-    previous month's bill still owed when the receipt was issued. Callers hold the bill's lock.
+    previous month's bill still owed when the receipt was issued. Callers hold the bill's,
+    tenancy's and property's locks and pass those rows, read again under them.
     """
-    entry = payment.entry
-    tenancy = entry.tenancy
-    prop = tenancy.property
 
     # The bill as it stood right after this payment: payments are never edited, and later ones
     # get higher sequences under the bill's lock, so this never changes.
@@ -413,27 +414,23 @@ def issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
 
     Everything printed on the receipt is copied from the stored records now, so later payments
     or changed details never change it. The payment row is locked, so simultaneous requests
-    issue one receipt; its unique column is the last guard. The bill is locked too, so its
-    receipts are numbered one at a time.
+    issue one receipt; its unique column is the last guard. The bill, tenancy and property are
+    locked and read again before anything is copied, so an edit that commits first is always
+    on the receipt; the property's lock also numbers references one at a time, so they never
+    collide and nothing needs retrying.
     """
-    for attempt in range(REFERENCE_ATTEMPTS):
-        try:
-            return _issue_payment_receipt(payment_id=payment_id, actor=actor)
-        except IntegrityError as error:
-            # The locks make these unlikely; the failed transaction has been rolled back, so
-            # anything is looked up outside it.
-            constraint = _violated_constraint(error)
-            if constraint == RECEIPT_REFERENCE_CONSTRAINT and attempt + 1 < REFERENCE_ATTEMPTS:
-                # Another bill (same name, flat and month) took the reference: number again.
-                continue
-            if constraint != RECEIPT_PAYMENT_CONSTRAINT:
-                raise
-            existing = Receipt.objects.select_related("payment__entry__tenancy").get(
-                payment_id=payment_id
-            )
-            _check_can_issue_receipts(actor, existing.payment.entry.tenancy.property_id)
-            return IssuedReceipt(receipt=existing, created=False)
-    raise AssertionError("unreachable")
+    try:
+        return _issue_payment_receipt(payment_id=payment_id, actor=actor)
+    except IntegrityError as error:
+        # The payment's lock makes this unlikely; the failed transaction has been rolled back,
+        # so the receipt is looked up outside it.
+        if _violated_constraint(error) != RECEIPT_PAYMENT_CONSTRAINT:
+            raise
+        existing = Receipt.objects.select_related("payment__entry__tenancy").get(
+            payment_id=payment_id
+        )
+        _check_can_issue_receipts(actor, existing.payment.entry.tenancy.property_id)
+        return IssuedReceipt(receipt=existing, created=False)
 
 
 def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
@@ -456,12 +453,19 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
         if existing is not None:
             return IssuedReceipt(receipt=existing, created=False)
 
-        problem = receipt_problem(payment)
+        # Always payment, then bill, then tenancy, then property, each read again under its
+        # lock: the copies loaded with the payment may predate an edit this request waited
+        # for, and the receipt must print the details as they are when it's issued. NO KEY, so
+        # new bills and tenancies (which reference these rows) aren't held up; the property's
+        # lock also numbers its receipts one at a time.
+        entry = RentEntry.objects.select_for_update().get(pk=payment.entry_id)
+        tenancy = Tenancy.objects.select_for_update(no_key=True).get(pk=entry.tenancy_id)
+        prop = Property.objects.select_for_update(no_key=True).get(pk=tenancy.property_id)
+
+        problem = receipt_problem(payment, tenancy, prop)
         if problem is not None:
             raise ReceiptConfigurationIncompleteError(problem)
 
-        entry = RentEntry.objects.select_for_update().get(pk=payment.entry_id)
-        tenancy = payment.entry.tenancy
         previous = RentEntry.objects.filter(
             tenancy=tenancy, billing_month=_previous_month(entry.billing_month)
         ).first()
@@ -470,10 +474,13 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
         )
 
         receipt = Receipt.objects.create(
-            reference=_next_reference(tenancy, entry),
+            property=prop,
+            reference=_next_reference(prop, tenancy, entry),
             issued_by=actor,
             issued_at=timezone.now(),
             issued_date=business_date(),
-            **receipt_snapshot(payment, actor, previous_outstanding=previous_outstanding),
+            **receipt_snapshot(
+                payment, entry, tenancy, prop, actor, previous_outstanding=previous_outstanding
+            ),
         )
         return IssuedReceipt(receipt=receipt, created=True)

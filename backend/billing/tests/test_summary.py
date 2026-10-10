@@ -1,11 +1,15 @@
 from datetime import date
+from decimal import Decimal
 from io import StringIO
 
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 
 from billing.models import Payment
-from billing.summary import ledger_summary
+from billing.summary import _digest, ledger_summary
+from properties.models import Property, Tenancy
 
 from .factories import make_property, make_tenancy, make_user
 from .test_payments_api import make_entry, make_payment
@@ -71,9 +75,63 @@ class LedgerSummaryTests(TestCase):
         self.assertEqual(before["total paid"], after["total paid"])
         self.assertNotEqual(before["bills digest"], after["bills digest"])
 
+    def test_changed_details_change_it_with_the_same_counts(self):
+        changes = {
+            "people digest": lambda: get_user_model()
+            .objects.filter(pk=self.user.pk)
+            .update(phone_number="+919000000099"),
+            "properties digest": lambda: Property.objects.update(address="Another address"),
+            "tenancies digest": lambda: Tenancy.objects.update(rent_amount="16000.00"),
+        }
+        for digest, change in changes.items():
+            with self.subTest(digest=digest):
+                before = summary()
+                change()
+
+                after = summary()
+
+                self.assertNotEqual(before[digest], after[digest])
+                self.assertEqual(
+                    {k: v for k, v in before.items() if "digest" not in k},
+                    {k: v for k, v in after.items() if "digest" not in k},
+                )
+
+    def test_signing_in_to_admin_does_not_change_it(self):
+        before = summary()
+        get_user_model().objects.filter(pk=self.user.pk).update(last_login=timezone.now())
+
+        self.assertEqual(before, summary())
+
+    def test_prints_hashes_never_details(self):
+        out = StringIO()
+        call_command("ledger_summary", stdout=out)
+
+        for detail in (self.tenancy.name, self.tenancy.mobile_number, self.tenancy.property.name):
+            with self.subTest(detail=detail):
+                self.assertTrue(detail)
+                self.assertNotIn(detail, out.getvalue())
+
     def test_prints_one_line_per_figure(self):
         out = StringIO()
         call_command("ledger_summary", stdout=out)
 
         self.assertIn("bills: 2\n", out.getvalue())
         self.assertIn("total outstanding: 10750.00\n", out.getvalue())
+
+
+class DigestTests(SimpleTestCase):
+    def test_tells_apart_rows_whose_text_runs_across_boundaries(self):
+        different = {
+            "a | in a field": ([("same-id", "A|B", "C")], [("same-id", "A", "B|C")]),
+            "a line break in a field": ([("a\nb",)], [("a",), ("b",)]),
+            "an empty field and the text None": ([("id", None)], [("id", "None")]),
+        }
+        for case, (rows, other) in different.items():
+            with self.subTest(case=case):
+                self.assertNotEqual(_digest(rows), _digest(other))
+
+    def test_ignores_the_order_of_rows(self):
+        rows = [("1", "A", date(2026, 9, 1)), ("2", "B", Decimal("15000.00"))]
+
+        self.assertEqual(_digest(rows), _digest(list(reversed(rows))))
+

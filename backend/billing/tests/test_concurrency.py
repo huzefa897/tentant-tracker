@@ -1,10 +1,11 @@
 import threading
+import time
 import uuid
 from datetime import date
 from decimal import Decimal
 from unittest import mock
 
-from django.db import connection
+from django.db import connection, transaction
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
 from billing.calculations import entry_amounts
@@ -15,6 +16,8 @@ from billing.services import (
     issue_payment_receipt,
     record_payment,
 )
+
+from properties.models import Property, Tenancy
 
 from .factories import make_property, make_tenancy, make_user
 
@@ -99,6 +102,24 @@ def run_simultaneously(count, action):
     for thread in threads:
         thread.join(timeout=30)
     return outcomes
+
+
+def wait_until_another_connection_waits_on_a_lock(timeout=10):
+    """Test-only: PostgreSQL's own view of its sessions, so a test can commit only once
+    another connection is blocked behind its locks."""
+    deadline = time.monotonic() + timeout
+    with connection.cursor() as cursor:
+        while time.monotonic() < deadline:
+            # Statistics are cached per transaction; clear them to see the current state.
+            cursor.execute("SELECT pg_stat_clear_snapshot()")
+            cursor.execute(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid()"
+            )
+            if cursor.fetchone()[0]:
+                return
+            time.sleep(0.02)
+    raise AssertionError("No other connection waited on a lock.")
 
 
 def make_bill(tenancy, user, month=date(2026, 9, 1)):
@@ -267,3 +288,106 @@ class ConcurrentReceiptTests(TransactionTestCase):
                 "Shaik_Zahid_Ali_202_Rent_September 2026_3",
             ],
         )
+
+    def test_properties_issue_the_same_reference_at_once_without_retrying(self):
+        # Five properties, each with a Shaik Zahid Ali in flat 202 paying for September.
+        payments = [self.payment]
+        for i in range(4):
+            prop = make_property(name=f"Property {i}", member=self.user)
+            entry = make_bill(make_tenancy(prop), self.user)
+            payments.append(
+                record_payment(
+                    entry_id=entry.pk,
+                    actor=self.user,
+                    idempotency_key=uuid.uuid4(),
+                    validated_data=PAYMENT,
+                ).payment
+            )
+
+        def issue(i):
+            result = issue_payment_receipt(payment_id=payments[i].pk, actor=self.user)
+            return ("created" if result.created else "returned", result.receipt.reference)
+
+        outcomes = run_simultaneously(5, issue)
+
+        self.assertEqual(
+            outcomes, [("created", "Shaik_Zahid_Ali_202_Rent_September 2026")] * 5
+        )
+        self.assertEqual(Receipt.objects.values("property").distinct().count(), 5)
+
+    def test_one_propertys_bills_issued_at_once_get_distinct_references(self):
+        # The same name and flat on two tenancies that both cover September, so two bills.
+        prop = self.tenancy.property
+        Tenancy.objects.filter(pk=self.tenancy.pk).update(end_date=date(2026, 9, 10))
+        later = make_tenancy(prop, start_date=date(2026, 9, 11))
+        entry = make_bill(later, self.user)
+        payments = [
+            self.payment,
+            record_payment(
+                entry_id=entry.pk,
+                actor=self.user,
+                idempotency_key=uuid.uuid4(),
+                validated_data=PAYMENT,
+            ).payment,
+        ]
+
+        outcomes = run_simultaneously(
+            2,
+            lambda i: issue_payment_receipt(payment_id=payments[i].pk, actor=self.user)
+            .receipt.reference,
+        )
+
+        self.assertEqual(
+            sorted(outcomes),
+            [
+                "Shaik_Zahid_Ali_202_Rent_September 2026",
+                "Shaik_Zahid_Ali_202_Rent_September 2026_2",
+            ],
+        )
+
+    def issue_during(self, edit):
+        """Starts issuing this payment's receipt while `edit` is saved but not committed, and
+        commits once issuance is waiting for it. Returns the receipt."""
+        outcome = {}
+
+        def issue():
+            try:
+                outcome["receipt"] = issue_payment_receipt(
+                    payment_id=self.payment.pk, actor=self.user
+                ).receipt
+            except Exception as error:  # noqa: BLE001 - reported by the assertion below
+                outcome["error"] = error
+            finally:
+                connection.close()
+
+        thread = threading.Thread(target=issue)
+        with transaction.atomic():
+            edit()
+            thread.start()
+            wait_until_another_connection_waits_on_a_lock()
+        thread.join(timeout=30)
+        self.assertNotIn("error", outcome)
+        return outcome["receipt"]
+
+    def test_an_address_edit_committed_while_issuing_is_on_the_receipt(self):
+        prop = Property.objects.get(pk=self.tenancy.property_id)
+
+        def edit():
+            prop.address = "2 New Road"
+            prop.save()
+
+        receipt = self.issue_during(edit)
+
+        self.assertEqual(receipt.issuer_address, "2 New Road")
+
+    def test_a_tenant_rename_committed_while_issuing_is_on_the_receipt(self):
+        tenancy = Tenancy.objects.get(pk=self.tenancy.pk)
+
+        def edit():
+            tenancy.name = "Shaik Zahid"
+            tenancy.save()
+
+        receipt = self.issue_during(edit)
+
+        self.assertEqual(receipt.tenant_name, "Shaik Zahid")
+        self.assertEqual(receipt.reference, "Shaik_Zahid_202_Rent_September 2026")

@@ -5,7 +5,7 @@ import logging
 
 import firebase_admin
 from django.conf import settings
-from firebase_admin import auth, exceptions
+from firebase_admin import auth, credentials, exceptions
 from google.auth.exceptions import GoogleAuthError
 
 logger = logging.getLogger(__name__)
@@ -27,8 +27,11 @@ def initialize_firebase():
     try:
         return firebase_admin.get_app()
     except ValueError:
-        # Credentials come from GOOGLE_APPLICATION_CREDENTIALS (loaded from .env).
+        # The key's fields from the environment, else the key file named by
+        # GOOGLE_APPLICATION_CREDENTIALS (both loaded from .env; settings.py).
+        key = settings.FIREBASE_SERVICE_ACCOUNT_KEY
         return firebase_admin.initialize_app(
+            credentials.Certificate(key) if key else None,
             options={
                 "projectId": settings.FIREBASE_PROJECT_ID,
             },

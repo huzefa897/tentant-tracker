@@ -33,6 +33,14 @@ def env_int(name: str, default: int) -> int:
     return default if value is None or not value.strip() else int(value)
 
 
+def postgres_options() -> dict[str, str]:
+    """POSTGRES_SSLMODE (libpq's sslmode): "require" for a database reached over the internet,
+    e.g. Supabase. Unset, libpq's default ("prefer") uses TLS only when the server offers it,
+    which is fine for the database on the same machine or Docker network."""
+    sslmode = os.getenv("POSTGRES_SSLMODE", "").strip()
+    return {"sslmode": sslmode} if sslmode else {}
+
+
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
@@ -127,6 +135,7 @@ DATABASES = {
         "PASSWORD": os.environ["POSTGRES_PASSWORD"],
         "HOST": os.environ["POSTGRES_HOST"],
         "PORT": os.getenv("POSTGRES_PORT", "5432"),
+        "OPTIONS": postgres_options(),
     },
 }
 
@@ -159,6 +168,10 @@ STATIC_URL = "static/"
 # `manage.py collectstatic` copies admin's CSS and JS here (done when the image is built).
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# The only upload is the Sheet import in admin (billing/sheet_import.py, superusers only), which
+# refuses more than 5 MB: a file that size stays in memory rather than in a temporary file.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
+
 # The app sends no email yet. Development prints it; production uses SMTP unless set.
 MAILERS = {
     "default": {
@@ -186,6 +199,14 @@ CACHES = {
         if env_bool("DJANGO_SHARED_CACHE")
         else {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
     ),
+    # The health and readiness checks' counts: always this process's memory, never PostgreSQL,
+    # so a flood of pings can't load the database just to be counted (config/throttling.py).
+    # Bounded: the oldest entries are dropped past MAX_ENTRIES.
+    "health": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "health-checks",
+        "OPTIONS": {"MAX_ENTRIES": 1000},
+    },
 }
 
 # Plain console logs; the host collects them. Never log tokens, Authorization headers, OTPs,
@@ -231,6 +252,9 @@ REST_FRAMEWORK = {
         "address": os.getenv("DJANGO_THROTTLE_ADDRESS", "300/minute"),
         "user": os.getenv("DJANGO_THROTTLE_USER", "300/minute"),
         "writes": os.getenv("DJANGO_THROTTLE_WRITES", "30/minute"),
+        # /health/ and /ready/, per address and process: room for monitors (and Docker's own
+        # check every 30 seconds), not for floods.
+        "health": os.getenv("DJANGO_THROTTLE_HEALTH", "10/minute"),
     },
     # How many proxies sit in front of Django, so a client's address is read from
     # X-Forwarded-For rather than the proxy's. 0 (the default) ignores X-Forwarded-For, which
@@ -245,3 +269,19 @@ TEST_RUNNER = "config.test_runner.TestRunner"
 # The Firebase project the Vue app signs in with. Its service-account credentials come
 # from GOOGLE_APPLICATION_CREDENTIALS: a path to a JSON key kept outside the repository.
 FIREBASE_PROJECT_ID = os.environ["FIREBASE_PROJECT_ID"]
+# Or from the key's fields, one variable each (backend/.env, e.g. for compose.yaml): used
+# instead of GOOGLE_APPLICATION_CREDENTIALS when FIREBASE_PRIVATE_KEY is set. The private
+# key's line breaks may be written as \n. "KEY" in the name hides it on Django's error pages.
+FIREBASE_SERVICE_ACCOUNT_KEY = (
+    {
+        "type": "service_account",
+        "project_id": FIREBASE_PROJECT_ID,
+        "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID", ""),
+        "private_key": os.environ["FIREBASE_PRIVATE_KEY"].replace("\\n", "\n"),
+        "client_email": os.environ["FIREBASE_CLIENT_EMAIL"],
+        "client_id": os.getenv("FIREBASE_CLIENT_ID", ""),
+        "token_uri": os.getenv("FIREBASE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+    }
+    if os.getenv("FIREBASE_PRIVATE_KEY", "").strip()
+    else None
+)

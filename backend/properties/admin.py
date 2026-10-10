@@ -1,6 +1,8 @@
 from django.contrib import admin, messages
+from django.contrib.admin.utils import unquote
 from django.db import IntegrityError
-from django.http import HttpResponseRedirect
+from django.http import Http404, HttpResponseRedirect
+from django.urls import path
 from django.db.models import Count, Prefetch, Q
 
 from .models import (
@@ -67,6 +69,25 @@ class PropertyAdmin(GrantedByMixin, admin.ModelAdmin):
             .annotate(active_members=Count("memberships", filter=Q(memberships__is_active=True)))
             .prefetch_related(Prefetch("memberships", active_owners, to_attr="active_owners"))
         )
+
+    def get_urls(self):
+        return [
+            path(
+                "<path:object_id>/import-sheet/",
+                self.admin_site.admin_view(self.import_sheet_view),
+                name="properties_property_import_sheet",
+            ),
+            *super().get_urls(),
+        ]
+
+    def import_sheet_view(self, request, object_id):
+        # Billing builds on properties, so it's imported here rather than at the top.
+        from billing.sheet_import import sheet_import_view
+
+        prop = self.get_object(request, unquote(object_id))
+        if prop is None:
+            raise Http404
+        return sheet_import_view(self, request, prop)
 
     @admin.display(description="Owners")
     def owners(self, obj):

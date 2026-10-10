@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0005_payment_sequence'),
+        ('billing', '0006_receipt_reference_per_property'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

@@ -10,7 +10,8 @@ is imported, or (any record rejected, reconciliation failing, or a dry run) noth
   original references; their snapshot is built from the imported records, as at the time they
   were issued.
 - After importing, the source and the database are reconciled: counts, totals and every bill's
-  outstanding must match, or nothing is kept.
+  outstanding must match, or nothing is kept. Every payment on the source's bills counts, so a
+  bill with a payment recorded in the app (possibly the same money the source lists) fails it.
 """
 
 import hashlib
@@ -26,7 +27,7 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Max, Sum
 
-from properties.models import Tenancy
+from properties.models import Property, Tenancy
 
 from .calculations import ZERO, entry_amounts
 from .legacy_ledger import RECEIPT_SUFFIX, Ledger, LedgerBill, LedgerPayment
@@ -67,9 +68,12 @@ def _previous_month(month):
 
 
 class _Importer:
-    def __init__(self, ledger: Ledger, mapping: dict[str, uuid.UUID], imported_by, dry_run):
+    def __init__(
+        self, ledger: Ledger, mapping: dict[str, uuid.UUID], imported_by, dry_run, property_id
+    ):
         self.ledger = ledger
         self.mapping = mapping
+        self.property_id = property_id
         self.imported_by = imported_by
         self.report = ImportReport(dry_run=dry_run)
         # Bill source id → the database bill, for reconciliation.
@@ -141,6 +145,15 @@ class _Importer:
                 self.reject(
                     f"tenant {tenant.source_id!r}: tenancy {self.mapping[tenant.source_id]} "
                     "doesn't exist"
+                )
+                continue
+            # Read under the lock, so a tenancy moved since the mapping was checked (admin
+            # signs it at Check and imports up to an hour later) can't take its bills and
+            # receipts to another property, and can't move until this commits.
+            if self.property_id is not None and tenancy.property_id != self.property_id:
+                self.reject(
+                    f"tenant {tenant.source_id!r}: tenancy {tenancy.pk} isn't one of this "
+                    "property's tenancies any more"
                 )
                 continue
             tenancies[tenant.source_id] = tenancy
@@ -260,14 +273,21 @@ class _Importer:
         if issued is not None:
             self.reject(f"{label}: the payment already has receipt {issued.reference}")
             return
-        if Receipt.objects.filter(reference=receipt.reference).exists():
-            self.reject(f"{label}: another receipt already has this reference")
+        # Read again, as when the app issues one: the tenancy is locked for the whole import,
+        # and the property's lock numbers its references one at a time, so the app can't take
+        # this one meanwhile and the receipt copies the details as they are now.
+        entry = payment.entry
+        tenancy = Tenancy.objects.get(pk=entry.tenancy_id)
+        prop = Property.objects.select_for_update(no_key=True).get(pk=tenancy.property_id)
+        if Receipt.objects.filter(property=prop, reference=receipt.reference).exists():
+            self.reject(f"{label}: another receipt of this property already has this reference")
             return
-        problem = receipt_problem(payment)
+        problem = receipt_problem(payment, tenancy, prop)
         if problem is not None:
             self.reject(f"{label}: {problem}")
             return
         created = Receipt.objects.create(
+            property=prop,
             # The original reference, never a new one: it's the receipt already handed out.
             reference=receipt.reference,
             issued_by=self.imported_by,
@@ -275,8 +295,11 @@ class _Importer:
             issued_date=receipt.issued_date,
             **receipt_snapshot(
                 payment,
+                entry,
+                tenancy,
+                prop,
                 self.imported_by,
-                previous_outstanding=self.previous_outstanding(payment.entry, receipt.issued_date),
+                previous_outstanding=self.previous_outstanding(entry, receipt.issued_date),
             ),
         )
         self.record(source_id, Kind.RECEIPT, created, fingerprint)
@@ -308,16 +331,21 @@ class _Importer:
                 source_id__in=payment_ids, kind=Kind.PAYMENT
             ).values("object_id")
         )
-
-        def imported_paid(entry):
-            return imported_payments.filter(entry=entry).aggregate(total=Sum("amount"))[
-                "total"
-            ] or ZERO
+        # The database side counts every payment on these bills, not only the imported ones: a
+        # payment recorded in the app since an earlier import may be the same money the source
+        # lists, and a rerun mustn't add it again and still call the bill reconciled.
+        amounts = {source_id: entry_amounts(entry) for source_id, entry in self.entries.items()}
+        not_from_source = sorted(
+            {
+                source_id
+                for source_id, entry in self.entries.items()
+                if entry.payments.exclude(pk__in=imported_payments.values("pk")).exists()
+            }
+        )
 
         source_outstanding = {b.source_id: b.total_due - b.total_paid for b in bills}
         database_outstanding = {
-            source_id: entry_amounts(entry).total_due - imported_paid(entry)
-            for source_id, entry in self.entries.items()
+            source_id: amount.total_due - amount.total_paid for source_id, amount in amounts.items()
         }
         mismatched = [
             source_id
@@ -333,14 +361,20 @@ class _Importer:
                 str(LegacyRecord.objects.filter(source_id__in=receipt_ids).count()),
             ),
             (
+                "bills with payments not from this source",
+                "0",
+                str(len(not_from_source))
+                + (f" ({', '.join(not_from_source)})" if not_from_source else ""),
+            ),
+            (
                 "total billed",
                 str(sum((b.total_due for b in bills), ZERO)),
-                str(sum((entry_amounts(e).total_due for e in self.entries.values()), ZERO)),
+                str(sum((a.total_due for a in amounts.values()), ZERO)),
             ),
             (
                 "total paid",
                 str(sum((b.total_paid for b in bills), ZERO)),
-                str(imported_payments.aggregate(total=Sum("amount"))["total"] or ZERO),
+                str(sum((a.total_paid for a in amounts.values()), ZERO)),
             ),
             (
                 "bills whose outstanding differs",
@@ -350,9 +384,13 @@ class _Importer:
         ]
 
 
-def import_ledger(ledger: Ledger, mapping: dict, *, imported_by, dry_run: bool) -> ImportReport:
-    """Imports the ledger in one transaction, or nothing: see the module docstring."""
-    importer = _Importer(ledger, mapping, imported_by, dry_run)
+def import_ledger(
+    ledger: Ledger, mapping: dict, *, imported_by, dry_run: bool, property_id=None
+) -> ImportReport:
+    """Imports the ledger in one transaction, or nothing: see the module docstring. With
+    property_id (admin's import, from one property's page), every mapped tenancy must belong
+    to that property when the import runs."""
+    importer = _Importer(ledger, mapping, imported_by, dry_run, property_id)
     with transaction.atomic():
         importer.run()
         if not importer.report.saved:

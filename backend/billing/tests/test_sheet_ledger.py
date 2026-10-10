@@ -3,8 +3,8 @@ import tempfile
 from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
-from unittest import skipUnless
 
+import openpyxl
 from django.conf import settings
 from django.core.management import CommandError, call_command
 from django.test import TestCase
@@ -12,20 +12,15 @@ from django.test import TestCase
 from billing.legacy_import import import_ledger
 from billing.legacy_ledger import parse_ledger
 from billing.models import Receipt, RentEntry
+from billing.sheet_ledger import convert_workbook
 
 from .factories import make_property, make_tenancy, make_user
 from .test_payments_api import TODAY
 
-try:
-    import openpyxl
-except ImportError:  # A dev package: production images don't have it.
-    openpyxl = None
-
-if openpyxl is not None:
-    from billing.sheet_ledger import convert_workbook
 
 
-def tenant_tab(workbook, title, rows, *, rate=6, flat=202.0, notes_header="Notes"):
+def tenant_tab(workbook, title, rows, *, rate=6, flat=202.0, notes_header="Notes",
+               water_header="Water Bill", due_header="Total Due"):
     """A tab laid out like the owners' sheet (fictional data): details, then monthly rows."""
     sheet = workbook.create_sheet(title)
     sheet["A1"] = "Rent Tracker"
@@ -40,7 +35,7 @@ def tenant_tab(workbook, title, rows, *, rate=6, flat=202.0, notes_header="Notes
     sheet.append([])
     # Row 10: the header, in this tab's own order.
     headers = ["Month", "Rent Amount", "Status", "Units Used", "Electricity Charge",
-               "Water Bill", "Total Due", "Total Paid", "Paid Date", notes_header,
+               water_header, due_header, "Total Paid", "Paid Date", notes_header,
                "Email Trigger", "Overdue Amount"]
     for column, header in enumerate(headers, start=1):
         sheet.cell(row=10, column=column, value=header)
@@ -75,7 +70,6 @@ def convert(*tabs):
     return convert_workbook(workbook_with(*tabs), today=TODAY)
 
 
-@skipUnless(openpyxl, "needs openpyxl (pipenv install --dev)")
 class ConvertWorkbookTests(TestCase):
     def test_converts_each_months_own_charges_and_payment(self):
         conversion = convert(
@@ -213,6 +207,23 @@ class ConvertWorkbookTests(TestCase):
         october = conversion.ledger["tenants"][0]["bills"][2]
         self.assertEqual(october["waterAmount"], "200.00")
 
+    def test_refuses_a_tab_without_a_water_bill_column(self):
+        # Misspelled, so the column can't be found: every bill would lose its water.
+        conversion = convert(
+            ("Tenant A", [row(datetime(2026, 9, 1), 75, water=300)], {"water_header": "Water"})
+        )
+
+        self.assertIn("'Tenant A' row 10: no 'Water Bill' column", conversion.problems)
+        self.assertEqual(conversion.ledger["tenants"], [])
+
+    def test_warns_when_bills_cant_be_compared_with_the_sheet(self):
+        conversion = convert(
+            ("Tenant A", [row(datetime(2026, 9, 1), 75)], {"due_header": "Due"})
+        )
+
+        self.assertEqual(conversion.problems, [])
+        self.assertIn("can't be compared with what the Sheet showed", conversion.warnings[0])
+
     def test_skips_tabs_without_a_month_header(self):
         workbook = workbook_with()
         workbook.create_sheet("Notes")["A1"] = "Ideas"
@@ -252,7 +263,6 @@ class ConvertWorkbookTests(TestCase):
         self.assertIn(("total paid", "20750.00", "20750.00"), report.reconciliation)
 
 
-@skipUnless(openpyxl, "needs openpyxl (pipenv install --dev)")
 class SheetToLedgerCommandTests(TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()

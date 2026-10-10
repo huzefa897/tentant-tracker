@@ -23,6 +23,8 @@ Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). PostgreS
 - `pipenv run makemigrate` — `makemigrations` (alias `makemigrations`); `pipenv run migrate` — apply them
 - `pipenv run test` — Django tests (needs the database up); `pipenv run check`; `pipenv run dbcheck` prints `postgresql`
 
+Or run everything in Docker with live reload: `docker compose --profile app up` (app on http://localhost:5173, Django on :8000; needs `backend/.env`, see `backend/README.md`).
+
 Before calling backend work done: `pipenv run check && pipenv run python manage.py makemigrations --check --dry-run && pipenv run test`. CI's `backend` job runs the same against a Postgres service.
 
 ## How the app works: read the docs
@@ -38,7 +40,7 @@ The details of each part of the app live in `docs/`, one file per area. **Before
 | [docs/payments-and-receipts.md](docs/payments-and-receipts.md)         | Payments (model, `record_payment`, API, store, recording), idempotent retries, and receipts (Django snapshots, issuance, PDF download)                                                                                                 |
 | [docs/security.md](docs/security.md)                                   | Security rules and the hardening checklist (admin, access, RLS, tokens, secrets, logs, SQL, input, XSS, uploads, rate limits, CORS, production settings, dependencies); **read it before any backend, auth, API or dependency change** |
 | [docs/testing.md](docs/testing.md)                                     | The shared service fakes and fixtures for tests                                                                                                                                                                                        |
-| [docs/deployment.md](docs/deployment.md)                               | Production: the containers and Caddy, first deploy, releasing and rolling back, health and readiness, backups, restore tests and recovery; **read it before changing settings, images, Compose or the scripts**                        |
+| [docs/deployment.md](docs/deployment.md)                               | Production: the containers and Caddy, first deploy, releasing and rolling back, health and readiness, backups, restore tests and recovery, the Render + Supabase alternative; **read it before changing settings, images, Compose, `render.yaml` or the scripts**                        |
 | [docs/data-import.md](docs/data-import.md)                             | Importing the owners' Google Sheet: what's imported, `sheet_to_ledger`, `import_legacy_ledger`, the mapping, reconciliation, reruns                                                                                                    |
 | [docs/google-sheets-integration.md](docs/google-sheets-integration.md) | The owners' Google Sheet and its Apps Script (`google-api/`): layout, data problems, what the app needs from it; read before any Sheets work                                                                                           |
 

@@ -119,12 +119,16 @@ export class ReceiptError extends Error {
   }
 }
 
-function receiptErrorMessage(err: unknown): string {
+// notFound: what's missing on a 404, the payment unless said otherwise.
+function receiptErrorMessage(
+  err: unknown,
+  notFound = "This payment can't be found. It may no longer be available.",
+): string {
   const problem = receiptConfigurationProblem(err)
   if (problem) return problem
   const kind = err instanceof ApiError ? err.kind : 'unknown'
   if (kind === 'forbidden') return "You don't have permission to issue receipts for this property."
-  if (kind === 'not-found') return "This payment can't be found. It may no longer be available."
+  if (kind === 'not-found') return notFound
   if (kind === 'rate-limited') return RATE_LIMITED_MESSAGE
   if (kind === 'unauthorized')
     return "Your sign-in couldn't be verified. Log out and sign in again."
@@ -596,7 +600,11 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         : (await receiptService.issueReceipt(propertyId, tenantId, payment.entryId, payment.id))
             .receipt
     } catch (err) {
-      if (isUncertainFailure(err)) throw new ReceiptError(RECEIPT_UNCONFIRMED_MESSAGE, true)
+      if (isUncertainFailure(err)) {
+        // Only issuing can leave it unknown whether a receipt now exists; loading one can't.
+        if (payment.receipt) throw new ReceiptError(RECEIPT_ERROR_MESSAGE)
+        throw new ReceiptError(RECEIPT_UNCONFIRMED_MESSAGE, true)
+      }
       throw new ReceiptError(receiptErrorMessage(err))
     }
 
@@ -609,25 +617,29 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
 
   // The receipt for the bill's most recent payment (newest paid date, then newest recorded),
   // issued if it has none: for buttons that offer a bill's receipt without listing its
-  // payments. Uses the bill's loaded payments, or loads them. Throws ReceiptError.
+  // payments. Always loads the bill's payments first, never a loaded list, which may predate a
+  // payment someone else recorded; fails if they can't be loaded. Throws ReceiptError.
   async function getLatestReceipt(tenantId: string, entryId: string): Promise<PaymentReceipt> {
     const propertyId = requireProperty()
     const gen = generation
-    const loaded = payments.value[entryId]
-    let list = loaded?.status === 'ready' ? loaded.payments : null
-    if (!list) {
-      try {
-        list = await paymentService.getPayments(propertyId, tenantId, entryId)
-      } catch (err) {
-        throw new ReceiptError(
-          isUncertainFailure(err) ? RECEIPT_ERROR_MESSAGE : receiptErrorMessage(err),
-        )
-      }
-      if (gen === generation) {
-        payments.value = {
-          ...payments.value,
-          [entryId]: { status: 'ready', payments: list, error: null },
-        }
+    const startSeq = paymentsSeq.get(entryId) ?? 0
+    let list: Payment[]
+    try {
+      list = await paymentService.getPayments(propertyId, tenantId, entryId)
+    } catch (err) {
+      throw new ReceiptError(
+        isUncertainFailure(err)
+          ? RECEIPT_ERROR_MESSAGE
+          : receiptErrorMessage(err, "This entry can't be found. It may no longer be available."),
+      )
+    }
+    // Shown unless a load started since; one under way when this began may predate the newest
+    // payment, so it's superseded (its result ignored). After a failure it's left to finish.
+    if (gen === generation && (paymentsSeq.get(entryId) ?? 0) === startSeq) {
+      paymentsSeq.set(entryId, startSeq + 1)
+      payments.value = {
+        ...payments.value,
+        [entryId]: { status: 'ready', payments: list, error: null },
       }
     }
 

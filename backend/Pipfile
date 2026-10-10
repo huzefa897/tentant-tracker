@@ -13,9 +13,10 @@ firebase-admin = "*"
 argon2-cffi = "*"
 gunicorn = "*"
 whitenoise = "*"
+openpyxl = "*"
+defusedxml = "*"
 
 [dev-packages]
-openpyxl = "*"
 
 [requires]
 python_version = "3.13"

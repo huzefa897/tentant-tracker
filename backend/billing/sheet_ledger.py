@@ -186,11 +186,18 @@ class _Tab:
             self.warning(None, "no Flat Number, so its receipts can't keep their references")
 
         columns = {_label(name): index for index, name in enumerate(self.rows[header])}
-        for required in ("rent amount", "units used", "total paid", "paid date"):
+        # Water too, though often blank: without its column every bill would quietly lose it.
+        for required in ("rent amount", "units used", "water bill", "total paid", "paid date"):
             if required not in columns:
                 self.problem(header + 1, f"no {required.title()!r} column")
         if self.failed:
             return None
+        if "total due" not in columns or "overdue amount" not in columns:
+            self.warning(
+                header + 1,
+                "no 'Total Due' or 'Overdue Amount' column, so its bills can't be compared with "
+                "what the Sheet showed; check them against it",
+            )
 
         bills, months = [], set()
         for index in range(header + 1, len(self.rows)):

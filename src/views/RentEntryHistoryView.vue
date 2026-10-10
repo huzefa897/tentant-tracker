@@ -64,7 +64,7 @@ const {
   downloadingId: downloadingReceiptId,
   error: receiptError,
   downloadLatestReceipt,
-  clearError: clearReceiptError,
+  reset: resetReceiptDownload,
 } = useReceiptDownload()
 
 function downloadReceipt(entryId: string) {
@@ -76,7 +76,7 @@ function downloadReceipt(entryId: string) {
 watch(
   () => props.tenantId,
   () => {
-    clearReceiptError()
+    resetReceiptDownload()
     historyShown.value = false
     selectedYear.value = 'all'
     selectedStatus.value = 'all'
@@ -86,13 +86,16 @@ watch(
   { immediate: true },
 )
 
-// Both filters change together on Clear filters: one reload, not two.
+// Both filters change together on Clear filters: one reload, not two. A filter or page shows
+// other bills, so an earlier bill's receipt download no longer shows or holds the buttons.
 watch([selectedYear, selectedStatus], () => {
+  resetReceiptDownload()
   page.value = 1
   load()
 })
 
 function goToPage(next: number) {
+  resetReceiptDownload()
   page.value = next
   load()
 }

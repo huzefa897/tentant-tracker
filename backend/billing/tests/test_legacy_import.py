@@ -196,6 +196,7 @@ class ImportLedgerTests(TestCase):
         # August was paid in full on 16 August, before this receipt.
         self.assertEqual(receipt.previous_month_outstanding, Decimal("0.00"))
         self.assertEqual(receipt.issuer_name, "Saleem Towers")
+        self.assertEqual(receipt.property, self.property)
 
     def part_paid_august(self):
         data = ledger_data()
@@ -315,6 +316,21 @@ class ImportLedgerTests(TestCase):
         self.assertIn("'Tenant B': not in the mapping file", report.rejected[0])
         self.assertIn("doesn't exist", report.rejected[1])
 
+    def test_refuses_a_tenancy_of_another_property_when_given_one(self):
+        other = make_property(name="Property B")
+
+        report = import_ledger(
+            parse(ledger_data()),
+            self.mapping,
+            imported_by=self.user,
+            dry_run=False,
+            property_id=other.pk,
+        )
+
+        self.assertFalse(report.saved)
+        self.assertIn("isn't one of this property's tenancies any more", report.rejected[0])
+        self.assertFalse(RentEntry.objects.exists())
+
     def test_refuses_months_outside_the_tenancy(self):
         self.tenancy.start_date = date(2026, 9, 1)
         self.tenancy.save()
@@ -337,6 +353,29 @@ class ImportLedgerTests(TestCase):
 
         self.assertIn("more than the bill's outstanding 750.00", report.rejected[0])
 
+    def test_does_not_reconcile_a_bill_with_payments_recorded_in_the_app(self):
+        self.run_import()
+        september = RentEntry.objects.get(billing_month=date(2026, 9, 1))
+        make_payment(september, self.user, "500.00", paid_date=date(2026, 9, 30))
+        data = ledger_data()
+        # Fits what's left (₹11,250), but may be the same money as the app's payment.
+        data["tenants"][0]["bills"][1]["payments"].append(
+            payment("Tenant A/2026-09/payment-2", "200.00", "2026-10-01")
+        )
+
+        report = self.run_import(data)
+
+        self.assertEqual(report.rejected, [])
+        self.assertFalse(report.reconciled)
+        self.assertFalse(report.saved)
+        self.assertIn(
+            ("bills with payments not from this source", "0", "1 (Tenant A/2026-09)"),
+            report.reconciliation,
+        )
+        # The ledger says ₹5,200 paid; the database has ₹5,500 without the new payment.
+        self.assertIn(("total paid", "20950.00", "21450.00"), report.reconciliation)
+        self.assertEqual(september.payments.count(), 2)
+
     def test_refuses_a_receipt_reference_already_in_use(self):
         self.run_import()
         data = ledger_data()
@@ -353,7 +392,28 @@ class ImportLedgerTests(TestCase):
 
         report = self.run_import(data, mapping={"Tenant A again": self.tenancy.pk})
 
-        self.assertIn("another receipt already has this reference", report.rejected[0])
+        self.assertIn(
+            "another receipt of this property already has this reference", report.rejected[0]
+        )
+
+    def test_references_only_need_to_be_free_within_the_property(self):
+        self.run_import()
+        other = make_tenancy(make_property(name="Property B", member=self.user))
+        data = ledger_data()
+        data["tenants"][0]["sourceId"] = "Tenant B"
+        for b in data["tenants"][0]["bills"]:
+            b["sourceId"] = b["sourceId"].replace("Tenant A", "Tenant B")
+            for p in b["payments"]:
+                p["sourceId"] = p["sourceId"].replace("Tenant A", "Tenant B")
+
+        report = self.run_import(data, mapping={"Tenant B": other.pk})
+
+        self.assertTrue(report.saved)
+        receipts = Receipt.objects.filter(reference="RCP-202-202609")
+        self.assertEqual(
+            sorted(receipts.values_list("property__name", flat=True)),
+            ["Property B", "Saleem Towers"],
+        )
 
     def test_refuses_receipts_until_the_property_is_configured(self):
         self.property.address = ""

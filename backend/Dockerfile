@@ -30,5 +30,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-m", "config.healthcheck"]
 # Logs (access and errors) go to stdout/stderr for the host to collect. The access log records
-# the request line, never headers, so tokens aren't logged. Workers: WEB_CONCURRENCY.
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]
+# the request line, never headers, so tokens aren't logged. Workers: WEB_CONCURRENCY. No control
+# socket: nothing uses it, and the user has no home directory to keep it in.
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-", "--no-control-socket"]
