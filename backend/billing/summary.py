@@ -7,6 +7,7 @@ Only counts, totals and hashes: never names, phone numbers or amounts per person
 """
 
 import hashlib
+import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -36,10 +37,17 @@ PROPERTY_FIELDS = _fields(Property)
 TENANCY_FIELDS = _fields(Tenancy)
 
 
+def _encode(row) -> str:
+    """One row as JSON: strings are quoted and escaped, so no field's text (a "|" or a line
+    break in a name or address) can pass for a field or row boundary, and an empty (None)
+    field stays apart from the text "None". Dates, decimals and ids go as their text."""
+    return json.dumps(list(row), default=str)
+
+
 def _digest(rows) -> str:
     """A hash of rows, in a fixed order: equal only if every row matches."""
     digest = hashlib.sha256()
-    for row in sorted("|".join(str(value) for value in row) for row in rows):
+    for row in sorted(_encode(row) for row in rows):
         digest.update(row.encode())
         digest.update(b"\n")
     return digest.hexdigest()[:16]
