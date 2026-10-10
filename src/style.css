@@ -131,8 +131,9 @@
   }
 }
 
-/* Motion. Screens ease in as they open, cards rise in when their content changes, and buttons
-   press in. All of it is off for people who prefer reduced motion. */
+/* Motion. Screens ease in as they open, cards rise in when their content changes, buttons
+   press in, switches slide and panels open in place. All of it is off for people who prefer
+   reduced motion. */
 @keyframes page-in {
   from {
     opacity: 0;
@@ -162,6 +163,36 @@
   [data-slot='button']:active:not(:disabled) {
     scale: 0.97;
   }
+
+  /* ToggleSwitch: the thumb overhangs both ends of its track and slides across. */
+  .switch-track,
+  .switch-thumb-core {
+    transition: background-color 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .switch-thumb {
+    translate: -4px 0;
+    transition:
+      translate 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      background-color 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .switch-thumb[data-state='checked'] {
+    translate: 16px 0;
+  }
+
+  /* A panel that opens in place, pushing what's below it down rather than covering it. */
+  .collapsible {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .collapsible[data-open='true'] {
+    grid-template-rows: 1fr;
+  }
+  .collapsible > * {
+    min-height: 0;
+    overflow: hidden;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -172,6 +203,13 @@
 
   [data-slot='button']:active:not(:disabled) {
     scale: none;
+  }
+
+  .switch-track,
+  .switch-thumb,
+  .switch-thumb-core,
+  .collapsible {
+    transition: none;
   }
 
   /* Skeletons hold still; their shape alone says something is loading. */

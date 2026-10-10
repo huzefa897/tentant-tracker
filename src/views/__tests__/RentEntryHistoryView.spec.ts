@@ -276,7 +276,7 @@ describe('RentEntryHistoryView', () => {
 
     expect(rows()).toHaveLength(1)
     expect(rows()[0]).toEqual(expect.arrayContaining(['October 2026', 'Void']))
-    expect((view!.get('#filter-show-void').element as HTMLInputElement).checked).toBe(true)
+    expect(view!.get('#filter-show-void').attributes('aria-checked')).toBe('true')
   })
 
   it('shows a load error, not an empty history or zero totals, then retries', async () => {

@@ -48,13 +48,14 @@ describe('RentEntryFilters', () => {
     expect(wrapper.emitted('update:status')).toEqual([['all']])
   })
 
-  it('hides void bills unless asked, apart from Clear filters', async () => {
+  it('hides void bills unless switched on, apart from Clear filters', async () => {
     const wrapper = mountFilters('2026')
     const toggle = wrapper.get('#filter-show-void')
-    expect((toggle.element as HTMLInputElement).checked).toBe(false)
+    expect(toggle.attributes('role')).toBe('switch')
+    expect(toggle.attributes('aria-checked')).toBe('false')
     expect(wrapper.get('label[for="filter-show-void"]').text()).toBe('Show void bills')
 
-    await toggle.setValue(true)
+    await toggle.trigger('click')
     expect(wrapper.emitted('update:showVoid')).toEqual([[true]])
 
     await wrapper
@@ -62,5 +63,31 @@ describe('RentEntryFilters', () => {
       .find((b) => b.text() === 'Clear filters')!
       .trigger('click')
     expect(wrapper.emitted('update:showVoid')).toHaveLength(1)
+  })
+
+  it('opens and closes the year and status panel from the Filters button', async () => {
+    const wrapper = mountFilters()
+    const toggle = wrapper.get('[data-testid="filters-toggle"]')
+    const panel = wrapper.get('#history-filter-panel')
+    expect(toggle.attributes('aria-controls')).toBe('history-filter-panel')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(panel.attributes('data-open')).toBe('false')
+    expect(panel.attributes('inert')).toBeDefined()
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(panel.attributes('data-open')).toBe('true')
+    expect(panel.attributes('inert')).toBeUndefined()
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+  })
+
+  it('starts open, counting them, when filters already apply', () => {
+    const wrapper = mountFilters('2026', 'paid')
+
+    expect(wrapper.get('[data-testid="filters-toggle"]').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('[data-testid="filters-count"]').text()).toBe('2 applied')
+    expect(mountFilters().find('[data-testid="filters-count"]').exists()).toBe(false)
   })
 })

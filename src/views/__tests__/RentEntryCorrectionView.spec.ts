@@ -119,7 +119,7 @@ describe('RentEntryCorrectionView', () => {
     const totals = () => view!.get('[aria-labelledby="entry-totals-heading"] dl').text()
     expect(totals()).toContain('₹31,500')
 
-    await view!.get('#filter-show-void').setValue(true)
+    await view!.get('#filter-show-void').trigger('click')
     await flushPromises()
     expect(months()).toEqual([
       ['October 2026', 'Unpaid'],

@@ -88,7 +88,7 @@ Skills are task guides in `.claude/skills/<name>/SKILL.md`. Claude Code loads th
 - Format money with `utils/currency.ts` (`formatINR`) and days with `utils/date.ts` (`formatOrdinal`).
 - Errors are shown inline (`role="alert"`), never `alert()`.
 - Loading states are skeletons in the content's place, never a "Loading…" line or a spinner that the content then pushes aside: shadcn-vue's `Skeleton`, arranged with `components/common/SkeletonLines.vue` (label/value lines, optionally a card), `SkeletonRows.vue` (list and table rows) and `components/tenant/TenantChipSkeleton.vue`, inside `LoadingRegion.vue` (announces a label to screen readers, hides the shapes). A reload of content already shown keeps the controls (e.g. filters) and replaces only what's reloading. Skeletons don't pulse under `prefers-reduced-motion` (`style.css`).
-- Motion lives in `style.css`: `animate-page-in` (layout content, so every screen eases in), `animate-rise-in` (content that appears or changes in place; key the element to replay it) and a press-in on every `[data-slot=button]`. All of it is off under `prefers-reduced-motion`; don't hand-edit `components/ui/` for motion.
+- Motion lives in `style.css`: `animate-page-in` (layout content, so every screen eases in), `animate-rise-in` (content that appears or changes in place; key the element to replay it), `.collapsible` (a panel that opens in place, pushing content down), the `ToggleSwitch` slide and a press-in on every `[data-slot=button]`. All of it is off under `prefers-reduced-motion`; don't hand-edit `components/ui/` for motion.
 - `VITE_*` env vars are public — never put secrets in them.
 
 ## Private data
