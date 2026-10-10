@@ -11,6 +11,14 @@ from .models import Payment, PaymentReversal, Receipt, RentEntry
 
 MONTH_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
 
+# Who did something, for people who can read the bill. A person's name is optional; the
+# username is internal ("app-<hex>") and the phone number is personal, so neither stands in.
+UNNAMED_PERSON = "Unnamed person"
+
+
+def person_name(user) -> str:
+    return user.name.strip() or UNNAMED_PERSON
+
 # Set by the server, never by the request.
 SERVER_ASSIGNED_FIELDS = {
     "id",
@@ -192,7 +200,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             "id": str(reversal.id),
             "reason": reversal.reason,
             "createdAt": serializers.DateTimeField().to_representation(reversal.created_at),
-            "createdByName": reversal.created_by.name,
+            "createdByName": person_name(reversal.created_by),
         }
 
     def get_receipt(self, payment):
@@ -417,7 +425,7 @@ class RentEntrySerializer(serializers.ModelSerializer):
             "voidedAt": None
             if instance.voided_at is None
             else serializers.DateTimeField().to_representation(instance.voided_at),
-            "voidedByName": None if instance.voided_by is None else instance.voided_by.name,
+            "voidedByName": None if instance.voided_by is None else person_name(instance.voided_by),
             "voidReason": instance.void_reason,
             "replacesEntryId": None
             if instance.replaces_entry_id is None

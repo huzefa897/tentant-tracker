@@ -535,6 +535,18 @@ class ReversalHistoryTests(ReversalTestCase):
         self.assertEqual(after["total paid"], "0.00")
         self.assertNotEqual(before["payment reversals digest"], after["payment reversals digest"])
 
+    def test_a_reversal_by_someone_without_a_name_says_unnamed_person(self):
+        self.owner.name = ""
+        self.owner.save()
+        self.reverse()
+        url = payments_url(self.property, self.tenancy, self.entry.id)
+
+        payments = {p["id"]: p for p in self.client.get(url).json()}
+
+        self.assertEqual(
+            payments[str(self.payment.id)]["reversal"]["createdByName"], "Unnamed person"
+        )
+
 
 class ReversalAdminTests(ReversalTestCase):
     def setUp(self):
@@ -575,3 +587,4 @@ class ReversalAdminTests(ReversalTestCase):
         response = self.client.get(reverse("admin:billing_receipt_change", args=[receipt.pk]))
 
         self.assertContains(response, REASON)
+

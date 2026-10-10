@@ -484,6 +484,36 @@ class BillCorrectionApiTests(BillCorrectionTestCase):
         self.assertEqual(body["outstandingAmount"], "0.00")
         self.assertIsNone(body["paymentStatus"])
 
+    def test_an_owner_without_a_name_is_named_as_unnamed_on_every_read(self):
+        # A person's name is optional; an empty one would make every read of the bill invalid.
+        self.owner.name = ""
+        self.owner.save()
+        voided = self.post_void()
+        corrected_entry = make_entry(self.tenancy, self.owner, month=date(2026, 9, 1))
+        corrected = self.client.post(
+            correction_url(self.property, self.tenancy, corrected_entry.id),
+            {
+                "reason": REASON,
+                "rentAmount": "15000.00",
+                "electricityUnits": "75.000",
+                "waterAmount": "400.00",
+                "notes": "",
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+
+        self.assertEqual(voided.status_code, 201)
+        self.assertEqual(voided.json()["voidedByName"], "Unnamed person")
+        self.assertEqual(corrected.status_code, 201)
+        self.assertEqual(corrected.json()["original"]["voidedByName"], "Unnamed person")
+        url = entries_url(self.property, self.tenancy)
+        self.assertEqual(
+            self.client.get(f"{url}{self.entry.id}/").json()["voidedByName"], "Unnamed person"
+        )
+        listed = self.client.get(url, {"status": "void"}).json()["results"]
+        self.assertEqual([e["voidedByName"] for e in listed], ["Unnamed person"] * 2)
+
     def test_void_retry_is_200_and_another_reason_409(self):
         self.post_void()
 
