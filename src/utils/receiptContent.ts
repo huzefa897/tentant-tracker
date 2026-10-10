@@ -4,7 +4,12 @@
 
 import type { PaymentReceipt } from '@/types/receipt'
 import { formatAmount, formatINR, formatINRWithPaise } from '@/utils/currency'
-import { formatDateValueNumeric, formatMonthValue, formatOrdinal } from '@/utils/date'
+import {
+  formatDateValueNumeric,
+  formatMonthValue,
+  formatOrdinal,
+  formatTimestamp,
+} from '@/utils/date'
 import { formatPhoneNumber } from '@/utils/phone'
 
 export interface ReceiptField {
@@ -25,6 +30,9 @@ export interface ReceiptTotalRow {
 }
 
 export interface ReceiptContent {
+  // Set when the payment was reversed: printed prominently, above everything it no longer
+  // confirms. The rest of the receipt is the snapshot as issued.
+  voided: { banner: string; details: string } | null
   fileName: string
   title: string
   subtitle: string
@@ -59,9 +67,12 @@ function present(fields: ReceiptField[]): ReceiptField[] {
   return fields.filter((field) => field.value !== '')
 }
 
+export const VOID_BANNER = 'VOID — Payment reversed'
+
 export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
   const { issuer, tenant, charges } = receipt
-  const paidInFull = receipt.outstanding <= 0
+  const isVoid = receipt.status === 'void'
+  const paidInFull = !isVoid && receipt.outstanding <= 0
   // Only differs from this payment's amount when earlier payments went towards the same bill.
   const paidEarlier = receipt.totalPaid !== receipt.paymentAmount
   const month = formatMonthValue(receipt.billingMonth)
@@ -97,15 +108,33 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
     })
   }
 
+  const summaryAmount = {
+    amountLabel: paidEarlier ? 'THIS PAYMENT' : 'AMOUNT PAID',
+    amount: formatINRWithPaise(receipt.paymentAmount),
+  }
+
   return {
+    voided: isVoid
+      ? {
+          banner: VOID_BANNER,
+          details: [
+            receipt.voidedAt && `Reversed ${formatTimestamp(receipt.voidedAt)}.`,
+            `Reason: ${receipt.voidReason}`,
+            'This receipt no longer confirms a payment.',
+          ]
+            .filter(Boolean)
+            .join(' '),
+        }
+      : null,
     // The reference already reads like the owners' receipt names: "Mirza_Baig_102_Rent_September 2026".
-    fileName: `${toFileName(receipt.reference)}.pdf`,
+    // A void copy says so in its name too, so it isn't mistaken for the valid one.
+    fileName: `${toFileName(receipt.reference)}${isVoid ? ' (VOID)' : ''}.pdf`,
     title: 'PAYMENT RECEIPT',
     subtitle: 'Rental / Tenant Payment Receipt',
     receiptNumber: receipt.reference,
     receiptDate: formatDateValueNumeric(receipt.issuedDate),
     paidInFull,
-    status: paidInFull ? 'PAID' : 'PARTIALLY PAID',
+    status: isVoid ? 'VOID' : paidInFull ? 'PAID' : 'PARTIALLY PAID',
     issuer: present([
       { label: 'Received By', value: issuer.receivedBy },
       { label: 'Property / Building Name', value: issuer.name },
@@ -144,23 +173,27 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
         tone: 'previous',
       },
     ],
-    summary: paidInFull
+    summary: isVoid
       ? {
-          heading: 'Payment received in full.',
-          message: 'Thank you! Your payment has been received successfully.',
-          amountLabel: paidEarlier ? 'THIS PAYMENT' : 'AMOUNT PAID',
-          amount: formatINRWithPaise(receipt.paymentAmount),
+          heading: 'Payment reversed.',
+          message: 'This payment was corrected after the receipt was issued. The receipt is void.',
+          ...summaryAmount,
         }
-      : {
-          heading: 'Part payment received.',
-          message: `${formatINRWithPaise(receipt.outstanding)} remains due for ${month}.`,
-          amountLabel: paidEarlier ? 'THIS PAYMENT' : 'AMOUNT PAID',
-          amount: formatINRWithPaise(receipt.paymentAmount),
-        },
+      : paidInFull
+        ? {
+            heading: 'Payment received in full.',
+            message: 'Thank you! Your payment has been received successfully.',
+            ...summaryAmount,
+          }
+        : {
+            heading: 'Part payment received.',
+            message: `${formatINRWithPaise(receipt.outstanding)} remains due for ${month}.`,
+            ...summaryAmount,
+          },
     remarks: receipt.paymentNotes.trim()
       ? [receipt.paymentNotes, STANDARD_REMARKS]
       : [STANDARD_REMARKS],
     authorizedBy: `AUTHORIZED BY · ${issuer.receivedBy || issuer.name}`,
-    footer: 'Thank you for your payment.',
+    footer: isVoid ? `${VOID_BANNER}.` : 'Thank you for your payment.',
   }
 }

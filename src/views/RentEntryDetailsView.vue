@@ -9,6 +9,7 @@ import SkeletonRows from '@/components/common/SkeletonRows.vue'
 import PaymentHistory from '@/components/rent/PaymentHistory.vue'
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import RecordPaymentForm from '@/components/rent/RecordPaymentForm.vue'
+import ReversePaymentForm from '@/components/rent/ReversePaymentForm.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import TenantChipSkeleton from '@/components/tenant/TenantChipSkeleton.vue'
 import { Button } from '@/components/ui/button'
@@ -24,9 +25,15 @@ import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteEntry } from '@/composables/useRouteEntry'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
-import { PAYMENT_SAVE_ERROR_MESSAGE, PaymentSaveError, useRentEntryStore } from '@/stores/rentEntry'
+import { useAccessStore } from '@/stores/access'
+import {
+  PAYMENT_SAVE_ERROR_MESSAGE,
+  REVERSAL_ERROR_MESSAGE,
+  PaymentSaveError,
+  useRentEntryStore,
+} from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
-import type { PaymentInput } from '@/types/payment'
+import type { Payment, PaymentInput } from '@/types/payment'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue, formatTimestamp } from '@/utils/date'
 
@@ -39,6 +46,7 @@ const props = defineProps<{
 
 const rentEntryStore = useRentEntryStore()
 const tenantStore = useTenantStore()
+const accessStore = useAccessStore()
 const router = useRouter()
 
 const {
@@ -79,10 +87,13 @@ const paymentDialogOpen = ref(false)
 const savingPayment = ref(false)
 const paymentError = ref<string | null>(null)
 const confirmation = ref<string | null>(null)
+// After a reversal: the replacement is a new payment, recorded on purpose (never pre-filled).
+const offerReplacement = ref(false)
 
 function openPaymentDialog() {
   paymentError.value = null
   confirmation.value = null
+  offerReplacement.value = false
   paymentDialogOpen.value = true
 }
 
@@ -129,6 +140,50 @@ async function handleSavePayment(input: PaymentInput) {
   }
 }
 
+// Owners correct payments recorded by mistake; the backend refuses anyone else.
+const canReverse = computed(() => accessStore.selectedProperty?.role === 'owner')
+const reversingPayment = ref<Payment | null>(null)
+const savingReversal = ref(false)
+const reversalError = ref<string | null>(null)
+
+function openReversal(paymentId: string) {
+  const payment = entryPayments.value?.payments.find((item) => item.id === paymentId)
+  if (!payment || payment.status !== 'recorded') return
+  reversalError.value = null
+  confirmation.value = null
+  offerReplacement.value = false
+  reversingPayment.value = payment
+}
+
+// The dialog stays open while a reversal is in flight, so its result (and any error) is seen.
+function setReversalDialogOpen(open: boolean) {
+  if (!open && !savingReversal.value) reversingPayment.value = null
+}
+
+// Only once the backend confirms does the bill show its new balance and the payment show as
+// reversed. On failure the dialog stays open with the reason, so trying again sends the same
+// one (a safe retry: the payment has one reversal).
+async function handleReverse(reason: string) {
+  const payment = reversingPayment.value
+  if (!payment || savingReversal.value) return
+
+  savingReversal.value = true
+  reversalError.value = null
+  try {
+    const { replayed } = await rentEntryStore.reversePayment(props.tenantId, payment, reason)
+    reversingPayment.value = null
+    const voided = payment.receipt ? ' Its receipt is now void.' : ''
+    confirmation.value = replayed
+      ? `Payment of ${formatINR(payment.amount)} was already reversed.${voided}`
+      : `Payment of ${formatINR(payment.amount)} reversed.${voided}`
+    offerReplacement.value = true
+  } catch (error) {
+    reversalError.value = error instanceof Error ? error.message : REVERSAL_ERROR_MESSAGE
+  } finally {
+    savingReversal.value = false
+  }
+}
+
 // Every receipt button waits while one is prepared; the error shows above the history.
 const {
   downloadingId: downloadingPaymentId,
@@ -150,6 +205,8 @@ watch(
     paymentDialogOpen.value = false
     paymentError.value = null
     confirmation.value = null
+    offerReplacement.value = false
+    if (!savingReversal.value) reversingPayment.value = null
     resetReceiptDownload()
     loadPayments()
   },
@@ -284,14 +341,27 @@ function goToHistory() {
           <User class="size-4" aria-hidden="true" />
           {{ tenant.name }} · Flat {{ tenant.flatNumber }}
         </p>
-        <p
+        <div
           v-if="confirmation"
-          class="mt-4 flex animate-rise-in items-center gap-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
-          role="status"
+          :key="confirmation"
+          class="mt-4 flex animate-rise-in flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
         >
-          <CircleCheck class="size-5 shrink-0" aria-hidden="true" />
-          {{ confirmation }}
-        </p>
+          <p class="flex items-center gap-2" role="status">
+            <CircleCheck class="size-5 shrink-0" aria-hidden="true" />
+            {{ confirmation }}
+          </p>
+          <Button
+            v-if="offerReplacement && entry.status !== 'paid'"
+            variant="outline"
+            size="sm"
+            class="h-9 text-foreground"
+            data-testid="record-replacement"
+            @click="openPaymentDialog"
+          >
+            <Plus aria-hidden="true" />
+            Record replacement payment
+          </Button>
+        </div>
       </header>
 
       <!-- Wide screens: charges, payment and other in one row, payment history below it. -->
@@ -366,7 +436,9 @@ function goToHistory() {
               :payments="entryPayments.payments"
               receipts
               :downloading-payment-id="downloadingPaymentId"
+              :can-reverse="canReverse"
               @download-receipt="handleDownloadReceipt"
+              @reverse-payment="openReversal"
             />
           </template>
         </section>
@@ -407,6 +479,27 @@ function goToHistory() {
             :save-error="paymentError"
             @save="handleSavePayment"
             @cancel="setPaymentDialogOpen(false)"
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog :open="!!reversingPayment" @update:open="setReversalDialogOpen">
+        <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reverse payment</DialogTitle>
+            <DialogDescription>
+              For a payment recorded by mistake. Record the correct one afterwards.
+            </DialogDescription>
+          </DialogHeader>
+          <ReversePaymentForm
+            v-if="reversingPayment"
+            :tenant="tenant"
+            :billing-month="entry.billingMonth"
+            :payment="reversingPayment"
+            :saving="savingReversal"
+            :save-error="reversalError"
+            @reverse="handleReverse"
+            @cancel="setReversalDialogOpen(false)"
           />
         </DialogContent>
       </Dialog>
