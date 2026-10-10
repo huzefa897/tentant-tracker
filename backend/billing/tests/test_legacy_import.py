@@ -316,6 +316,21 @@ class ImportLedgerTests(TestCase):
         self.assertIn("'Tenant B': not in the mapping file", report.rejected[0])
         self.assertIn("doesn't exist", report.rejected[1])
 
+    def test_refuses_a_tenancy_of_another_property_when_given_one(self):
+        other = make_property(name="Property B")
+
+        report = import_ledger(
+            parse(ledger_data()),
+            self.mapping,
+            imported_by=self.user,
+            dry_run=False,
+            property_id=other.pk,
+        )
+
+        self.assertFalse(report.saved)
+        self.assertIn("isn't one of this property's tenancies any more", report.rejected[0])
+        self.assertFalse(RentEntry.objects.exists())
+
     def test_refuses_months_outside_the_tenancy(self):
         self.tenancy.start_date = date(2026, 9, 1)
         self.tenancy.save()

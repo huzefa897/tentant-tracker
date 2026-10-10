@@ -17,7 +17,7 @@ Getting the records the owners already have into the production database once, w
 
 1. **Upload** the `.xlsx` (up to 5 MB). It's read in memory and never stored. It must be a real `.xlsx` (checked by its content), and one that unpacks to far more than a spreadsheet would is refused. The page shows the totals, any **problems** (nothing can be imported until they're fixed in the Sheet) and the warnings to **check** (step 3 below).
 2. **Match each tab** to one of _this property's_ tenancies (never by name), or choose _Don't import this tab_, then **Check**: a dry run that shows what would be created and the reconciliation, and saves nothing.
-3. **Import**: only offered after a clean check, and it imports exactly what was checked. Admin's history for the property records what was imported.
+3. **Import**: only offered after a clean check, and it imports exactly what was checked. Each tenancy must still belong to this property when it runs (checked with the tenancies locked), so one moved since the check is refused and nothing is imported. Admin's history for the property records what was imported.
 
 Between steps the converted Sheet travels in the page, signed for that property and admin, so it can't be altered, and it expires after an hour. Create the tenancies first (step 4 below) and take a backup (step 5). The steps below apply too, apart from copying files: the commands are the same import, for running by hand.
 

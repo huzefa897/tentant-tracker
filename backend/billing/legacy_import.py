@@ -68,9 +68,12 @@ def _previous_month(month):
 
 
 class _Importer:
-    def __init__(self, ledger: Ledger, mapping: dict[str, uuid.UUID], imported_by, dry_run):
+    def __init__(
+        self, ledger: Ledger, mapping: dict[str, uuid.UUID], imported_by, dry_run, property_id
+    ):
         self.ledger = ledger
         self.mapping = mapping
+        self.property_id = property_id
         self.imported_by = imported_by
         self.report = ImportReport(dry_run=dry_run)
         # Bill source id → the database bill, for reconciliation.
@@ -142,6 +145,15 @@ class _Importer:
                 self.reject(
                     f"tenant {tenant.source_id!r}: tenancy {self.mapping[tenant.source_id]} "
                     "doesn't exist"
+                )
+                continue
+            # Read under the lock, so a tenancy moved since the mapping was checked (admin
+            # signs it at Check and imports up to an hour later) can't take its bills and
+            # receipts to another property, and can't move until this commits.
+            if self.property_id is not None and tenancy.property_id != self.property_id:
+                self.reject(
+                    f"tenant {tenant.source_id!r}: tenancy {tenancy.pk} isn't one of this "
+                    "property's tenancies any more"
                 )
                 continue
             tenancies[tenant.source_id] = tenancy
@@ -372,9 +384,13 @@ class _Importer:
         ]
 
 
-def import_ledger(ledger: Ledger, mapping: dict, *, imported_by, dry_run: bool) -> ImportReport:
-    """Imports the ledger in one transaction, or nothing: see the module docstring."""
-    importer = _Importer(ledger, mapping, imported_by, dry_run)
+def import_ledger(
+    ledger: Ledger, mapping: dict, *, imported_by, dry_run: bool, property_id=None
+) -> ImportReport:
+    """Imports the ledger in one transaction, or nothing: see the module docstring. With
+    property_id (admin's import, from one property's page), every mapped tenancy must belong
+    to that property when the import runs."""
+    importer = _Importer(ledger, mapping, imported_by, dry_run, property_id)
     with transaction.atomic():
         importer.run()
         if not importer.report.saved:

@@ -207,7 +207,14 @@ def sheet_import_view(model_admin, request, prop):
     except LedgerError as error:
         return render(conversion=conversion, upload_form=UploadForm(), problems=error.problems)
 
-    report = import_ledger(ledger, mapping, imported_by=request.user, dry_run=step != "import")
+    report = import_ledger(
+        ledger,
+        mapping,
+        imported_by=request.user,
+        dry_run=step != "import",
+        # Checked again under the import's lock: a tenancy may have moved since the Check.
+        property_id=prop.pk,
+    )
     if report.saved:
         model_admin.log_change(request, prop, _summary(report))
         messages.success(request, _summary(report))

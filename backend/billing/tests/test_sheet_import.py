@@ -118,6 +118,21 @@ class SheetImportAdminTests(TestCase):
         log = LogEntry.objects.get(object_id=str(self.property.pk))
         self.assertIn("2 bill(s), 2 payment(s), 2 receipt(s)", log.get_change_message())
 
+    def test_refuses_a_tenancy_moved_to_another_property_since_the_check(self):
+        checked = self.check()
+        # A tenancy without bills can still move: say an admin corrects its property now.
+        self.tenancy.property = make_property(name="Property B")
+        self.tenancy.save()
+
+        response = self.client.post(
+            self.url, {"step": "import", "token": checked.context["import_token"]}
+        )
+
+        self.assertContains(response, "isn&#x27;t one of this property&#x27;s tenancies any more")
+        self.assertFalse(RentEntry.objects.exists())
+        self.assertFalse(Receipt.objects.exists())
+        self.assertFalse(LogEntry.objects.filter(object_id=str(self.property.pk)).exists())
+
     def test_importing_again_creates_nothing_twice(self):
         self.client.post(
             self.url, {"step": "import", "token": self.check().context["import_token"]}
