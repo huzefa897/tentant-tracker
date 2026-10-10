@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { ChevronRight, Download } from '@lucide/vue'
 
-import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
+import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
@@ -46,7 +46,7 @@ const charges = computed(() => [
         <p class="text-xs text-muted-foreground">Latest entry</p>
         <div class="mt-0.5 flex flex-wrap items-center gap-2">
           <h3 id="latest-entry-heading" class="text-lg font-semibold">{{ month }}</h3>
-          <PaymentStatusBadge :status="entry.status" />
+          <EntryStatusBadge :entry="entry" />
         </div>
       </div>
       <div class="flex flex-wrap gap-2">

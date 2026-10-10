@@ -2,14 +2,15 @@
 import { computed } from 'vue'
 import { ChevronRight, Download } from '@lucide/vue'
 
-import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
+import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
 
 // Shown in the given order, with the figures the backend calculated. Receipts are issued per
-// payment, on the entry's details page.
+// payment, on the entry's details page. A void bill is muted and marked VOID: it counts for
+// nothing, so its figures are shown struck through.
 const props = defineProps<{
   entries: RentEntry[]
   // The bill whose receipt is being prepared; every receipt button waits until it's done.
@@ -30,6 +31,8 @@ const rows = computed(() =>
     totalPaid: entry.totalPaid,
     outstanding: entry.outstanding,
     status: entry.status,
+    billStatus: entry.billStatus,
+    isVoid: entry.billStatus === 'void',
   })),
 )
 </script>
@@ -50,15 +53,28 @@ const rows = computed(() =>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in rows" :key="row.id" class="border-t" data-testid="history-row">
+          <tr
+            v-for="row in rows"
+            :key="row.id"
+            class="border-t"
+            :class="{ 'bg-muted/30 text-muted-foreground': row.isVoid }"
+            data-testid="history-row"
+          >
             <th scope="row" class="px-4 py-3 text-left font-medium">{{ row.month }}</th>
-            <td class="px-4 py-3 text-right tabular-nums">{{ formatINR(row.totalDue) }}</td>
-            <td class="px-4 py-3 text-right tabular-nums">{{ formatINR(row.totalPaid) }}</td>
-            <td class="px-4 py-3 text-right font-semibold tabular-nums">
+            <td class="px-4 py-3 text-right tabular-nums" :class="{ 'line-through': row.isVoid }">
+              {{ formatINR(row.totalDue) }}
+            </td>
+            <td class="px-4 py-3 text-right tabular-nums" :class="{ 'line-through': row.isVoid }">
+              {{ formatINR(row.totalPaid) }}
+            </td>
+            <td
+              class="px-4 py-3 text-right font-semibold tabular-nums"
+              :class="{ 'line-through': row.isVoid }"
+            >
               {{ formatINR(row.outstanding) }}
             </td>
             <td class="px-4 py-3">
-              <PaymentStatusBadge :status="row.status" />
+              <EntryStatusBadge :entry="row" />
             </td>
             <td class="px-4 py-2">
               <div class="flex justify-end gap-1">
@@ -94,14 +110,15 @@ const rows = computed(() =>
       <li
         v-for="row in rows"
         :key="row.id"
-        class="rounded-xl border bg-card p-4"
+        class="rounded-xl border p-4"
+        :class="row.isVoid ? 'bg-muted/30 text-muted-foreground' : 'bg-card'"
         data-testid="history-card"
       >
         <div class="flex items-center justify-between gap-3">
           <h3 class="font-semibold">{{ row.month }}</h3>
-          <PaymentStatusBadge :status="row.status" />
+          <EntryStatusBadge :entry="row" />
         </div>
-        <dl class="mt-3 space-y-1.5 text-sm">
+        <dl class="mt-3 space-y-1.5 text-sm" :class="{ 'line-through': row.isVoid }">
           <div class="flex justify-between gap-4">
             <dt class="text-muted-foreground">Total due</dt>
             <dd class="tabular-nums">{{ formatINR(row.totalDue) }}</dd>

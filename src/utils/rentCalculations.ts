@@ -71,19 +71,22 @@ export interface EntryTotals {
 }
 
 // Sums the given bills' figures (as the backend calculated them) in paise. Only what's passed
-// in: the history page sums the page on screen. The deposit is deliberately not applied: that
-// needs a business rule.
+// in: the history page sums the page on screen. Void bills count for nothing, so they're left
+// out. The deposit is deliberately not applied: that needs a business rule.
 export function sumEntryAmounts(
-  entries: Pick<RentEntry, 'totalDue' | 'totalPaid' | 'outstanding'>[],
+  entries: (Pick<RentEntry, 'totalDue' | 'totalPaid' | 'outstanding'> &
+    Partial<Pick<RentEntry, 'billStatus'>>)[],
 ): EntryTotals {
-  const paise = entries.reduce(
-    (sum, entry) => ({
-      totalBilled: sum.totalBilled + toPaise(entry.totalDue),
-      totalPaid: sum.totalPaid + toPaise(entry.totalPaid),
-      outstanding: sum.outstanding + toPaise(entry.outstanding),
-    }),
-    { totalBilled: 0, totalPaid: 0, outstanding: 0 },
-  )
+  const paise = entries
+    .filter((entry) => entry.billStatus !== 'void')
+    .reduce(
+      (sum, entry) => ({
+        totalBilled: sum.totalBilled + toPaise(entry.totalDue),
+        totalPaid: sum.totalPaid + toPaise(entry.totalPaid),
+        outstanding: sum.outstanding + toPaise(entry.outstanding),
+      }),
+      { totalBilled: 0, totalPaid: 0, outstanding: 0 },
+    )
 
   return {
     totalBilled: fromPaise(paise.totalBilled),

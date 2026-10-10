@@ -1,7 +1,7 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
 import { parseRentEntry, toRentEntry } from '@/services/rentEntry.service'
-import type { Payment, PaymentInput, RecordedPayment } from '@/types/payment'
+import type { Payment, PaymentInput, RecordedPayment, ReversedPayment } from '@/types/payment'
 
 // A payment as the backend returns it (.../entries/{entryId}/payments/).
 export interface PaymentDto {
@@ -11,7 +11,9 @@ export interface PaymentDto {
   paidDate: string // YYYY-MM-DD
   notes: string
   createdAt: string
-  receipt: { id: string; reference: string } | null
+  status: 'recorded' | 'reversed'
+  reversal: { id: string; reason: string; createdAt: string; createdByName: string } | null
+  receipt: { id: string; reference: string; status: 'issued' | 'void' } | null
 }
 
 // What a payment sends. The bill comes from the URL, the creator from the signed-in user, and
@@ -42,12 +44,25 @@ export function parsePayment(value: unknown): PaymentDto {
   if (typeof value.amount !== 'string' || !MONEY.test(value.amount)) invalid('amount')
   if (typeof value.paidDate !== 'string' || !DATE.test(value.paidDate)) invalid('paidDate')
   if (typeof value.notes !== 'string') invalid('notes')
+  if (value.status !== 'recorded' && value.status !== 'reversed') invalid('status')
+  // A reversed payment always says who reversed it and why; a recorded one never has a reversal.
+  const reversal = value.reversal
+  if (value.status === 'reversed') {
+    if (!isRecord(reversal)) invalid('reversal')
+    for (const key of ['id', 'reason', 'createdAt'] as const) {
+      if (typeof reversal[key] !== 'string' || reversal[key] === '') invalid(`reversal ${key}`)
+    }
+    if (typeof reversal.createdByName !== 'string') invalid('reversal createdByName')
+  } else if (reversal !== null) {
+    invalid('reversal')
+  }
   const receipt = value.receipt
   if (receipt !== null) {
     if (!isRecord(receipt)) invalid('receipt')
     for (const key of ['id', 'reference'] as const) {
       if (typeof receipt[key] !== 'string' || receipt[key] === '') invalid(`receipt ${key}`)
     }
+    if (receipt.status !== 'issued' && receipt.status !== 'void') invalid('receipt status')
   }
 
   return value as unknown as PaymentDto
@@ -61,7 +76,27 @@ export function toPayment(dto: PaymentDto): Payment {
     paidDate: dto.paidDate,
     notes: dto.notes,
     createdAt: dto.createdAt,
-    receipt: dto.receipt && { id: dto.receipt.id, reference: dto.receipt.reference },
+    status: dto.status,
+    reversal: dto.reversal && {
+      id: dto.reversal.id,
+      reason: dto.reversal.reason,
+      createdAt: dto.reversal.createdAt,
+      createdByName: dto.reversal.createdByName,
+    },
+    receipt: dto.receipt && {
+      id: dto.receipt.id,
+      reference: dto.receipt.reference,
+      status: dto.receipt.status,
+    },
+  }
+}
+
+// The payment and bill a write returns ({payment, entry}).
+function paymentAndEntry(data: unknown) {
+  if (!isRecord(data)) invalid('response')
+  return {
+    payment: toPayment(parsePayment(data.payment)),
+    entry: toRentEntry(parseRentEntry(data.entry)),
   }
 }
 
@@ -112,13 +147,30 @@ export const paymentService = {
       throw toApiError(error)
     }
 
-    const data: unknown = response.data
-    if (!isRecord(data)) invalid('response')
-    return {
-      payment: toPayment(parsePayment(data.payment)),
-      entry: toRentEntry(parseRentEntry(data.entry)),
-      replayed: response.status === 200,
+    return { ...paymentAndEntry(response.data), replayed: response.status === 200 }
+  },
+
+  // Reverses a payment recorded by mistake (owners only): it stops counting towards its bill and
+  // its receipt, if any, becomes void. The payment identifies its only reversal, so retrying
+  // with the same reason is safe (replayed). Errors: 'forbidden' (a manager); 'conflict' with
+  // code 'reversal_conflict' (already reversed for another reason); 'invalid-request' with
+  // fieldErrors.reason.
+  async reversePayment(
+    propertyId: string,
+    tenancyId: string,
+    payment: Pick<Payment, 'id' | 'entryId'>,
+    reason: string,
+  ): Promise<ReversedPayment> {
+    let response
+    try {
+      response = await api.post(
+        `${paymentsUrl(propertyId, tenancyId, payment.entryId)}${encodeURIComponent(payment.id)}/reversal/`,
+        { reason },
+      )
+    } catch (error) {
+      throw toApiError(error)
     }
+    return { ...paymentAndEntry(response.data), replayed: response.status === 200 }
   },
 
   // Every payment of the bill, newest paid date first (then newest recorded).

@@ -27,16 +27,26 @@ MONEY = DecimalField(max_digits=12, decimal_places=2)
 
 
 class RentEntryQuerySet(models.QuerySet):
+    def active(self):
+        """Bills that count: a void bill is kept as history but owes nothing."""
+        return self.filter(status=RentEntry.Status.ACTIVE)
+
     def with_amounts(self):
-        """Annotates each bill's payments sum (`paid_total`) and total due (`due_total`) in the
-        query itself, so a list of bills needs no query per bill and can be filtered by status.
+        """Annotates each bill's effective payments sum (`paid_total`) and total due
+        (`due_total`) in the query itself, so a list of bills needs no query per bill and can be
+        filtered by status.
 
         due_total follows billing/calculations.py: electricity rounded to paise, then added.
         PostgreSQL rounds halves away from zero, which is half up for these non-negative
         amounts. The serializer still calculates the shown figures with calculations.py.
         """
         return self.annotate(
-            paid_total=Coalesce(Sum("payments__amount"), Value(0), output_field=MONEY),
+            # Reversed payments don't count: they're corrections, kept only as history.
+            paid_total=Coalesce(
+                Sum("payments__amount", filter=Q(payments__reversal__isnull=True)),
+                Value(0),
+                output_field=MONEY,
+            ),
             due_total=models.ExpressionWrapper(
                 F("rent_amount")
                 + Round(F("electricity_units") * F("electricity_rate"), 2)
@@ -46,13 +56,15 @@ class RentEntryQuerySet(models.QuerySet):
         )
 
     def with_payment_status(self, status: str):
-        """Bills in one payment status (calculations.PaymentStatus). Needs with_amounts()."""
+        """Active bills in one payment status (calculations.PaymentStatus): a void bill has
+        none. Needs with_amounts()."""
+        bills = self.active()
         if status == "unpaid":
-            return self.filter(paid_total=0)
+            return bills.filter(paid_total=0)
         if status == "partially_paid":
-            return self.filter(paid_total__gt=0, paid_total__lt=F("due_total"))
+            return bills.filter(paid_total__gt=0, paid_total__lt=F("due_total"))
         if status == "paid":
-            return self.filter(paid_total__gte=F("due_total"))
+            return bills.filter(paid_total__gte=F("due_total"))
         raise ValueError(f"Unknown payment status: {status}")
 
 
@@ -61,8 +73,17 @@ class RentEntry(models.Model):
 
     Rent and electricity rate are copied from the tenancy when the bill is created: they're
     historical values, so changing the tenancy later never changes a saved bill. Totals, paid,
-    outstanding and status are derived (billing/calculations.py), never stored.
+    outstanding and payment status are derived (billing/calculations.py), never stored.
+
+    A bill is never edited or deleted. One that shouldn't exist is voided (status, voided_at,
+    voided_by, void_reason); one with wrong charges is voided and replaced by a new bill for
+    the same month (replaces_entry). A void bill keeps its charges as history and counts
+    towards nothing.
     """
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        VOID = "void", "Void"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # PROTECT: removing an occupant must never erase their billing history.
@@ -85,6 +106,25 @@ class RentEntry(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    status = models.CharField(max_length=6, choices=Status.choices, default=Status.ACTIVE)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    void_reason = models.CharField(max_length=500, blank=True)
+    # The void bill this one corrects. One-to-one: a bill is replaced at most once.
+    replaces_entry = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="replaced_by",
+    )
+
     objects = RentEntryQuerySet.as_manager()
 
     # Retry protection for creating the bill (the Idempotency-Key header). A retry with the same
@@ -99,10 +139,32 @@ class RentEntry(models.Model):
         # The API validates first for readable errors; these protect the stored data,
         # including against concurrent requests.
         constraints = [
+            # One active bill per tenancy and month; void ones stay beside it as history.
             models.UniqueConstraint(
                 fields=["tenancy", "billing_month"],
-                name="unique_tenancy_billing_month",
+                condition=Q(status="active"),
+                name="unique_active_tenancy_billing_month",
                 violation_error_message="An entry already exists for this tenancy and month.",
+            ),
+            # Void exactly when it records who voided it, when and why.
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        status="active",
+                        voided_at__isnull=True,
+                        voided_by__isnull=True,
+                        void_reason="",
+                    )
+                    | (
+                        Q(status="void", voided_at__isnull=False, voided_by__isnull=False)
+                        & ~Q(void_reason="")
+                    )
+                ),
+                name="rent_entry_void_details_match_status",
+            ),
+            models.CheckConstraint(
+                condition=~Q(replaces_entry=F("id")),
+                name="rent_entry_not_replacing_itself",
             ),
             models.CheckConstraint(
                 condition=Q(rent_amount__gt=0),
@@ -134,13 +196,21 @@ class RentEntry(models.Model):
         return f"{self.tenancy} — {self.billing_month:%B %Y}"
 
 
+class PaymentQuerySet(models.QuerySet):
+    def effective(self):
+        """Payments that count towards their bill: every one without a reversal."""
+        return self.filter(reversal__isnull=True)
+
+
 class Payment(models.Model):
     """Money received against one bill. A bill can have several; they're never allocated
     across months. The tenancy and property come through the bill (Payment → RentEntry →
     Tenancy → Property), never stored again here, so they can't contradict it.
 
     Created only through billing/services.py record_payment, which locks the bill so payments
-    never exceed it. Read-only afterwards: editing or reversing payments needs its own rules.
+    never exceed it. Never edited: a mistake is corrected by reversing the payment
+    (PaymentReversal, through reverse_payment) and recording its replacement, so the original
+    stays as it was recorded.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -161,6 +231,8 @@ class Payment(models.Model):
         related_name="+",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = PaymentQuerySet.as_manager()
 
     class Meta:
         # Newest received first; the same day, the latest recorded first. The sequence is unique
@@ -189,17 +261,54 @@ class Payment(models.Model):
         return f"₹{self.amount} on {self.paid_date:%d %b %Y} — {self.entry}"
 
 
+class PaymentReversal(models.Model):
+    """Corrects a payment recorded by mistake (the wrong amount, date or bill): the payment
+    stops counting towards its bill, and stays, unchanged, in its history. Its replacement is a
+    new payment. An accounting correction in the app; no money is moved.
+
+    Full reversals only: the reversed amount is always the payment's. Created only through
+    billing/services.py reverse_payment, which locks the bill, then the payment, and voids the
+    payment's receipt in the same transaction. Never edited or deleted.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # One reversal per payment, enforced by the database (a unique column).
+    payment = models.OneToOneField(Payment, on_delete=models.PROTECT, related_name="reversal")
+    reason = models.CharField(max_length=500)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "id")
+        constraints = [
+            models.CheckConstraint(
+                condition=~Q(reason=""),
+                name="payment_reversal_reason_not_empty",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Reversal of {self.payment}"
+
+
 class Receipt(models.Model):
     """Confirms one payment: a snapshot of everything printed on it, copied when it's issued.
 
     Later payments, or changes to the tenancy, property or bill, never change an issued receipt:
     reopening or downloading it shows exactly what was saved. The bill's figures are as they
-    stood right after this payment (the payments recorded before it, plus this one), so they're
-    the same whenever the receipt is issued.
+    stood right after this payment (the payments recorded before it, plus this one). Earlier
+    payments already reversed when it's issued don't count, so a receipt issued after such a
+    reversal can show a different balance than one issued before it.
 
-    Created only through billing/services.py issue_payment_receipt, which locks the payment so
-    each one gets at most one receipt, and the property so its references are numbered one at a
-    time. Read-only afterwards: corrections and voiding need their own workflow.
+    Created only through billing/services.py issue_payment_receipt, which locks the bill and the
+    payment so each one gets at most one receipt, and the property so its references are
+    numbered one at a time. Its snapshot is never changed afterwards. Reversing the payment voids
+    it (voided_at, voided_by, void_reason, set by reverse_payment): it keeps its reference and
+    snapshot but no longer confirms anything.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -266,9 +375,27 @@ class Receipt(models.Model):
     paid_date = models.DateField()
     payment_notes = models.CharField(max_length=500, blank=True)
 
+    # Set together when the payment is reversed; empty while the receipt is valid.
+    voided_at = models.DateTimeField(null=True, blank=True, editable=False)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="+",
+        null=True,
+        blank=True,
+        editable=False,
+    )
+    void_reason = models.CharField(max_length=500, blank=True, editable=False)
+
     class Meta:
         ordering = ("-issued_at", "id")
         constraints = [
+            # Void with when, who and why, or valid with none of them.
+            models.CheckConstraint(
+                condition=Q(voided_at__isnull=True, voided_by__isnull=True, void_reason="")
+                | (Q(voided_at__isnull=False, voided_by__isnull=False) & ~Q(void_reason="")),
+                name="receipt_void_details_together",
+            ),
             # Properties number their own: another property's tenant with the same name, flat
             # and month never makes this one's _2.
             models.UniqueConstraint(
@@ -286,7 +413,7 @@ class Receipt(models.Model):
         ]
 
     def __str__(self):
-        return self.reference
+        return self.reference if self.voided_at is None else f"{self.reference} (void)"
 
 
 def receipt_reference(tenant_name: str, flat_number: str, billing_month: date) -> str:

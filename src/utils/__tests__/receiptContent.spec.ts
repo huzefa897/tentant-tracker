@@ -194,4 +194,39 @@ describe('getReceiptContent', () => {
 
     expect(getReceiptContent(structuredClone(receipt))).toEqual(before)
   })
+
+  describe('a void receipt', () => {
+    const voided = makeReceipt({
+      ...paidInFull,
+      status: 'void',
+      voidedAt: '2026-10-07T08:00:00.000Z',
+      voidReason: 'Entered ₹17,654 for the wrong month.',
+    })
+
+    it('says prominently that it is void, why, and that it confirms nothing', () => {
+      const content = getReceiptContent(voided)
+
+      expect(content.voided?.banner).toBe('VOID — Payment reversed')
+      expect(content.voided?.details).toContain('Reason: Entered ₹17,654 for the wrong month.')
+      expect(content.voided?.details).toContain('no longer confirms a payment')
+      expect(content.status).toBe('VOID')
+      expect(content.paidInFull).toBe(false)
+      expect(content.summary.heading).toBe('Payment reversed.')
+      expect(content.footer).toBe('VOID — Payment reversed.')
+    })
+
+    it('keeps the snapshot as issued and names the file void', () => {
+      const content = getReceiptContent(voided)
+      const issued = getReceiptContent(makeReceipt(paidInFull))
+
+      expect(content.receiptNumber).toBe(issued.receiptNumber)
+      expect(content.totals).toEqual(issued.totals)
+      expect(content.charges).toEqual(issued.charges)
+      expect(content.fileName).toBe('Test_Tenant_102_Rent_September 2026 (VOID).pdf')
+    })
+
+    it('is not void while issued', () => {
+      expect(getReceiptContent(makeReceipt(paidInFull)).voided).toBeNull()
+    })
+  })
 })

@@ -1,5 +1,9 @@
 export type PaymentStatus = 'unpaid' | 'partially_paid' | 'paid'
 
+// A bill's own status, apart from its payments: a void bill is kept as history and counts
+// towards nothing (it's never "paid" or "unpaid").
+export type BillStatus = 'active' | 'void'
+
 // A new bill as the form submits it. The electricity rate is the tenant's current rate, used
 // for the preview only: the backend copies the rate from the tenancy when it saves the bill.
 export interface RentEntryInput {
@@ -42,10 +46,37 @@ export interface RentEntry {
   totalDue: number
   // The sum of the bill's payments.
   totalPaid: number
+  // Zero for a void bill.
   outstanding: number
-  status: PaymentStatus
+  // null for a void bill.
+  status: PaymentStatus | null
   notes: string
   createdAt: string // ISO timestamp
+  billStatus: BillStatus
+  // When, by whom and why it was voided; null while active.
+  voided: { at: string; byName: string; reason: string } | null
+  // A correction's two bills: the void bill a replacement replaces, and the replacement of a
+  // corrected one.
+  replacesEntryId: string | null
+  replacedByEntryId: string | null
+}
+
+// A corrected bill's replacement charges, and why. The tenancy, month and electricity rate are
+// the original bill's.
+export interface EntryCorrectionInput {
+  rentAmount: number
+  electricityUnits: number
+  waterAmount: number
+  notes: string
+  reason: string
+}
+
+// A correction as the backend made it: the original, now void, and its replacement.
+export interface CorrectedEntry {
+  original: RentEntry
+  replacement: RentEntry
+  // True when the backend had already made it (a retry after a lost response).
+  replayed: boolean
 }
 
 // One page of a tenant's bills, newest billing month first.
@@ -59,6 +90,8 @@ export interface RentEntryPage {
 }
 
 export interface RentEntryFilters {
+  // Active bills unless asked otherwise.
+  billStatus?: BillStatus | 'all'
   year?: string // YYYY
   billingMonth?: string // YYYY-MM
   paymentStatus?: PaymentStatus

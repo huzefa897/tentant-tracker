@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronRight, CircleCheck, User } from '@lucide/vue'
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
 import SlowLoadScreen from '@/components/common/SlowLoadScreen.vue'
-import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
+import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
 import RentEntryForm from '@/components/rent/RentEntryForm.vue'
 import {
   AlertDialog,
@@ -263,7 +263,7 @@ function handleDialogOpenChange(open: boolean) {
           </div>
           <div class="flex items-center justify-between gap-4">
             <dt class="text-muted-foreground">Status</dt>
-            <dd><PaymentStatusBadge :status="savedSummary.entry.status" /></dd>
+            <dd><EntryStatusBadge :entry="savedSummary.entry" /></dd>
           </div>
         </dl>
 

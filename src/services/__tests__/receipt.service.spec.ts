@@ -55,6 +55,9 @@ const receiptDto = {
   paymentAmount: '3000.00',
   paidDate: '2026-10-06',
   paymentNotes: 'Bank transfer',
+  status: 'issued',
+  voidedAt: null,
+  voidReason: '',
 }
 
 function httpError(status: number, data: unknown) {
@@ -109,6 +112,29 @@ describe('parseReceipt', () => {
       paymentAmount: 3000,
       paidDate: '2026-10-06',
       paymentNotes: 'Bank transfer',
+      status: 'issued',
+      voidedAt: null,
+      voidReason: '',
+    })
+  })
+
+  it('maps a void receipt with when and why', () => {
+    const receipt = toReceipt(
+      parseReceipt({
+        ...receiptDto,
+        status: 'void',
+        voidedAt: '2026-10-07T08:00:00Z',
+        voidReason: 'Wrong amount.',
+      }),
+    )
+
+    expect(receipt).toMatchObject({
+      status: 'void',
+      voidedAt: '2026-10-07T08:00:00Z',
+      voidReason: 'Wrong amount.',
+      // The snapshot is unchanged.
+      reference: receiptDto.reference,
+      paymentAmount: 3000,
     })
   })
 
@@ -122,6 +148,10 @@ describe('parseReceipt', () => {
     ['a tenant without a flat', { tenant: { ...receiptDto.tenant, flatNumber: '' } }],
     ['units with two decimals', { charges: { ...receiptDto.charges, electricityUnits: '75.00' } }],
     ['missing notes', { paymentNotes: undefined }],
+    ['an unknown status', { status: 'cancelled' }],
+    ['a void receipt without a reason', { status: 'void', voidedAt: '2026-10-07T08:00:00Z' }],
+    ['a void receipt without a time', { status: 'void', voidReason: 'Wrong amount.' }],
+    ['an issued receipt with a void time', { voidedAt: '2026-10-07T08:00:00Z' }],
   ])('rejects %s', (_, change) => {
     expect(() => parseReceipt({ ...receiptDto, ...change })).toThrow(ApiError)
   })

@@ -1,6 +1,9 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
 import type {
+  BillStatus,
+  CorrectedEntry,
+  EntryCorrectionInput,
   NewRentEntrySubmission,
   PaymentStatus,
   RentEntry,
@@ -24,9 +27,27 @@ export interface RentEntryDto {
   totalDue: string
   totalPaid: string
   outstandingAmount: string
-  paymentStatus: PaymentStatus
+  // null for a void bill.
+  paymentStatus: PaymentStatus | null
   notes: string
   createdAt: string
+  status: BillStatus
+  // null, null and "" while active.
+  voidedAt: string | null
+  voidedByName: string | null
+  voidReason: string
+  replacesEntryId: string | null
+  replacedByEntryId: string | null
+}
+
+// What a correction sends: the replacement's charges (decimal strings) and why. Never the rate,
+// month or tenancy, which are the original's.
+export interface EntryCorrectionDto {
+  reason: string
+  rentAmount: string
+  electricityUnits: string
+  waterAmount: string
+  notes: string
 }
 
 // What a new bill sends. No electricity rate (the server takes the tenancy's), tenancy, creator
@@ -47,6 +68,7 @@ export interface CreateRentEntryDto {
 }
 
 const STATUSES: readonly PaymentStatus[] = ['unpaid', 'partially_paid', 'paid']
+const BILL_STATUSES: readonly BillStatus[] = ['active', 'void']
 const MONEY = /^-?\d+\.\d{2}$/
 const UNITS = /^\d+\.\d{3}$/
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/
@@ -84,8 +106,25 @@ export function parseRentEntry(value: unknown): RentEntryDto {
   if (typeof value.electricityUnits !== 'string' || !UNITS.test(value.electricityUnits)) {
     invalid('electricityUnits')
   }
-  if (!STATUSES.includes(value.paymentStatus as PaymentStatus)) invalid('paymentStatus')
   if (typeof value.notes !== 'string') invalid('notes')
+  if (!BILL_STATUSES.includes(value.status as BillStatus)) invalid('status')
+  const isVoid = value.status === 'void'
+  // A void bill has no payment status and records who voided it, when and why; an active one
+  // has a payment status and no void details.
+  if (isVoid) {
+    if (value.paymentStatus !== null) invalid('paymentStatus')
+    for (const key of ['voidedAt', 'voidedByName', 'voidReason'] as const) {
+      if (typeof value[key] !== 'string' || value[key] === '') invalid(key)
+    }
+  } else {
+    if (!STATUSES.includes(value.paymentStatus as PaymentStatus)) invalid('paymentStatus')
+    if (value.voidedAt !== null || value.voidedByName !== null || value.voidReason !== '') {
+      invalid('voidedAt')
+    }
+  }
+  for (const key of ['replacesEntryId', 'replacedByEntryId'] as const) {
+    if (value[key] !== null && (typeof value[key] !== 'string' || value[key] === '')) invalid(key)
+  }
 
   return value as unknown as RentEntryDto
 }
@@ -107,7 +146,39 @@ export function toRentEntry(dto: RentEntryDto): RentEntry {
     status: dto.paymentStatus,
     notes: dto.notes,
     createdAt: dto.createdAt,
+    billStatus: dto.status,
+    voided:
+      dto.status === 'void'
+        ? { at: dto.voidedAt ?? '', byName: dto.voidedByName ?? '', reason: dto.voidReason }
+        : null,
+    replacesEntryId: dto.replacesEntryId,
+    replacedByEntryId: dto.replacedByEntryId,
   }
+}
+
+// Decimal strings, as for a new bill (validation has already limited the decimals).
+export function toEntryCorrectionDto(input: EntryCorrectionInput): EntryCorrectionDto {
+  return {
+    reason: input.reason,
+    rentAmount: input.rentAmount.toFixed(2),
+    electricityUnits: input.electricityUnits.toFixed(3),
+    waterAmount: input.waterAmount.toFixed(2),
+    notes: input.notes,
+  }
+}
+
+function parseCorrection(data: unknown): Omit<CorrectedEntry, 'replayed'> {
+  if (!isRecord(data)) invalid('correction')
+  const original = toRentEntry(parseRentEntry(data.original))
+  const replacement = toRentEntry(parseRentEntry(data.replacement))
+  if (
+    original.billStatus !== 'void' ||
+    replacement.billStatus !== 'active' ||
+    replacement.replacesEntryId !== original.id
+  ) {
+    invalid('correction')
+  }
+  return { original, replacement }
 }
 
 // Decimal strings, so the backend never parses a float. Validation has already limited the
@@ -193,7 +264,8 @@ export const rentEntryService = {
   },
 
   // One page of the tenancy's bills, newest billing month first, filtered by the backend before
-  // paging. billingMonth finds one month's bill, e.g. the one a duplicate save clashed with.
+  // paging. Active bills only, unless billStatus asks for void ones too ('all') or only them.
+  // billingMonth finds one month's active bill, e.g. the one a duplicate save clashed with.
   async getEntries(
     propertyId: string,
     tenancyId: string,
@@ -201,6 +273,7 @@ export const rentEntryService = {
   ): Promise<RentEntryPage> {
     const page = filters.page ?? 1
     const params: Record<string, string | number> = {}
+    if (filters.billStatus && filters.billStatus !== 'active') params.status = filters.billStatus
     if (filters.year) params.year = filters.year
     if (filters.billingMonth) params.billing_month = filters.billingMonth
     if (filters.paymentStatus) params.payment_status = filters.paymentStatus
@@ -216,5 +289,54 @@ export const rentEntryService = {
       api.get(`${entriesUrl(propertyId, tenancyId)}${encodeURIComponent(entryId)}/`),
     )
     return toRentEntry(parseRentEntry(data))
+  },
+
+  // Voids a bill that should not exist (owners only). A retry with the same reason is safe
+  // (replayed). Errors: 'forbidden' (a manager); 'conflict' with code 'unreversed_payments'
+  // (payments still count: reverse them first) or 'void_conflict' (voided already, for
+  // another reason); 'invalid-request' with fieldErrors.
+  async voidEntry(
+    propertyId: string,
+    tenancyId: string,
+    entryId: string,
+    reason: string,
+  ): Promise<{ entry: RentEntry; replayed: boolean }> {
+    let response
+    try {
+      response = await api.post(
+        `${entriesUrl(propertyId, tenancyId)}${encodeURIComponent(entryId)}/void/`,
+        { reason },
+      )
+    } catch (error) {
+      throw toApiError(error)
+    }
+    const entry = toRentEntry(parseRentEntry(response.data))
+    if (entry.billStatus !== 'void') invalid('status')
+    return { entry, replayed: response.status === 200 }
+  },
+
+  // Voids a bill with wrong charges and creates its replacement for the same month, together
+  // or not at all (owners only). idempotencyKey: one per intended correction, reused by a retry,
+  // which returns the correction it made (replayed). Errors: 'forbidden'; 'conflict' with code
+  // 'unreversed_payments', 'entry_void' (already void) or 'idempotency_conflict';
+  // 'invalid-request' with fieldErrors (nonFieldErrors when nothing changed).
+  async correctEntry(
+    propertyId: string,
+    tenancyId: string,
+    entryId: string,
+    input: EntryCorrectionInput,
+    idempotencyKey: string,
+  ): Promise<CorrectedEntry> {
+    let response
+    try {
+      response = await api.post(
+        `${entriesUrl(propertyId, tenancyId)}${encodeURIComponent(entryId)}/correction/`,
+        toEntryCorrectionDto(input),
+        { headers: { 'Idempotency-Key': idempotencyKey } },
+      )
+    } catch (error) {
+      throw toApiError(error)
+    }
+    return { ...parseCorrection(response.data), replayed: response.status === 200 }
   },
 }

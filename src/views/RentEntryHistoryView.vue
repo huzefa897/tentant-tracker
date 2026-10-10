@@ -41,6 +41,7 @@ const PAGE_SIZE = 12
 
 const selectedYear = ref('all')
 const selectedStatus = ref<PaymentStatus | 'all'>('all')
+const showVoid = ref(false)
 const page = ref(1)
 
 const filtered = computed(() => selectedYear.value !== 'all' || selectedStatus.value !== 'all')
@@ -54,6 +55,7 @@ const skeletonRows = ref(4)
 // The backend filters (before paging) and pages; this page asks for what's shown.
 function load() {
   rentEntryStore.loadHistory(props.tenantId, {
+    includeVoid: showVoid.value,
     year: selectedYear.value === 'all' ? null : selectedYear.value,
     paymentStatus: selectedStatus.value === 'all' ? null : selectedStatus.value,
     page: page.value,
@@ -81,6 +83,7 @@ watch(
     historyShown.value = false
     selectedYear.value = 'all'
     selectedStatus.value = 'all'
+    showVoid.value = false
     page.value = 1
     load()
   },
@@ -89,7 +92,7 @@ watch(
 
 // Both filters change together on Clear filters: one reload, not two. A filter or page shows
 // other bills, so an earlier bill's receipt download no longer shows or holds the buttons.
-watch([selectedYear, selectedStatus], () => {
+watch([selectedYear, selectedStatus, showVoid], () => {
   resetReceiptDownload()
   page.value = 1
   load()
@@ -125,7 +128,9 @@ const years = computed(() => {
 })
 
 // This page's bills only: a tenant's other pages aren't loaded, so this is never their balance.
+// Void bills count for nothing.
 const totals = computed(() => sumEntryAmounts(entries.value))
+const voidCount = computed(() => entries.value.filter((e) => e.billStatus === 'void').length)
 
 // What the empty result is for, e.g. "No paid entries in 2026."
 const noMatchesMessage = computed(() => {
@@ -135,6 +140,18 @@ const noMatchesMessage = computed(() => {
       : `${formatPaymentStatus(selectedStatus.value).toLowerCase()} `
   const year = selectedYear.value === 'all' ? '' : ` in ${selectedYear.value}`
   return `No ${status}entries${year}.`
+})
+
+// All the matching bills, across pages.
+const entriesCountLabel = computed(() =>
+  history.value.count === 1 ? '1 entry' : `${history.value.count} entries`,
+)
+
+const allVoidMessage = computed(() => {
+  const count = history.value.hiddenVoidCount
+  return count === 1
+    ? 'No active bills. The only bill is void, so it’s hidden.'
+    : `No active bills. All ${count} bills are void, so they’re hidden.`
 })
 
 function clearFilters() {
@@ -180,7 +197,7 @@ function viewEntry(entryId: string) {
         <Skeleton class="h-11 w-44" />
       </div>
       <div class="space-y-6">
-        <Skeleton class="h-[4.25rem] w-full max-w-lg" />
+        <Skeleton class="h-[7.5rem] w-full rounded-xl" />
         <SkeletonRows bordered />
       </div>
     </LoadingRegion>
@@ -227,13 +244,18 @@ function viewEntry(entryId: string) {
         data-testid="history-loading"
       >
         <div class="space-y-6">
-          <Skeleton class="h-[4.25rem] w-full max-w-lg" />
+          <Skeleton class="h-[7.5rem] w-full rounded-xl" />
           <SkeletonRows bordered />
         </div>
       </LoadingRegion>
 
       <div
-        v-else-if="history.status === 'ready' && history.count === 0 && !filtered"
+        v-else-if="
+          history.status === 'ready' &&
+          history.count === 0 &&
+          !filtered &&
+          history.hiddenVoidCount === 0
+        "
         class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
       >
         <div
@@ -252,24 +274,38 @@ function viewEntry(entryId: string) {
       </div>
 
       <div v-else class="space-y-6">
-        <!-- Wide screens: filters and totals share a row, so the table starts higher. -->
-        <div class="grid gap-6 xl:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] xl:items-end">
-          <RentEntryFilters
-            v-model:year="selectedYear"
-            v-model:status="selectedStatus"
-            :years="years"
-          />
-          <RentEntryTotals
-            v-if="history.status === 'ready' && entries.length > 0"
-            :totals="totals"
-          />
-          <!-- Holds the totals' space while another page or filter loads. -->
-          <Skeleton
-            v-else-if="history.status !== 'ready'"
-            class="h-[18.5rem] sm:h-28"
-            aria-hidden="true"
-          />
-        </div>
+        <RentEntryTotals
+          v-if="history.status === 'ready' && entries.length > 0"
+          :totals="totals"
+          :void-count="voidCount"
+        />
+        <!-- Holds the totals' space while another page or filter loads. -->
+        <Skeleton
+          v-else-if="history.status !== 'ready'"
+          class="h-[18.5rem] sm:h-28"
+          aria-hidden="true"
+        />
+
+        <section aria-labelledby="entries-heading" class="rounded-xl border">
+          <div class="flex items-baseline justify-between gap-4 border-b px-4 py-3 sm:px-5">
+            <h2 id="entries-heading" class="text-lg font-semibold">Entries</h2>
+            <p
+              v-if="history.status === 'ready'"
+              class="text-sm text-muted-foreground tabular-nums"
+              data-testid="entries-count"
+            >
+              {{ entriesCountLabel }}
+            </p>
+          </div>
+          <div class="p-3 sm:px-4">
+            <RentEntryFilters
+              v-model:year="selectedYear"
+              v-model:status="selectedStatus"
+              v-model:show-void="showVoid"
+              :years="years"
+            />
+          </div>
+        </section>
 
         <LoadingRegion
           v-if="history.status !== 'ready'"
@@ -318,6 +354,24 @@ function viewEntry(entryId: string) {
             </Button>
           </nav>
         </template>
+
+        <!-- Every bill is void: they're hidden, not missing. -->
+        <div
+          v-else-if="history.hiddenVoidCount > 0"
+          class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-10 text-center"
+          data-testid="all-bills-void"
+        >
+          <p class="max-w-sm text-muted-foreground">{{ allVoidMessage }}</p>
+          <div class="mt-4 flex flex-wrap justify-center gap-3">
+            <Button variant="outline" class="h-11 px-6" @click="showVoid = true">
+              Show void bills
+            </Button>
+            <Button class="h-11 px-6" @click="addEntry">
+              <Plus aria-hidden="true" />
+              Add New Entry
+            </Button>
+          </div>
+        </div>
 
         <div
           v-else

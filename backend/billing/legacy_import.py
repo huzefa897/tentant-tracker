@@ -185,11 +185,20 @@ class _Importer:
         entry = self.existing(source_id, Kind.BILL, fingerprint, label)
         if entry is False:
             return
+        # Imported before and voided in the app since: it counts for nothing now, so it can't
+        # take payments or be reconciled as saved.
+        if entry is not None and entry.status == RentEntry.Status.VOID:
+            self.reject(f"{label}: it was voided in the app since it was imported")
+            return
         if entry is None:
             if not tenancy_covers_month(tenancy, bill.billing_month):
                 self.reject(f"{label}: {bill.billing_month:%Y-%m} is outside the tenancy's dates")
                 return
-            if RentEntry.objects.filter(tenancy=tenancy, billing_month=bill.billing_month).exists():
+            if (
+                RentEntry.objects.active()
+                .filter(tenancy=tenancy, billing_month=bill.billing_month)
+                .exists()
+            ):
                 self.reject(
                     f"{label}: the tenancy already has a {bill.billing_month:%B %Y} bill that "
                     "wasn't imported from this source; remove one of them first"
@@ -234,6 +243,9 @@ class _Importer:
             # app payment on the same bill. Payments recorded in the app since an earlier
             # import count towards the balance too.
             entry = RentEntry.objects.select_for_update().get(pk=entry.pk)
+            if entry.status == RentEntry.Status.VOID:
+                self.reject(f"{label}: its bill was voided in the app since it was imported")
+                return
             outstanding = entry_amounts(entry).outstanding_amount
             if payment.amount > outstanding:
                 self.reject(
@@ -306,12 +318,14 @@ class _Importer:
 
     def previous_outstanding(self, entry: RentEntry, issued_date) -> Decimal:
         """What the previous month's bill still owed on the day the receipt was issued."""
-        previous = RentEntry.objects.filter(
-            tenancy=entry.tenancy, billing_month=_previous_month(entry.billing_month)
-        ).first()
+        previous = (
+            RentEntry.objects.active()
+            .filter(tenancy=entry.tenancy, billing_month=_previous_month(entry.billing_month))
+            .first()
+        )
         if previous is None:
             return ZERO
-        paid = previous.payments.filter(paid_date__lte=issued_date).aggregate(
+        paid = previous.payments.effective().filter(paid_date__lte=issued_date).aggregate(
             total=Sum("amount")
         )["total"]
         return max(entry_amounts(previous, total_paid=paid or ZERO).outstanding_amount, ZERO)

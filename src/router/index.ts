@@ -67,10 +67,19 @@ const router = createRouter({
       name: 'rent-entry-details',
       component: () => import('@/views/RentEntryDetailsView.vue'),
       // ?from=dashboard sends the back button to the dashboard; anything else, to the history.
+      // ?corrected=1: it's the replacement just made by correcting a bill.
       props: (route) => ({
         ...route.params,
         from: route.query.from === 'dashboard' ? 'dashboard' : 'history',
+        corrected: route.query.corrected === '1',
       }),
+      meta: { requiresAuth: true, requiresProperty: true },
+    },
+    {
+      path: '/tenants/:tenantId/entries/:entryId/correct',
+      name: 'rent-entry-correct',
+      component: () => import('@/views/RentEntryCorrectionView.vue'),
+      props: true,
       meta: { requiresAuth: true, requiresProperty: true },
     },
     {

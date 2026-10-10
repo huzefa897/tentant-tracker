@@ -7,9 +7,17 @@ from rest_framework import serializers
 from properties.models import business_date
 
 from .calculations import entry_amounts
-from .models import Payment, Receipt, RentEntry
+from .models import Payment, PaymentReversal, Receipt, RentEntry
 
 MONTH_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
+
+# Who did something, for people who can read the bill. A person's name is optional; the
+# username is internal ("app-<hex>") and the phone number is personal, so neither stands in.
+UNNAMED_PERSON = "Unnamed person"
+
+
+def person_name(user) -> str:
+    return user.name.strip() or UNNAMED_PERSON
 
 # Set by the server, never by the request.
 SERVER_ASSIGNED_FIELDS = {
@@ -19,6 +27,11 @@ SERVER_ASSIGNED_FIELDS = {
     "electricityRate",
     "createdBy",
     "createdAt",
+    "voidedAt",
+    "voidedByName",
+    "voidReason",
+    "replacesEntryId",
+    "replacedByEntryId",
 }
 # Derived from the charges and payments, never typed in.
 DERIVED_FIELDS = {
@@ -115,27 +128,91 @@ class PaymentCreateSerializer(serializers.Serializer):
         return super().to_internal_value(data)
 
 
+class PaymentReversalCreateSerializer(serializers.Serializer):
+    """Why a payment is being reversed. The payment comes from the URL; the person and time are
+    the server's."""
+
+    reason = serializers.CharField(
+        max_length=500,
+        trim_whitespace=True,
+        error_messages={
+            "required": "Say why this payment is being reversed.",
+            "blank": "Say why this payment is being reversed.",
+            "max_length": "The reason must be 500 characters or fewer.",
+        },
+    )
+
+    def to_internal_value(self, data):
+        refuse_unknown_fields(self, data)
+        return super().to_internal_value(data)
+
+
+def receipt_status(receipt: Receipt) -> str:
+    return "issued" if receipt.voided_at is None else "void"
+
+
 class PaymentSerializer(serializers.ModelSerializer):
-    """A recorded payment. The amount is a decimal string ("3000.00"). receipt: {id, reference}
-    once one is issued, else null (lists load receipts in the same query: select_related)."""
+    """A recorded payment. The amount is a decimal string ("3000.00").
+
+    status: "recorded", or "reversed" once corrected (it then no longer counts towards the
+    bill), with reversal: {id, reason, createdAt, createdByName}, else null. receipt: {id,
+    reference, status} once one is issued ("issued", or "void" after a reversal), else null.
+    Lists load both in the same query (select_related("receipt", "reversal__created_by")).
+    """
 
     entryId = serializers.UUIDField(source="entry_id")
     amount = serializers.DecimalField(max_digits=10, decimal_places=2)
     paidDate = serializers.DateField(source="paid_date")
     createdAt = serializers.DateTimeField(source="created_at")
+    status = serializers.SerializerMethodField()
+    reversal = serializers.SerializerMethodField()
     receipt = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
-        fields = ("id", "entryId", "amount", "paidDate", "notes", "createdAt", "receipt")
+        fields = (
+            "id",
+            "entryId",
+            "amount",
+            "paidDate",
+            "notes",
+            "createdAt",
+            "status",
+            "reversal",
+            "receipt",
+        )
         read_only_fields = fields
+
+    def _reversal(self, payment) -> PaymentReversal | None:
+        try:
+            return payment.reversal
+        except PaymentReversal.DoesNotExist:
+            return None
+
+    def get_status(self, payment):
+        return "recorded" if self._reversal(payment) is None else "reversed"
+
+    def get_reversal(self, payment):
+        reversal = self._reversal(payment)
+        if reversal is None:
+            return None
+        return {
+            "id": str(reversal.id),
+            "reason": reversal.reason,
+            "createdAt": serializers.DateTimeField().to_representation(reversal.created_at),
+            "createdByName": person_name(reversal.created_by),
+        }
 
     def get_receipt(self, payment):
         try:
             receipt = payment.receipt
         except Receipt.DoesNotExist:
             return None
-        return {"id": str(receipt.id), "reference": receipt.reference}
+        return {
+            "id": str(receipt.id),
+            "reference": receipt.reference,
+            "status": receipt_status(receipt),
+        }
 
 
 def money(value) -> str:
@@ -144,7 +221,8 @@ def money(value) -> str:
 
 class ReceiptSerializer(serializers.BaseSerializer):
     """An issued receipt, entirely from its saved snapshot: never today's tenancy, property,
-    bill or payment details. Money is a decimal string."""
+    bill or payment details. Money is a decimal string. status: "issued", or "void" once its
+    payment was reversed (voidedAt and voidReason then say when and why; null and "" before)."""
 
     def to_representation(self, receipt: Receipt):
         return {
@@ -182,7 +260,66 @@ class ReceiptSerializer(serializers.BaseSerializer):
             "paymentAmount": money(receipt.payment_amount),
             "paidDate": receipt.paid_date.isoformat(),
             "paymentNotes": receipt.payment_notes,
+            "status": receipt_status(receipt),
+            "voidedAt": None
+            if receipt.voided_at is None
+            else serializers.DateTimeField().to_representation(receipt.voided_at),
+            "voidReason": receipt.void_reason,
         }
+
+
+class EntryVoidSerializer(serializers.Serializer):
+    """Why a bill is being voided. The bill comes from the URL; the person and time are the
+    server's."""
+
+    reason = serializers.CharField(
+        max_length=500,
+        trim_whitespace=True,
+        error_messages={
+            "required": "Say why this bill is being voided.",
+            "blank": "Say why this bill is being voided.",
+            "max_length": "The reason must be 500 characters or fewer.",
+        },
+    )
+
+    def to_internal_value(self, data):
+        refuse_unknown_fields(self, data)
+        return super().to_internal_value(data)
+
+
+class EntryCorrectionSerializer(EntryVoidSerializer):
+    """A replacement's charges, and why the bill is corrected. Its tenancy, month and
+    electricity rate are the original bill's, so they're refused here (as server-assigned or
+    unknown)."""
+
+    rentAmount = serializers.DecimalField(
+        source="rent_amount",
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+        error_messages={"min_value": "Rent must be more than zero."},
+    )
+    electricityUnits = serializers.DecimalField(
+        source="electricity_units",
+        max_digits=10,
+        decimal_places=3,
+        min_value=Decimal("0"),
+        error_messages={"min_value": "Electricity units can't be negative."},
+    )
+    waterAmount = serializers.DecimalField(
+        source="water_amount",
+        max_digits=10,
+        decimal_places=2,
+        min_value=Decimal("0"),
+        error_messages={"min_value": "The water amount can't be negative."},
+    )
+    notes = serializers.CharField(
+        max_length=500,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+        error_messages={"max_length": "Notes must be 500 characters or fewer."},
+    )
 
 
 class RentEntryCreateSerializer(serializers.Serializer):
@@ -230,7 +367,14 @@ class RentEntryCreateSerializer(serializers.Serializer):
 
 class RentEntrySerializer(serializers.ModelSerializer):
     """A saved bill. Money is a decimal string ("15750.00"); totals come from
-    billing/calculations.py, so the app displays them rather than recalculating."""
+    billing/calculations.py, so the app displays them rather than recalculating.
+
+    status: "active", or "void" (voidedAt, voidedByName and voidReason say when, by whom and
+    why; null, null and "" before). A void bill keeps its charges and totalDue, owes nothing
+    (outstandingAmount "0.00") and has no paymentStatus (null). replacesEntryId and
+    replacedByEntryId link a correction's two bills (else null). Lists load the voider and
+    replacement in the same query (select_related("voided_by", "replaced_by")).
+    """
 
     tenancyId = serializers.UUIDField(source="tenancy_id")
     billingMonth = BillingMonthField(source="billing_month")
@@ -277,4 +421,21 @@ class RentEntrySerializer(serializers.ModelSerializer):
             "paymentStatus": amounts.payment_status,
             "notes": data["notes"],
             "createdAt": data["createdAt"],
+            "status": instance.status,
+            "voidedAt": None
+            if instance.voided_at is None
+            else serializers.DateTimeField().to_representation(instance.voided_at),
+            "voidedByName": None if instance.voided_by is None else person_name(instance.voided_by),
+            "voidReason": instance.void_reason,
+            "replacesEntryId": None
+            if instance.replaces_entry_id is None
+            else str(instance.replaces_entry_id),
+            "replacedByEntryId": replaced_by_id(instance),
         }
+
+
+def replaced_by_id(entry: RentEntry) -> str | None:
+    try:
+        return str(entry.replaced_by.pk)
+    except RentEntry.DoesNotExist:
+        return None

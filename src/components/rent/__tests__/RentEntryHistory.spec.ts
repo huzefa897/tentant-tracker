@@ -32,6 +32,29 @@ describe('RentEntryHistory', () => {
     ])
   })
 
+  it('marks a void bill VOID, muted with its figures struck through, never as paid', () => {
+    const wrapper = mount(RentEntryHistory, {
+      props: {
+        entries: [makeEntry({ id: 'v', billingMonth: '2026-10', billStatus: 'void' })],
+      },
+    })
+    const row = wrapper.get('[data-testid="history-row"]')
+
+    expect(row.findAll('th, td').map((cell) => cell.text())).toEqual([
+      'October 2026',
+      '₹15,750',
+      '₹0',
+      '₹0',
+      'Void',
+      'View Summary',
+    ])
+    expect(row.classes()).toContain('text-muted-foreground')
+    expect(row.findAll('td.line-through')).toHaveLength(3)
+    const card = wrapper.get('[data-testid="history-card"]')
+    expect(card.get('[data-testid="void-badge"]').text()).toBe('Void')
+    expect(card.get('dl').classes()).toContain('line-through')
+  })
+
   it('shows the bill’s own figures rather than recalculating them', () => {
     const wrapper = mount(RentEntryHistory, {
       props: { entries: [makeEntry({ totalDue: 99, outstanding: 99 })] },

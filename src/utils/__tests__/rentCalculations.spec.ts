@@ -125,6 +125,8 @@ describe('sortPaymentsNewestFirst', () => {
     paidDate,
     notes: '',
     createdAt,
+    status: 'recorded',
+    reversal: null,
     receipt: null,
   })
 
@@ -164,6 +166,15 @@ describe('sumEntryAmounts', () => {
 
   it('returns zeros for no bills', () => {
     expect(sumEntryAmounts([])).toEqual({ totalBilled: 0, totalPaid: 0, outstanding: 0 })
+  })
+
+  it('leaves out void bills, which count for nothing', () => {
+    expect(
+      sumEntryAmounts([
+        { totalDue: 19800, totalPaid: 0, outstanding: 0, billStatus: 'void' },
+        { totalDue: 15750, totalPaid: 5000, outstanding: 10750, billStatus: 'active' },
+      ]),
+    ).toEqual({ totalBilled: 15750, totalPaid: 5000, outstanding: 10750 })
   })
 
   it('adds in paise, without floating point drift', () => {
