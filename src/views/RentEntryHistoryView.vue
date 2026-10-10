@@ -40,6 +40,7 @@ const PAGE_SIZE = 12
 
 const selectedYear = ref('all')
 const selectedStatus = ref<PaymentStatus | 'all'>('all')
+const showVoid = ref(false)
 const page = ref(1)
 
 const filtered = computed(() => selectedYear.value !== 'all' || selectedStatus.value !== 'all')
@@ -53,6 +54,7 @@ const skeletonRows = ref(4)
 // The backend filters (before paging) and pages; this page asks for what's shown.
 function load() {
   rentEntryStore.loadHistory(props.tenantId, {
+    includeVoid: showVoid.value,
     year: selectedYear.value === 'all' ? null : selectedYear.value,
     paymentStatus: selectedStatus.value === 'all' ? null : selectedStatus.value,
     page: page.value,
@@ -80,6 +82,7 @@ watch(
     historyShown.value = false
     selectedYear.value = 'all'
     selectedStatus.value = 'all'
+    showVoid.value = false
     page.value = 1
     load()
   },
@@ -88,7 +91,7 @@ watch(
 
 // Both filters change together on Clear filters: one reload, not two. A filter or page shows
 // other bills, so an earlier bill's receipt download no longer shows or holds the buttons.
-watch([selectedYear, selectedStatus], () => {
+watch([selectedYear, selectedStatus, showVoid], () => {
   resetReceiptDownload()
   page.value = 1
   load()
@@ -124,7 +127,9 @@ const years = computed(() => {
 })
 
 // This page's bills only: a tenant's other pages aren't loaded, so this is never their balance.
+// Void bills count for nothing.
 const totals = computed(() => sumEntryAmounts(entries.value))
+const voidCount = computed(() => entries.value.filter((e) => e.billStatus === 'void').length)
 
 // What the empty result is for, e.g. "No paid entries in 2026."
 const noMatchesMessage = computed(() => {
@@ -261,11 +266,13 @@ function viewEntry(entryId: string) {
           <RentEntryFilters
             v-model:year="selectedYear"
             v-model:status="selectedStatus"
+            v-model:show-void="showVoid"
             :years="years"
           />
           <RentEntryTotals
             v-if="history.status === 'ready' && entries.length > 0"
             :totals="totals"
+            :void-count="voidCount"
           />
           <!-- Holds the totals' space while another page or filter loads. -->
           <Skeleton

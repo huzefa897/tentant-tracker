@@ -4,6 +4,8 @@ import { formatINR } from '@/utils/currency'
 
 defineProps<{
   totals: EntryTotals
+  // Void bills on the page, which the totals leave out.
+  voidCount?: number
 }>()
 </script>
 
@@ -27,5 +29,9 @@ defineProps<{
         <dd class="mt-1 text-lg font-semibold tabular-nums">{{ formatINR(totals.outstanding) }}</dd>
       </div>
     </dl>
+    <p v-if="voidCount" class="mt-2 text-xs text-muted-foreground" data-testid="void-not-counted">
+      {{ voidCount === 1 ? 'The void bill' : `The ${voidCount} void bills` }} on this page
+      {{ voidCount === 1 ? "isn't" : "aren't" }} counted.
+    </p>
   </section>
 </template>

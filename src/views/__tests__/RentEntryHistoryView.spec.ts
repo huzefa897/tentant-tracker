@@ -95,6 +95,7 @@ describe('RentEntryHistoryView', () => {
     await openHistory()
 
     expect(getEntries).toHaveBeenCalledWith(expect.any(String), 'tenant-001', {
+      billStatus: 'active',
       year: undefined,
       page: 1,
     })
@@ -181,6 +182,7 @@ describe('RentEntryHistoryView', () => {
     await flushPromises()
 
     expect(getEntries).toHaveBeenLastCalledWith(expect.any(String), 'tenant-001', {
+      billStatus: 'active',
       year: '2025',
       paymentStatus: undefined,
       page: 1,
@@ -207,6 +209,7 @@ describe('RentEntryHistoryView', () => {
     await flushPromises()
 
     expect(getEntries).toHaveBeenLastCalledWith(expect.any(String), 'tenant-001', {
+      billStatus: 'active',
       year: undefined,
       paymentStatus: 'partially_paid',
       page: 1,
