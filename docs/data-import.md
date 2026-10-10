@@ -103,7 +103,7 @@ Run the same command without `--dry-run`. It prints what it created and the reco
 | total billed, total paid                 | the same                                      |
 | bills whose outstanding differs          | 0                                             |
 
-These compare the ledger with the database, so they catch an import gone wrong, or payments recorded in the app since an earlier run: the database side counts **every** payment on the ledger's bills, not only the imported ones, so a payment entered in both the app and the Sheet can't be added twice. They can't tell you the ledger matches the Sheet: that's step 3's warnings and your reading of `ledger.json`.
+These compare the ledger with the database, so they catch an import gone wrong, or payments recorded in the app since an earlier run: the database side counts **every** payment on the ledger's bills, not only the imported ones, so a payment entered in both the app and the Sheet can't be added twice. Totals count only payments that weren't reversed, so a payment reversed in the app since shows up as a difference in total paid and outstanding. They can't tell you the ledger matches the Sheet: that's step 3's warnings and your reading of `ledger.json`.
 
 Then compare with what the converter printed in step 3, open a few tenants in the app (their bills, payments and receipts), and run `python manage.py ledger_summary` for the database's totals.
 

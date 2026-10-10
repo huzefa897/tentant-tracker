@@ -30,6 +30,9 @@ export interface ReceiptDto {
   paymentAmount: string
   paidDate: string // YYYY-MM-DD
   paymentNotes: string
+  status: 'issued' | 'void'
+  voidedAt: string | null
+  voidReason: string
 }
 
 const MONEY = /^\d+\.\d{2}$/
@@ -82,6 +85,13 @@ export function parseReceipt(value: unknown): ReceiptDto {
     matches(receipt, key, MONEY)
   }
   text(receipt, 'paymentNotes')
+  // Void with when and why, or issued with neither.
+  if (receipt.status === 'void') {
+    text(receipt, 'voidedAt', { required: true })
+    text(receipt, 'voidReason', { required: true })
+  } else if (receipt.status !== 'issued' || receipt.voidedAt !== null) {
+    invalid('status')
+  }
 
   const issuer = record(receipt.issuer, 'issuer')
   text(issuer, 'name', { required: true })
@@ -135,6 +145,9 @@ export function toReceipt(dto: ReceiptDto): PaymentReceipt {
     paymentAmount: Number(dto.paymentAmount),
     paidDate: dto.paidDate,
     paymentNotes: dto.paymentNotes,
+    status: dto.status,
+    voidedAt: dto.voidedAt,
+    voidReason: dto.voidReason,
   }
 }
 
@@ -154,7 +167,8 @@ export const receiptService = {
   // Issues the payment's receipt from Django's saved records, or returns the one it already has
   // (created: false), so retrying after a lost response never issues a second. Errors:
   // 'invalid-request' with code 'receipt_configuration_incomplete' (its message says what to
-  // configure); 'forbidden'; 'not-found'.
+  // configure); 'conflict' with code 'payment_reversed' (a reversed payment gets no new
+  // receipt; one it had is returned, void); 'forbidden'; 'not-found'.
   async issueReceipt(
     propertyId: string,
     tenancyId: string,

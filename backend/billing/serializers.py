@@ -7,7 +7,7 @@ from rest_framework import serializers
 from properties.models import business_date
 
 from .calculations import entry_amounts
-from .models import Payment, Receipt, RentEntry
+from .models import Payment, PaymentReversal, Receipt, RentEntry
 
 MONTH_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -115,27 +115,91 @@ class PaymentCreateSerializer(serializers.Serializer):
         return super().to_internal_value(data)
 
 
+class PaymentReversalCreateSerializer(serializers.Serializer):
+    """Why a payment is being reversed. The payment comes from the URL; the person and time are
+    the server's."""
+
+    reason = serializers.CharField(
+        max_length=500,
+        trim_whitespace=True,
+        error_messages={
+            "required": "Say why this payment is being reversed.",
+            "blank": "Say why this payment is being reversed.",
+            "max_length": "The reason must be 500 characters or fewer.",
+        },
+    )
+
+    def to_internal_value(self, data):
+        refuse_unknown_fields(self, data)
+        return super().to_internal_value(data)
+
+
+def receipt_status(receipt: Receipt) -> str:
+    return "issued" if receipt.voided_at is None else "void"
+
+
 class PaymentSerializer(serializers.ModelSerializer):
-    """A recorded payment. The amount is a decimal string ("3000.00"). receipt: {id, reference}
-    once one is issued, else null (lists load receipts in the same query: select_related)."""
+    """A recorded payment. The amount is a decimal string ("3000.00").
+
+    status: "recorded", or "reversed" once corrected (it then no longer counts towards the
+    bill), with reversal: {id, reason, createdAt, createdByName}, else null. receipt: {id,
+    reference, status} once one is issued ("issued", or "void" after a reversal), else null.
+    Lists load both in the same query (select_related("receipt", "reversal__created_by")).
+    """
 
     entryId = serializers.UUIDField(source="entry_id")
     amount = serializers.DecimalField(max_digits=10, decimal_places=2)
     paidDate = serializers.DateField(source="paid_date")
     createdAt = serializers.DateTimeField(source="created_at")
+    status = serializers.SerializerMethodField()
+    reversal = serializers.SerializerMethodField()
     receipt = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
-        fields = ("id", "entryId", "amount", "paidDate", "notes", "createdAt", "receipt")
+        fields = (
+            "id",
+            "entryId",
+            "amount",
+            "paidDate",
+            "notes",
+            "createdAt",
+            "status",
+            "reversal",
+            "receipt",
+        )
         read_only_fields = fields
+
+    def _reversal(self, payment) -> PaymentReversal | None:
+        try:
+            return payment.reversal
+        except PaymentReversal.DoesNotExist:
+            return None
+
+    def get_status(self, payment):
+        return "recorded" if self._reversal(payment) is None else "reversed"
+
+    def get_reversal(self, payment):
+        reversal = self._reversal(payment)
+        if reversal is None:
+            return None
+        return {
+            "id": str(reversal.id),
+            "reason": reversal.reason,
+            "createdAt": serializers.DateTimeField().to_representation(reversal.created_at),
+            "createdByName": reversal.created_by.name,
+        }
 
     def get_receipt(self, payment):
         try:
             receipt = payment.receipt
         except Receipt.DoesNotExist:
             return None
-        return {"id": str(receipt.id), "reference": receipt.reference}
+        return {
+            "id": str(receipt.id),
+            "reference": receipt.reference,
+            "status": receipt_status(receipt),
+        }
 
 
 def money(value) -> str:
@@ -144,7 +208,8 @@ def money(value) -> str:
 
 class ReceiptSerializer(serializers.BaseSerializer):
     """An issued receipt, entirely from its saved snapshot: never today's tenancy, property,
-    bill or payment details. Money is a decimal string."""
+    bill or payment details. Money is a decimal string. status: "issued", or "void" once its
+    payment was reversed (voidedAt and voidReason then say when and why; null and "" before)."""
 
     def to_representation(self, receipt: Receipt):
         return {
@@ -182,6 +247,11 @@ class ReceiptSerializer(serializers.BaseSerializer):
             "paymentAmount": money(receipt.payment_amount),
             "paidDate": receipt.paid_date.isoformat(),
             "paymentNotes": receipt.payment_notes,
+            "status": receipt_status(receipt),
+            "voidedAt": None
+            if receipt.voided_at is None
+            else serializers.DateTimeField().to_representation(receipt.voided_at),
+            "voidReason": receipt.void_reason,
         }
 
 

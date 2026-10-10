@@ -13,13 +13,21 @@ from properties.queries import properties_for_user
 from properties.roles import Capability, role_can
 
 from .calculations import ZERO, entry_amounts, to_paise
-from .models import Payment, Receipt, RentEntry, receipt_reference, tenancy_covers_month
+from .models import (
+    Payment,
+    PaymentReversal,
+    Receipt,
+    RentEntry,
+    receipt_reference,
+    tenancy_covers_month,
+)
 
 UNIQUE_MONTH_CONSTRAINT = "unique_tenancy_billing_month"
 PAYMENT_KEY_CONSTRAINT = "unique_payment_idempotency_key"
 CREATION_KEY_CONSTRAINT = "unique_rent_entry_creation_key"
-# The unique column behind Receipt.payment (PostgreSQL's name for it).
+# The unique columns behind Receipt.payment and PaymentReversal.payment (PostgreSQL's names).
 RECEIPT_PAYMENT_CONSTRAINT = "billing_receipt_payment_id_key"
+REVERSAL_PAYMENT_CONSTRAINT = "billing_paymentreversal_payment_id_key"
 
 
 class DuplicateBillingMonthError(Exception):
@@ -59,6 +67,18 @@ class ReceiptConfigurationIncompleteError(Exception):
         self.detail = detail
 
 
+class PaymentReversedError(Exception):
+    """The payment has been reversed, so it can't get a new receipt."""
+
+
+class ReversalNotAllowedError(Exception):
+    """The actor's role can't reverse payments for this property."""
+
+
+class ReversalConflictError(Exception):
+    """The payment was already reversed, with another reason."""
+
+
 class PaymentExceedsOutstandingError(Exception):
     """The payment is more than the bill's outstanding amount (zero when it's fully paid)."""
 
@@ -79,6 +99,15 @@ class IssuedReceipt:
     receipt: Receipt
     # False when the payment already had this receipt: nothing was issued now.
     created: bool
+
+
+@dataclass(frozen=True)
+class ReversedPayment:
+    reversal: PaymentReversal
+    # False when the payment was already reversed for the same reason: a retry.
+    created: bool
+    # The bill, with its amounts annotated (with_amounts), as it stands after the reversal.
+    entry: RentEntry
 
 
 @dataclass(frozen=True)
@@ -374,11 +403,12 @@ def receipt_snapshot(
     """
 
     # The bill as it stood right after this payment: payments are never edited, and later ones
-    # get higher sequences under the bill's lock, so this never changes.
+    # get higher sequences under the bill's lock. Earlier payments reversed by the time it's
+    # issued don't count (a reversed payment itself can't get a receipt).
     paid_through = to_paise(
-        entry.payments.filter(sequence__lte=payment.sequence).aggregate(total=Sum("amount"))[
-            "total"
-        ]
+        entry.payments.effective()
+        .filter(sequence__lte=payment.sequence)
+        .aggregate(total=Sum("amount"))["total"]
         or ZERO
     )
     amounts = entry_amounts(entry, total_paid=paid_through)
@@ -413,11 +443,13 @@ def issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
     """Issues the payment's receipt, or returns the one it already has.
 
     Everything printed on the receipt is copied from the stored records now, so later payments
-    or changed details never change it. The payment row is locked, so simultaneous requests
-    issue one receipt; its unique column is the last guard. The bill, tenancy and property are
-    locked and read again before anything is copied, so an edit that commits first is always
-    on the receipt; the property's lock also numbers references one at a time, so they never
-    collide and nothing needs retrying.
+    or changed details never change it. The bill and then the payment are locked, so
+    simultaneous requests issue one receipt and a reversal can't slip in between; the unique
+    column is the last guard. A reversed payment gets no new receipt (PaymentReversedError),
+    but one it already had is returned, void. The tenancy and property are locked and read
+    again before anything is copied, so an edit that commits first is always on the receipt;
+    the property's lock also numbers references one at a time, so they never collide and
+    nothing needs retrying.
     """
     try:
         return _issue_payment_receipt(payment_id=payment_id, actor=actor)
@@ -433,32 +465,42 @@ def issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
         return IssuedReceipt(receipt=existing, created=False)
 
 
+def _lock_bill_and_payment(payment_id) -> tuple[RentEntry, Payment]:
+    """Locks the payment's bill, then the payment: the order receipt issuance and reversal both
+    take, so they're carried out one at a time and never deadlock. The bill's lock is also the
+    one record_payment takes, so balances never change under either. A payment's bill never
+    changes, so it's safe to read before locking."""
+    entry_id = Payment.objects.filter(pk=payment_id).values_list("entry_id", flat=True).first()
+    if entry_id is None:
+        raise PaymentNotFoundError()
+    entry = RentEntry.objects.select_for_update().get(pk=entry_id)
+    payment = Payment.objects.select_for_update().get(pk=payment_id)
+    return entry, payment
+
+
 def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
     with transaction.atomic():
-        try:
-            payment = (
-                Payment.objects.select_for_update(of=("self",))
-                .select_related("entry__tenancy__property")
-                .get(pk=payment_id)
-            )
-        except Payment.DoesNotExist:
-            raise PaymentNotFoundError() from None
+        entry, payment = _lock_bill_and_payment(payment_id)
 
         # Checked again inside the lock: the view's lookup happened before it.
-        _check_can_issue_receipts(actor, payment.entry.tenancy.property_id)
+        _check_can_issue_receipts(actor, entry.tenancy.property_id)
 
         # Before validating today's details: an issued receipt reopens even if, say, the
-        # property's address has since been cleared.
+        # property's address has since been cleared, and a void one is returned as it is.
         existing = Receipt.objects.filter(payment=payment).first()
         if existing is not None:
             return IssuedReceipt(receipt=existing, created=False)
 
-        # Always payment, then bill, then tenancy, then property, each read again under its
-        # lock: the copies loaded with the payment may predate an edit this request waited
-        # for, and the receipt must print the details as they are when it's issued. NO KEY, so
-        # new bills and tenancies (which reference these rows) aren't held up; the property's
-        # lock also numbers its receipts one at a time.
-        entry = RentEntry.objects.select_for_update().get(pk=payment.entry_id)
+        # Under the same locks as reverse_payment, so a reversal either committed first (and
+        # this refuses) or waits until this receipt exists (and voids it).
+        if PaymentReversal.objects.filter(payment=payment).exists():
+            raise PaymentReversedError()
+
+        # Then tenancy, then property, each read again under its lock: the copies loaded before
+        # may predate an edit this request waited for, and the receipt must print the details
+        # as they are when it's issued. NO KEY, so new bills and tenancies (which reference
+        # these rows) aren't held up; the property's lock also numbers its receipts one at a
+        # time.
         tenancy = Tenancy.objects.select_for_update(no_key=True).get(pk=entry.tenancy_id)
         prop = Property.objects.select_for_update(no_key=True).get(pk=tenancy.property_id)
 
@@ -484,3 +526,77 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
             ),
         )
         return IssuedReceipt(receipt=receipt, created=True)
+
+
+def _check_can_reverse_payments(actor, property_id) -> None:
+    """As _check_can_record_payments: no access is "not found"."""
+    role = (
+        properties_for_user(actor).filter(pk=property_id).values_list("role", flat=True).first()
+    )
+    if role is None:
+        raise PaymentNotFoundError()
+    if not role_can(role, Capability.REVERSE_PAYMENTS):
+        raise ReversalNotAllowedError()
+
+
+def _replay_reversal(existing: PaymentReversal, *, reason: str, entry_id) -> ReversedPayment:
+    """The payment's reversal, when a retry gives the same reason; otherwise it was already
+    reversed for another one."""
+    if existing.reason != reason:
+        raise ReversalConflictError()
+    return ReversedPayment(
+        reversal=existing,
+        created=False,
+        entry=RentEntry.objects.with_amounts().get(pk=entry_id),
+    )
+
+
+def reverse_payment(*, payment_id, actor, reason: str) -> ReversedPayment:
+    """Reverses a payment recorded by mistake: it stops counting towards its bill, and its
+    receipt, if it has one, is voided. Neither is otherwise changed. Full reversals only;
+    the replacement is a new payment (record_payment).
+
+    reason: why (trimmed, 1–500 characters). The payment identifies its only possible reversal,
+    so a retry with the same reason returns it; another reason is ReversalConflictError.
+
+    One transaction: the bill, then the payment, are locked (as receipt issuance does), access
+    is checked again, then the reversal is created and the receipt voided together, or neither.
+    """
+    reason = reason.strip()
+    if not reason or len(reason) > 500:
+        raise ValueError("A reversal needs a reason of 1–500 characters.")
+
+    try:
+        with transaction.atomic():
+            entry, payment = _lock_bill_and_payment(payment_id)
+
+            # Checked again inside the lock: the view's lookup happened before it.
+            _check_can_reverse_payments(actor, entry.tenancy.property_id)
+
+            existing = PaymentReversal.objects.filter(payment=payment).first()
+            if existing is not None:
+                return _replay_reversal(existing, reason=reason, entry_id=entry.pk)
+
+            reversal = PaymentReversal.objects.create(
+                payment=payment, reason=reason, created_by=actor
+            )
+            # Its receipt no longer confirms anything: void, with its reference and snapshot
+            # kept as issued.
+            Receipt.objects.filter(payment=payment, voided_at__isnull=True).update(
+                voided_at=reversal.created_at, voided_by=actor, void_reason=reason
+            )
+            return ReversedPayment(
+                reversal=reversal,
+                created=True,
+                entry=RentEntry.objects.with_amounts().get(pk=entry.pk),
+            )
+    except IntegrityError as error:
+        # The bill's lock makes this unlikely; the failed transaction has been rolled back, so
+        # the reversal is looked up outside it.
+        if _violated_constraint(error) != REVERSAL_PAYMENT_CONSTRAINT:
+            raise
+        existing = PaymentReversal.objects.select_related("payment__entry__tenancy").get(
+            payment_id=payment_id
+        )
+        _check_can_reverse_payments(actor, existing.payment.entry.tenancy.property_id)
+        return _replay_reversal(existing, reason=reason, entry_id=existing.payment.entry_id)

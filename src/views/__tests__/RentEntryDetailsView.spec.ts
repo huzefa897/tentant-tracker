@@ -15,7 +15,8 @@ import {
 } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import { makeEntry, makePayment, openPage } from '@/test/rentEntries'
-import { resetAccessService } from '@/test/mocks/accessService'
+import { accessService } from '@/services/access.service'
+import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService } from '@/test/mocks/authService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { fakeReceipts } from '@/test/mocks/receiptService'
@@ -34,6 +35,7 @@ const getEntry = vi.mocked(rentEntryService.getEntry)
 const recordPaymentApi = vi.mocked(paymentService.recordPayment)
 const getPayments = vi.mocked(paymentService.getPayments)
 const issueReceipt = vi.mocked(receiptService.issueReceipt)
+const reversePaymentApi = vi.mocked(paymentService.reversePayment)
 const downloadPdf = vi.mocked(downloadReceiptPdf)
 
 let view: VueWrapper | undefined
@@ -320,7 +322,9 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       await openDetails('tenant-001', 'sep')
 
       expect(getPayments).toHaveBeenCalledWith(expect.any(String), 'tenant-001', 'sep')
-      expect(paymentRows()).toEqual([['3 Oct 2026', '₹10,000', 'Initial payment', 'Issue receipt']])
+      expect(paymentRows()).toEqual([
+        ['3 Oct 2026', '₹10,000', 'Initial payment', 'Issue receipt Reverse'],
+      ])
     })
 
     it('shows a failed payment load as an error with Retry, never as no payments', async () => {
@@ -593,7 +597,7 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
         )
         expect(downloadPdf).not.toHaveBeenCalled()
         expect(paymentRows()).toEqual([
-          ['3 Oct 2026', '₹10,000', 'Initial payment', 'Issue receipt'],
+          ['3 Oct 2026', '₹10,000', 'Initial payment', 'Issue receipt Reverse'],
         ])
         expect(fakeEntries.payments).toHaveLength(1)
       })
@@ -637,6 +641,183 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       await recordPayment('3000')
 
       expect(dialog().get('[role="alert"]').text()).toBe(PAYMENT_SAVE_ERROR_MESSAGE)
+    })
+
+    describe('reversing payments', () => {
+      const REASON = 'Entered ₹10,000 instead of ₹1,000.'
+
+      async function openReversal() {
+        await view!.get('[data-testid="reverse-payment"]').trigger('click')
+        await flushPromises()
+      }
+
+      async function submitReversal(reason = REASON) {
+        await dialog().get('#reversal-reason').setValue(reason)
+        await dialog().get('form').trigger('submit')
+        await flushPromises()
+      }
+
+      it('confirms what is being reversed and what reversing does', async () => {
+        await openDetails('tenant-001', 'sep')
+
+        await openReversal()
+
+        expect(dialog().text()).toContain('Reverse payment')
+        const details = dialog().get('[data-testid="reversal-payment"]').text()
+        for (const part of [
+          'Shaik Zahid Ali · Flat 202',
+          'September 2026',
+          '3 Oct 2026',
+          '₹10,000',
+        ]) {
+          expect(details).toContain(part)
+        }
+        expect(dialog().get('[data-testid="reversal-effects"]').text()).toContain(
+          'No money is refunded',
+        )
+        expect(dialog().text()).not.toContain('VOID')
+      })
+
+      it('warns that an issued receipt will be voided', async () => {
+        await openDetails('tenant-001', 'sep')
+        await view!.get('[data-testid="download-receipt"]').trigger('click')
+        await flushPromises()
+
+        await openReversal()
+
+        expect(dialog().get('[data-testid="reversal-effects"]').text()).toContain(
+          `Its receipt ${fakeReceipts.get('p-1')!.reference} will be marked VOID`,
+        )
+      })
+
+      it('needs a reason before anything is sent', async () => {
+        await openDetails('tenant-001', 'sep')
+        await openReversal()
+
+        await submitReversal('   ')
+
+        expect(dialog().get('#reversal-reason-error').text()).toBe(
+          'Say why this payment is being reversed.',
+        )
+        expect(reversePaymentApi).not.toHaveBeenCalled()
+      })
+
+      it('cancelling changes nothing', async () => {
+        await openDetails('tenant-001', 'sep')
+        await openReversal()
+
+        await dialog()
+          .findAll('button')
+          .find((b) => b.text() === 'Cancel')!
+          .trigger('click')
+        await flushPromises()
+
+        expect(body.find('[role="dialog"]').exists()).toBe(false)
+        expect(reversePaymentApi).not.toHaveBeenCalled()
+        expect(section('payment')['Total paid']).toBe('₹10,000')
+      })
+
+      it('shows the payment reversed and the bill without it, then offers its replacement', async () => {
+        await openDetails('tenant-001', 'sep')
+        await openReversal()
+
+        await submitReversal()
+
+        expect(reversePaymentApi).toHaveBeenCalledWith(
+          expect.any(String),
+          'tenant-001',
+          expect.objectContaining({ id: 'p-1' }),
+          REASON,
+        )
+        expect(body.find('[role="dialog"]').exists()).toBe(false)
+        expect(view!.get('[role="status"]').text()).toBe('Payment of ₹10,000 reversed.')
+        expect(section('payment')).toMatchObject({
+          'Total paid': '₹0',
+          Outstanding: '₹14,712.50',
+        })
+        const row = view!.get('[data-testid="payment-row"]')
+        expect(row.attributes('data-status')).toBe('reversed')
+        expect(row.get('[data-testid="reversal-reason"]').text()).toContain(REASON)
+        // A reversed payment can't be reversed again, nor get a new receipt.
+        expect(row.find('[data-testid="reverse-payment"]').exists()).toBe(false)
+        expect(row.find('[data-testid="download-receipt"]').exists()).toBe(false)
+
+        await view!.get('[data-testid="record-replacement"]').trigger('click')
+        await flushPromises()
+        // Never pre-filled with the reversed amount.
+        expect((dialog().get('#payment-amount').element as HTMLInputElement).value).toBe('')
+        await submitPayment('1000')
+        expect(section('payment')['Total paid']).toBe('₹1,000')
+      })
+
+      it('keeps a voided receipt downloadable, marked void', async () => {
+        await openDetails('tenant-001', 'sep')
+        await view!.get('[data-testid="download-receipt"]').trigger('click')
+        await flushPromises()
+        await openReversal()
+
+        await submitReversal()
+
+        expect(view!.get('[role="status"]').text()).toBe(
+          'Payment of ₹10,000 reversed. Its receipt is now void.',
+        )
+        const download = view!.get('[data-testid="download-receipt"]')
+        expect(download.text()).toBe('Download void receipt')
+        await download.trigger('click')
+        await flushPromises()
+        expect(downloadPdf).toHaveBeenLastCalledWith(
+          expect.objectContaining({ status: 'void', voidReason: REASON }),
+        )
+      })
+
+      it('keeps the dialog and the reason when the reversal fails', async () => {
+        reversePaymentApi.mockRejectedValueOnce(new ApiError('forbidden'))
+        await openDetails('tenant-001', 'sep')
+        await openReversal()
+
+        await submitReversal()
+
+        expect(dialog().text()).toContain("Only the property's owners can reverse payments.")
+        expect((dialog().get('#reversal-reason').element as HTMLTextAreaElement).value).toBe(REASON)
+        expect(section('payment')['Total paid']).toBe('₹10,000')
+      })
+
+      it('stays on this entry, with the dialog open, while a reversal is in flight', async () => {
+        fakeEntries.entries = [entry, makeEntry({ id: 'aug', billingMonth: '2026-08' })]
+        let finish!: () => void
+        const reverse = reversePaymentApi.getMockImplementation()!
+        reversePaymentApi.mockImplementationOnce(async (...args) => {
+          await new Promise<void>((resolve) => (finish = resolve))
+          return reverse(...args)
+        })
+        await openDetails('tenant-001', 'sep')
+        await openReversal()
+        await dialog().get('#reversal-reason').setValue(REASON)
+        await dialog().get('form').trigger('submit')
+        await flushPromises()
+
+        expect(button('Back to Previous Entries').attributes('disabled')).toBeDefined()
+        await router.push('/tenants/tenant-001/entries/aug')
+        await flushPromises()
+        expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
+        expect(body.find('[role="dialog"]').exists()).toBe(true)
+
+        finish()
+        await flushPromises()
+        expect(view!.get('[role="status"]').text()).toBe('Payment of ₹10,000 reversed.')
+      })
+
+      it('never offers reversing to a manager', async () => {
+        vi.mocked(accessService.getMe).mockResolvedValue(
+          identityWith([{ ...testProperty, role: 'manager' }]),
+        )
+        await openDetails('tenant-001', 'sep')
+
+        expect(view!.find('[data-testid="reverse-payment"]').exists()).toBe(false)
+        expect(paymentRows()).toEqual([
+          ['3 Oct 2026', '₹10,000', 'Initial payment', 'Issue receipt'],
+        ])
+      })
     })
   })
 })

@@ -125,6 +125,8 @@ describe('sortPaymentsNewestFirst', () => {
     paidDate,
     notes: '',
     createdAt,
+    status: 'recorded',
+    reversal: null,
     receipt: null,
   })
 

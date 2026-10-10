@@ -293,6 +293,9 @@ class ReceiptApiTests(ReceiptTestCase):
                 "paymentAmount": "3000.00",
                 "paidDate": "2026-10-06",
                 "paymentNotes": "Bank transfer",
+                "status": "issued",
+                "voidedAt": None,
+                "voidReason": "",
             },
         )
         datetime.fromisoformat(response.json()["issuedAt"])
@@ -407,7 +410,7 @@ class PaymentReceiptMetadataTests(ReceiptTestCase):
 
         self.assertEqual(
             payments[str(self.payment.id)]["receipt"],
-            {"id": str(receipt.id), "reference": receipt.reference},
+            {"id": str(receipt.id), "reference": receipt.reference, "status": "issued"},
         )
         self.assertIsNone(payments[str(unreceipted.id)]["receipt"])
 

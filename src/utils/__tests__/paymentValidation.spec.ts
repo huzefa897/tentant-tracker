@@ -6,6 +6,7 @@ import {
   parsePaymentDraft,
   validatePaymentDraft,
   validatePaymentInput,
+  validateReversalReason,
 } from '@/utils/paymentValidation'
 
 const today = '2026-10-03'
@@ -153,5 +154,23 @@ describe('parsePaymentDraft', () => {
       ok: false,
       errors: { amount: 'Enter the amount received.' },
     })
+  })
+})
+
+describe('validateReversalReason', () => {
+  it('accepts a reason up to 500 characters once trimmed', () => {
+    expect(validateReversalReason('Entered ₹10,000 instead of ₹1,000.')).toBeNull()
+    expect(validateReversalReason(`  ${'x'.repeat(500)}  `)).toBeNull()
+  })
+
+  it('needs a reason', () => {
+    expect(validateReversalReason('')).toBe('Say why this payment is being reversed.')
+    expect(validateReversalReason(' \n ')).toBe('Say why this payment is being reversed.')
+  })
+
+  it('refuses more than 500 characters', () => {
+    expect(validateReversalReason('x'.repeat(501))).toBe(
+      'The reason must be 500 characters or fewer.',
+    )
   })
 })

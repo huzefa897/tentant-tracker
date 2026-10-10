@@ -169,6 +169,21 @@ export function renderReceiptPdf(content: ReceiptContent, fonts: ReceiptFonts): 
   rule(X, y, X + W)
   y += 4
 
+  // A void receipt says so before anything else, in red, across the page.
+  if (content.voided) {
+    use('regular', 8.5, OVERDUE)
+    const detailLines = doc.splitTextToSize(content.voided.details, W - 12) as string[]
+    const bannerH = 13 + detailLines.length * lineHeight(8.5)
+    doc.setDrawColor(...OVERDUE)
+    doc.setLineWidth(0.8)
+    doc.rect(X, y, W, bannerH)
+    use('bold', 16, OVERDUE)
+    spaced(content.voided.banner.toUpperCase(), PAGE_W / 2, y + 8.5, 0.8, 'center')
+    use('regular', 8.5, OVERDUE)
+    doc.text(detailLines, PAGE_W / 2, y + 14, { align: 'center', lineHeightFactor: 1.35 })
+    y += bannerH + 5
+  }
+
   boxes(
     [
       { label: 'Receipt No.', value: content.receiptNumber },
@@ -309,6 +324,14 @@ export function renderReceiptPdf(content: ReceiptContent, fonts: ReceiptFonts): 
   frames.push({ page: doc.getNumberOfPages(), top: frameTop, bottom: y })
   for (const frame of frames) {
     doc.setPage(frame.page)
+    // Every page of a void receipt carries it, faint, behind nothing it hides.
+    if (content.voided) {
+      doc.saveGraphicsState()
+      doc.setGState(doc.GState({ opacity: 0.12 }))
+      use('bold', 110, OVERDUE)
+      doc.text('VOID', PAGE_W / 2, PAGE_H / 2 + 20, { align: 'center', angle: 35 })
+      doc.restoreGraphicsState()
+    }
     doc.setDrawColor(...INK)
     doc.setLineWidth(0.6)
     doc.rect(MARGIN, frame.top, PAGE_W - 2 * MARGIN, frame.bottom - frame.top)

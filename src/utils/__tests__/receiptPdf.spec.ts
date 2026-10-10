@@ -106,4 +106,26 @@ describe('renderReceiptPdf', () => {
   it('titles the PDF with the receipt number', () => {
     expect(render().output()).toContain('Payment Receipt Shaik_Zahid_Ali_202_Rent_September 2026')
   })
+
+  it('prints VOID across a void receipt, still on one page', () => {
+    const doc = render(
+      makeReceipt({
+        status: 'void',
+        voidedAt: '2026-10-07T08:00:00.000Z',
+        voidReason: 'Entered ₹10,000 instead of ₹1,000.',
+      }),
+    )
+    const texts = drawn.map((d) => d.text)
+
+    expect(doc.getNumberOfPages()).toBe(1)
+    expect(texts).toContain('VOID — PAYMENT REVERSED')
+    expect(texts.join(' ')).toContain('Reason: Entered ₹10,000 instead of ₹1,000.')
+    expect(texts).toContain('VOID')
+  })
+
+  it('prints no VOID on a valid receipt', () => {
+    render()
+
+    expect(drawn.map((d) => d.text).filter((text) => text.includes('VOID'))).toEqual([])
+  })
 })
