@@ -4,7 +4,7 @@
 
 **Bills are rent entries** (`billing.RentEntry`): one per tenancy and billing month (stored as the first of the month), `PROTECT`ed from tenancy deletion.
 
-- Rent and electricity rate are copied from the tenancy when the bill is created and never change after. Totals, paid, outstanding and status are derived in `billing/calculations.py` with `Decimal` (electricity rounded to paise, half up, **then** added to rent and water) and never stored.
+- Rent and electricity rate are copied from the tenancy when the bill is created and never change after. Totals, paid, outstanding and status are derived in `billing/calculations.py` with `Decimal` (electricity rounded to paise, half up, **then** added to rent and water) and never stored. Paid counts only payments that weren't reversed ([payments-and-receipts.md](payments-and-receipts.md#corrections-reversing-a-payment)), so a reversal can make a paid bill partially paid or unpaid again.
 - Database constraints back every rule (unique month, rent > 0, units/rate/water ≥ 0, first of month).
 - The API (`/api/v1/properties/{id}/tenancies/{id}/entries/`, list/create, and `.../{entryId}/`) is scoped through `properties_for_user` then the tenancy, so others' bills 404; there's no update or delete.
 - Creation goes through `billing/services.py` `create_rent_entry`, which locks the tenancy, rechecks that the month overlaps the occupancy (no proration), and assigns the rate, tenancy and creator itself. The rent is optional and defaults to the tenancy's. The serializer refuses unknown, server-assigned and payment fields rather than ignoring them.
