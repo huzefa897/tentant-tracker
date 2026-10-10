@@ -137,6 +137,11 @@ For each file, check:
   - 🔄 Request Changes (must address)
 - Offer to pair if complex
 
+### Delivering the Review
+
+- When reviewing a GitHub PR, leave each finding as an inline comment on its line of the PR (e.g. a review posted with `gh api repos/{owner}/{repo}/pulls/{number}/reviews`), with the summary and decision as the review body.
+- If you can't leave inline comments (no PR, no `gh` access or auth, the post fails), start your review with a line in CAPS saying so, e.g. `COULD NOT LEAVE INLINE COMMENTS ON THE PR: <reason>.`, and give the full review in your output instead.
+
 ## Review Techniques
 
 ### Technique 1: The Checklist Method
