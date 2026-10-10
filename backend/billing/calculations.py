@@ -54,17 +54,18 @@ class EntryAmounts:
 
 
 def total_paid_for(entry) -> Decimal:
-    """The sum of the bill's payment records: from the queryset's `paid_total` annotation
-    (RentEntry.objects.with_amounts()) when present, otherwise one aggregate query."""
+    """The sum of the bill's effective payments (reversed ones don't count): from the
+    queryset's `paid_total` annotation (RentEntry.objects.with_amounts()) when present,
+    otherwise one aggregate query."""
     paid = getattr(entry, "paid_total", None)
     if paid is None:
-        paid = entry.payments.aggregate(total=Sum("amount"))["total"]
+        paid = entry.payments.effective().aggregate(total=Sum("amount"))["total"]
     return to_paise(paid or ZERO)
 
 
 def entry_amounts(entry, total_paid: Decimal | None = None) -> EntryAmounts:
-    """Everything derived for one bill, from its stored historical charges and its payments
-    (summed by total_paid_for unless given)."""
+    """Everything derived for one bill, from its stored historical charges and its effective
+    payments (summed by total_paid_for unless given)."""
     if total_paid is None:
         total_paid = total_paid_for(entry)
     total_due = calculate_total_due(

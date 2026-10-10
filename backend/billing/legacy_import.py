@@ -311,7 +311,7 @@ class _Importer:
         ).first()
         if previous is None:
             return ZERO
-        paid = previous.payments.filter(paid_date__lte=issued_date).aggregate(
+        paid = previous.payments.effective().filter(paid_date__lte=issued_date).aggregate(
             total=Sum("amount")
         )["total"]
         return max(entry_amounts(previous, total_paid=paid or ZERO).outstanding_amount, ZERO)

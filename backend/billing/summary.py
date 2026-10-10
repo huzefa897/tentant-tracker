@@ -1,7 +1,7 @@
 """A summary of everything the database holds that matters for recovery: counts, money totals
 and checksums. Two databases with the same summary hold the same people, properties, access,
-tenancies, bills, payments and receipts, down to their details (scripts/restore-test.sh
-compares a restored backup with the live one).
+tenancies, bills, payments, reversals and receipts (void or not), down to their details
+(scripts/restore-test.sh compares a restored backup with the live one).
 
 Only counts, totals and hashes: never names, phone numbers or amounts per person.
 """
@@ -12,8 +12,8 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 
-from billing.calculations import ZERO, entry_amounts
-from billing.models import Payment, Receipt, RentEntry
+from billing.calculations import entry_amounts
+from billing.models import Payment, PaymentReversal, Receipt, RentEntry
 from properties.models import Property, PropertyMembership, Tenancy
 
 # The snapshot fields printed on a receipt: a restored receipt must match on every one.
@@ -54,11 +54,9 @@ def _digest(rows) -> str:
 
 
 def ledger_summary() -> list[tuple[str, str]]:
-    entries = list(RentEntry.objects.prefetch_related("payments"))
-    amounts = {
-        entry.pk: entry_amounts(entry, total_paid=sum((p.amount for p in entry.payments.all()), ZERO))
-        for entry in entries
-    }
+    # Reversed payments don't count towards the totals (with_amounts sums the effective ones).
+    entries = list(RentEntry.objects.with_amounts())
+    amounts = {entry.pk: entry_amounts(entry) for entry in entries}
     total_due = sum((a.total_due for a in amounts.values()), Decimal("0.00"))
     total_paid = sum((a.total_paid for a in amounts.values()), Decimal("0.00"))
     memberships = PropertyMembership.objects.values_list(
@@ -76,6 +74,7 @@ def ledger_summary() -> list[tuple[str, str]]:
         ("tenancies digest", _digest(Tenancy.objects.values_list(*TENANCY_FIELDS))),
         ("bills", str(len(entries))),
         ("payments", str(Payment.objects.count())),
+        ("payment reversals", str(PaymentReversal.objects.count())),
         ("receipts", str(Receipt.objects.count())),
         ("total billed", str(total_due)),
         ("total paid", str(total_paid)),
@@ -100,6 +99,14 @@ def ledger_summary() -> list[tuple[str, str]]:
                 Payment.objects.values_list(
                     # The sequence too: receipts total a bill's payments in that order.
                     "id", "entry_id", "sequence", "amount", "paid_date", "notes"
+                )
+            ),
+        ),
+        (
+            "payment reversals digest",
+            _digest(
+                PaymentReversal.objects.values_list(
+                    "id", "payment_id", "reason", "created_by_id", "created_at"
                 )
             ),
         ),

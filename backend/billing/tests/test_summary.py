@@ -39,6 +39,7 @@ class LedgerSummaryTests(TestCase):
                 "tenancies": "1",
                 "bills": "2",
                 "payments": "2",
+                "payment reversals": "0",
                 "receipts": "0",
                 "total billed": "31500.00",
                 "total paid": "20750.00",
