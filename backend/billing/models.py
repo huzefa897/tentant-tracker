@@ -244,8 +244,9 @@ class Receipt(models.Model):
 
     Later payments, or changes to the tenancy, property or bill, never change an issued receipt:
     reopening or downloading it shows exactly what was saved. The bill's figures are as they
-    stood right after this payment (the payments recorded before it, plus this one), so they're
-    the same whenever the receipt is issued.
+    stood right after this payment (the payments recorded before it, plus this one). Earlier
+    payments already reversed when it's issued don't count, so a receipt issued after such a
+    reversal can show a different balance than one issued before it.
 
     Created only through billing/services.py issue_payment_receipt, which locks the bill and the
     payment so each one gets at most one receipt, and the property so its references are

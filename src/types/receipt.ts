@@ -13,7 +13,7 @@ export type ReceiptStatus = 'issued' | 'void'
 // Confirms one Payment. A snapshot Django saved when it was issued, so later payments, or
 // changes to the tenant or property, never change it: every download uses it exactly as saved.
 // The bill figures are as they stood right after this payment (payments recorded before it,
-// plus this one), so they're the same whenever the receipt was issued.
+// plus this one), leaving out earlier payments already reversed when it was issued.
 export interface PaymentReceipt {
   id: string
   reference: string // e.g. Shaik_Zahid_Ali_202_Rent_October 2026 (_2, _3… for a bill's later receipts); never regenerated
