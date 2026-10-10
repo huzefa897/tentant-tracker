@@ -249,3 +249,19 @@ TEST_RUNNER = "config.test_runner.TestRunner"
 # The Firebase project the Vue app signs in with. Its service-account credentials come
 # from GOOGLE_APPLICATION_CREDENTIALS: a path to a JSON key kept outside the repository.
 FIREBASE_PROJECT_ID = os.environ["FIREBASE_PROJECT_ID"]
+# Or from the key's fields, one variable each (backend/.env, e.g. for compose.yaml): used
+# instead of GOOGLE_APPLICATION_CREDENTIALS when FIREBASE_PRIVATE_KEY is set. The private
+# key's line breaks may be written as \n. "KEY" in the name hides it on Django's error pages.
+FIREBASE_SERVICE_ACCOUNT_KEY = (
+    {
+        "type": "service_account",
+        "project_id": FIREBASE_PROJECT_ID,
+        "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID", ""),
+        "private_key": os.environ["FIREBASE_PRIVATE_KEY"].replace("\\n", "\n"),
+        "client_email": os.environ["FIREBASE_CLIENT_EMAIL"],
+        "client_id": os.getenv("FIREBASE_CLIENT_ID", ""),
+        "token_uri": os.getenv("FIREBASE_TOKEN_URI", "https://oauth2.googleapis.com/token"),
+    }
+    if os.getenv("FIREBASE_PRIVATE_KEY", "").strip()
+    else None
+)

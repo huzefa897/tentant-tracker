@@ -10,6 +10,7 @@ from accounts.firebase import (
     InvalidFirebaseTokenError,
     find_firebase_uid,
     get_or_create_firebase_uid,
+    initialize_firebase,
     revoke_firebase_sessions,
     set_firebase_phone_number,
     verify_firebase_token,
@@ -160,3 +161,44 @@ class RevokeFirebaseSessionsTests(SimpleTestCase):
         with self.assertLogs("accounts.firebase", "ERROR"):
             with self.assertRaises(FirebaseUnavailableError):
                 revoke_firebase_sessions("uid-1")
+
+
+SERVICE_ACCOUNT_KEY = {
+    "type": "service_account",
+    "project_id": "test-project",
+    "private_key_id": "key-id",
+    "private_key": "-----BEGIN PRIVATE KEY-----\nnot a real key\n-----END PRIVATE KEY-----\n",
+    "client_email": "app@test-project.iam.gserviceaccount.com",
+    "client_id": "1",
+    "token_uri": "https://oauth2.googleapis.com/token",
+}
+
+
+@override_settings(FIREBASE_PROJECT_ID="test-project")
+@mock.patch("accounts.firebase.firebase_admin.initialize_app")
+@mock.patch("accounts.firebase.firebase_admin.get_app", side_effect=ValueError)
+class InitializeFirebaseTests(SimpleTestCase):
+    @override_settings(FIREBASE_SERVICE_ACCOUNT_KEY=SERVICE_ACCOUNT_KEY)
+    @mock.patch("accounts.firebase.credentials.Certificate")
+    def test_uses_the_keys_fields_when_set(self, certificate, _get_app, initialize_app):
+        initialize_firebase()
+
+        certificate.assert_called_once_with(SERVICE_ACCOUNT_KEY)
+        initialize_app.assert_called_once_with(
+            certificate.return_value, options={"projectId": "test-project"}
+        )
+
+    @override_settings(FIREBASE_SERVICE_ACCOUNT_KEY=None)
+    def test_otherwise_uses_the_key_file(self, _get_app, initialize_app):
+        initialize_firebase()
+
+        # None: the Admin SDK reads GOOGLE_APPLICATION_CREDENTIALS.
+        initialize_app.assert_called_once_with(None, options={"projectId": "test-project"})
+
+    @override_settings(FIREBASE_SERVICE_ACCOUNT_KEY=SERVICE_ACCOUNT_KEY)
+    def test_an_unusable_key_makes_firebase_unavailable(self, _get_app, initialize_app):
+        with self.assertLogs("accounts.firebase", "ERROR"):
+            with self.assertRaises(FirebaseUnavailableError):
+                verify_firebase_token("token")
+
+        initialize_app.assert_not_called()

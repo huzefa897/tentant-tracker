@@ -57,7 +57,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 6. Secrets stay server-side
 
-- Backend secrets (`DJANGO_SECRET_KEY`, the database password, the Firebase service-account key path) come from the gitignored `backend/.env`. The service-account JSON lives outside the repository. In production they come from the gitignored `.env.production` on the server, each container gets only the ones it needs, and the key is mounted read-only; neither image contains any (their `.dockerignore` files are allowlists). [deployment.md](deployment.md) says how to keep a copy for recovery.
+- Backend secrets (`DJANGO_SECRET_KEY`, the database password, the Firebase service-account key's path, or its fields as variables) come from the gitignored `backend/.env`. The service-account JSON lives outside the repository. The key as variables is named so Django's error pages mask it (`FIREBASE_SERVICE_ACCOUNT_KEY`); never log it. In production they come from the gitignored `.env.production` on the server, each container gets only the ones it needs, and the key is mounted read-only; neither image contains any (their `.dockerignore` files are allowlists). [deployment.md](deployment.md) says how to keep a copy for recovery.
 - `VITE_*` variables are bundled into the app and are **public**: never put a secret in one. The Firebase web config is public by design.
 - Apps Script secrets live in Script Properties, never in the code. The repo is public: never commit tenant data, phone numbers, emails, sheet or script IDs.
 

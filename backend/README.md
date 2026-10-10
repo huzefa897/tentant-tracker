@@ -70,7 +70,7 @@ Admin portal access (`is_staff`/`is_superuser`, username + password) and app sig
 - Mobile numbers are E.164 (`+918341413827`), unique, and limited to the countries the app's login accepts (`accounts/phone.py`, mirroring the frontend's `utils/phoneCountries.ts`). Admin accepts spaces and dashes.
 - Firebase still sends a code to any number typed on the login page (in the allowed SMS regions); the backend is what refuses unknown numbers.
 
-Configure in `.env`: `FIREBASE_PROJECT_ID` (the Vue app's project) and `GOOGLE_APPLICATION_CREDENTIALS` (absolute path to a service-account key kept **outside** the repo). Tests mock Firebase and need neither.
+Configure in `.env`: `FIREBASE_PROJECT_ID` (the Vue app's project) and either `GOOGLE_APPLICATION_CREDENTIALS` (absolute path to a service-account key kept **outside** the repo) or the key's fields, one variable each (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY_ID`, `FIREBASE_CLIENT_ID`; used when `FIREBASE_PRIVATE_KEY` is set). Tests mock Firebase and need neither.
 
 ### Adding a person and granting access
 
