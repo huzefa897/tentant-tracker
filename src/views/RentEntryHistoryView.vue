@@ -141,6 +141,11 @@ const noMatchesMessage = computed(() => {
   return `No ${status}entries${year}.`
 })
 
+// All the matching bills, across pages.
+const entriesCountLabel = computed(() =>
+  history.value.count === 1 ? '1 entry' : `${history.value.count} entries`,
+)
+
 const allVoidMessage = computed(() => {
   const count = history.value.hiddenVoidCount
   return count === 1
@@ -189,7 +194,7 @@ function viewEntry(entryId: string) {
         <Skeleton class="h-11 w-44" />
       </div>
       <div class="space-y-6">
-        <Skeleton class="ml-auto h-11 w-full max-w-sm" />
+        <Skeleton class="h-[7.5rem] w-full rounded-xl" />
         <SkeletonRows bordered />
       </div>
     </LoadingRegion>
@@ -243,7 +248,7 @@ function viewEntry(entryId: string) {
         data-testid="history-loading"
       >
         <div class="space-y-6">
-          <Skeleton class="ml-auto h-11 w-full max-w-sm" />
+          <Skeleton class="h-[7.5rem] w-full rounded-xl" />
           <SkeletonRows bordered />
         </div>
       </LoadingRegion>
@@ -273,26 +278,38 @@ function viewEntry(entryId: string) {
       </div>
 
       <div v-else class="space-y-6">
-        <!-- The page's totals, then the filters below them on the right, then the bills. -->
-        <div class="space-y-4">
-          <RentEntryTotals
-            v-if="history.status === 'ready' && entries.length > 0"
-            :totals="totals"
-            :void-count="voidCount"
-          />
-          <!-- Holds the totals' space while another page or filter loads. -->
-          <Skeleton
-            v-else-if="history.status !== 'ready'"
-            class="h-[18.5rem] sm:h-28"
-            aria-hidden="true"
-          />
-          <RentEntryFilters
-            v-model:year="selectedYear"
-            v-model:status="selectedStatus"
-            v-model:show-void="showVoid"
-            :years="years"
-          />
-        </div>
+        <RentEntryTotals
+          v-if="history.status === 'ready' && entries.length > 0"
+          :totals="totals"
+          :void-count="voidCount"
+        />
+        <!-- Holds the totals' space while another page or filter loads. -->
+        <Skeleton
+          v-else-if="history.status !== 'ready'"
+          class="h-[18.5rem] sm:h-28"
+          aria-hidden="true"
+        />
+
+        <section aria-labelledby="entries-heading" class="rounded-xl border">
+          <div class="flex items-baseline justify-between gap-4 border-b px-4 py-3 sm:px-5">
+            <h2 id="entries-heading" class="text-lg font-semibold">Entries</h2>
+            <p
+              v-if="history.status === 'ready'"
+              class="text-sm text-muted-foreground tabular-nums"
+              data-testid="entries-count"
+            >
+              {{ entriesCountLabel }}
+            </p>
+          </div>
+          <div class="p-3 sm:px-4">
+            <RentEntryFilters
+              v-model:year="selectedYear"
+              v-model:status="selectedStatus"
+              v-model:show-void="showVoid"
+              :years="years"
+            />
+          </div>
+        </section>
 
         <LoadingRegion
           v-if="history.status !== 'ready'"

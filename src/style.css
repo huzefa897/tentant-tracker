@@ -132,7 +132,7 @@
 }
 
 /* Motion. Screens ease in as they open, cards rise in when their content changes, buttons
-   press in, switches slide and panels open in place. All of it is off for people who prefer
+   press in, and switches slide. All of it is off for people who prefer
    reduced motion. */
 @keyframes page-in {
   from {
@@ -179,20 +179,6 @@
   .switch-thumb[data-state='checked'] {
     translate: 16px 0;
   }
-
-  /* A panel that opens in place, pushing what's below it down rather than covering it. */
-  .collapsible {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .collapsible[data-open='true'] {
-    grid-template-rows: 1fr;
-  }
-  .collapsible > * {
-    min-height: 0;
-    overflow: hidden;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -207,8 +193,7 @@
 
   .switch-track,
   .switch-thumb,
-  .switch-thumb-core,
-  .collapsible {
+  .switch-thumb-core {
     transition: none;
   }
 
