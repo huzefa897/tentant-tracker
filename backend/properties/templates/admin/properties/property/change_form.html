@@ -1,0 +1,8 @@
+{% extends "admin/change_form.html" %}
+
+{% block object-tools-items %}
+  {% if original.pk and request.user.is_superuser %}
+    <li><a href="{% url 'admin:properties_property_import_sheet' original.pk %}">Import from Google Sheet</a></li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .calculations import entry_amounts
-from .models import Payment, Receipt, RentEntry
+from .models import LegacyRecord, Payment, Receipt, RentEntry
 
 
 class ViewOnlyAdminMixin:
@@ -129,4 +129,16 @@ class ReceiptAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
         "paid_date",
         "payment_notes",
     )
+    readonly_fields = fields
+
+
+@admin.register(LegacyRecord)
+class LegacyRecordAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
+    """What `manage.py import_legacy_ledger` imported: which source record became which bill,
+    payment or receipt. Read-only: reruns rely on it to create nothing twice."""
+
+    list_display = ("source_id", "kind", "object_id", "imported_by", "imported_at")
+    list_filter = ("kind",)
+    search_fields = ("source_id",)
+    fields = ("source_id", "kind", "object_id", "fingerprint", "imported_by", "imported_at")
     readonly_fields = fields

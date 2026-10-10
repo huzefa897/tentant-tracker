@@ -15,11 +15,11 @@ The rules every change follows, what's in place, and what's left. Update the sta
 | 7   | No secrets in logs               | Done (rule + logging config)                                            |
 | 8   | Parameterised SQL                | Done (rule)                                                             |
 | 9   | Validate form inputs             | Done (rule)                                                             |
-| 10  | Block XSS                        | Done in code and API headers; the app's CSP is set where it's hosted    |
-| 11  | Validate uploads                 | Rule, for when uploads arrive                                           |
+| 10  | Block XSS                        | Done in code, API and Caddy headers; CSP report-only until checked      |
+| 11  | Validate uploads                 | Done for the one upload (the Sheet import in admin)                     |
 | 12  | Rate-limit all requests          | Done                                                                    |
 | 13  | Tighten CORS                     | Done                                                                    |
-| 14  | Production settings, DEBUG off   | Done; checked in CI                                                     |
+| 14  | Production settings, DEBUG off   | Done; set by compose.prod.yaml, checked in CI                           |
 | 15  | Patch dependencies               | Done; audited in CI, Dependabot weekly                                  |
 
 All settings below come from the environment; `backend/.env.example` lists every variable.
@@ -34,7 +34,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 2. Server-side access, always
 
-- DRF requires authentication by default (`IsAuthenticated` + `FirebaseAuthentication`). A public endpoint opts out explicitly with `AllowAny` and `authentication_classes([])`; only `/api/v1/health/` does today.
+- DRF requires authentication by default (`IsAuthenticated` + `FirebaseAuthentication`). A public endpoint opts out explicitly with `AllowAny` and `authentication_classes([])`; only `/api/v1/health/` and `/api/v1/ready/` do today.
 - Every request is checked on the server: never trust a UID, phone number, role, property, tenancy, rate or total from the request. The server derives them from the verified token and the database.
 - Role permissions are checked with `properties/roles.py` `role_can` on every write.
 
@@ -43,6 +43,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 - **In the app (done):** every query is scoped through `properties/queries.py` `properties_for_user`, then the tenancy, then its bills. The queryset is filtered, so another property's records 404 and never appear in lists. Object permissions alone are not enough.
 - A tenancy with bills can't move to another property, so bills never change scope ([tenants.md](tenants.md)).
 - **PostgreSQL RLS** isn't used: the app connects as one database role. Adding RLS policies would be defence in depth, needing a per-request setting of the user on the connection. Not planned; revisit if anything other than Django gets database access.
+- **On a hosted PostgreSQL with its own API** (Supabase): turn that API off. Supabase's Data API publishes the `public` schema to anyone with the project's public key, and without RLS that's every record ([deployment.md](deployment.md#render-and-supabase)).
 
 ## 4. Hash passwords
 
@@ -57,7 +58,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 6. Secrets stay server-side
 
-- Backend secrets (`DJANGO_SECRET_KEY`, the database password, the Firebase service-account key path) come from the gitignored `backend/.env`. The service-account JSON lives outside the repository. In production, use the host's secret store.
+- Backend secrets (`DJANGO_SECRET_KEY`, the database password, the Firebase service-account key's path, or its fields as variables) come from the gitignored `backend/.env`. The service-account JSON lives outside the repository. The key as variables is named so Django's error pages mask it (`FIREBASE_SERVICE_ACCOUNT_KEY`); never log it. In production they come from the gitignored `.env.production` on the server, each container gets only the ones it needs, and the key is mounted read-only; neither image contains any (their `.dockerignore` files are allowlists). [deployment.md](deployment.md) says how to keep a copy for recovery.
 - `VITE_*` variables are bundled into the app and are **public**: never put a secret in one. The Firebase web config is public by design.
 - Apps Script secrets live in Script Properties, never in the code. The repo is public: never commit tenant data, phone numbers, emails, sheet or script IDs.
 
@@ -87,13 +88,13 @@ All settings below come from the environment; `backend/.env.example` lists every
 - Redirects after login only follow same-app paths (`?redirect=`).
 - The API returns JSON only; receipts are generated as PDFs with jsPDF text.
 - **Django's responses** carry `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `Cross-Origin-Opener-Policy: same-origin` and `X-Frame-Options: DENY`, stated explicitly in `settings.py` and tested.
-- **The app's Content-Security-Policy** is set by whatever serves the built app; it isn't hosted yet. Start from this policy and check that phone sign-in (reCAPTCHA) still works in staging before tightening:
+- **The app's headers** come from Caddy ([deploy/web/Caddyfile](../deploy/web/Caddyfile)): the same four, plus HSTS and a **Content-Security-Policy**, sent as `Content-Security-Policy-Report-Only` until phone sign-in (reCAPTCHA) has been checked against it in the browser, then switched to enforcing ([deployment.md](deployment.md), first deploy). The policy:
 
   ```
   default-src 'self';
   script-src 'self' https://www.google.com https://www.gstatic.com https://apis.google.com;
-  frame-src https://www.google.com https://<firebase-project>.firebaseapp.com;
-  connect-src 'self' <api-origin> https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com;
+  frame-src https://www.google.com https://<VITE_FIREBASE_AUTH_DOMAIN>;
+  connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com;
   img-src 'self' data:;
   font-src 'self' data:;
   style-src 'self' 'unsafe-inline';
@@ -102,9 +103,13 @@ All settings below come from the environment; `backend/.env.example` lists every
   frame-ancestors 'none'
   ```
 
-## 11. Validate uploads (future)
+  With a separate API domain, add its origin to `connect-src`. Add a source only when a reported violation needs it.
 
-There are no uploads today. When they arrive:
+## 11. Validate uploads
+
+The only upload is the Google Sheet import on a property's admin page ([data-import.md](data-import.md), `billing/sheet_import.py`). It's for superusers only, checks the size (5 MB) on the server, checks the file is a zip by its content and refuses one that would unpack to more than 50 MB or 2,000 entries, and parses its XML through `defusedxml` (which `openpyxl` uses when it's installed). It's read in memory (`FILE_UPLOAD_MAX_MEMORY_SIZE`) and never stored or served; between steps the converted data is signed for that property and admin, and expires after an hour.
+
+For any future upload:
 
 - Check size on the server, and set `DATA_UPLOAD_MAX_MEMORY_SIZE` and `FILE_UPLOAD_MAX_MEMORY_SIZE`.
 - Check the type by content, not the name or `Content-Type`, and allow a short list of types.
@@ -116,9 +121,11 @@ There are no uploads today. When they arrive:
 
 Every API request is limited (`config/throttling.py`); over a limit is 429 with `Retry-After`, and the app says to wait a minute (`ApiError` `'rate-limited'`, `RATE_LIMITED_MESSAGE`). There are three limits:
 
-- **Per address, before authentication** (`ApiRateLimitMiddleware`, `DJANGO_THROTTLE_ADDRESS`, default 300/minute). It covers every `/api/` request. It's middleware because DRF checks its throttles only after authentication and permissions, so requests with no token or a bad one would otherwise never be counted.
+- **Per address, before authentication** (`ApiRateLimitMiddleware`, `DJANGO_THROTTLE_ADDRESS`, default 300/minute). It covers every `/api/` request except the health and readiness checks (below). It's middleware because DRF checks its throttles only after authentication and permissions, so requests with no token or a bad one would otherwise never be counted.
 - **Per signed-in person** (`UserRateThrottle`, `DJANGO_THROTTLE_USER`, default 300/minute).
 - **Writes per person** (`WriteRateThrottle`, `DJANGO_THROTTLE_WRITES`, default 30/minute), e.g. creating bills.
+
+**The public health and readiness checks** (`/api/v1/health/`, `/api/v1/ready/`) have their own, stricter limit instead (`HealthCheckRateThrottle`, `DJANGO_THROTTLE_HEALTH`, default 10/minute per address, shared by the two), and no per-person limits. Their counts are always kept in the process's memory (the `health` cache, bounded to 1,000 addresses), never in PostgreSQL, so a flood of pings costs no database work: health makes no queries at all, readiness only its `SELECT 1`. Each worker counts separately, so the effective limit is up to `WEB_CONCURRENCY` times the rate. An uptime monitor every few minutes, and Docker's own check every 30 seconds, are far below it.
 
 Admin login is throttled separately (item 1). OTP abuse is limited by Firebase and reCAPTCHA; consider Firebase App Check.
 
@@ -126,7 +133,10 @@ In production:
 
 - **Proxies:** behind a proxy, set `DJANGO_NUM_PROXIES` to how many there are, so each client's own address is read from `X-Forwarded-For`. Without it, every client shares the proxy's address. It defaults to `0`, which ignores `X-Forwarded-For`: clients can forge that header, so it's only trusted for the proxies you declare (never `None`, which would make DRF trust the whole header and let anyone dodge the limits). This applies to the admin login throttle too.
 - **Shared counts:** the default local-memory cache is per process, so with N worker processes a person effectively gets N times each limit. With more than one process, set `DJANGO_SHARED_CACHE=true` to keep counts in PostgreSQL (Django's database cache, table `django_cache`; run `manage.py createcachetable` once per database). Redis isn't used (decided 2026-10-07).
-- **Proxy limits:** add limits at the proxy as well.
+- **Proxy limits:** Caddy has no rate limiting without a plugin, so the app's limits are the ones that apply. Add proxy limits if traffic ever calls for them.
+- **Floods from many addresses:** per-address limits stop one client, not a distributed attack, which still reaches the server and uses its bandwidth and Caddy's connections before any limit applies. Protection from that is at the network edge (e.g. a proxying CDN such as Cloudflare in front of the domain), not in the app.
+
+The database-backed limits **fail open**: if the counts can't be read (the database is down, or `createcachetable` wasn't run), the request goes through and a warning is logged, so a rate limit never takes the app down and readiness can still report the database as unavailable.
 
 Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry over between tests. The rate-limit tests turn a real cache back on.
 
@@ -148,6 +158,9 @@ Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry ov
 - **Cookies:** admin's session and CSRF cookies are HTTPS-only unless `DEBUG` is on (`DJANGO_SECURE_COOKIES` overrides). `DJANGO_CSRF_TRUSTED_ORIGINS` lists admin's HTTPS origin if it's behind a proxy.
 - **Email:** the app sends none yet. The backend is console in development and SMTP otherwise (`DJANGO_EMAIL_BACKEND`).
 - **CI** runs `manage.py check --deploy --fail-level WARNING` with production-like settings, so a setting that weakens production fails the build.
+- **Database connections over the internet** use TLS: `POSTGRES_SSLMODE=require` (libpq's `sslmode`) refuses an unencrypted connection. Unset, the default (`prefer`) only encrypts when the server offers it, which is fine on one machine or Docker network. `require` doesn't verify the server's certificate; `verify-full` with the provider's CA certificate would.
+- **In production** `compose.prod.yaml` sets all of these (DEBUG off, the HTTPS redirect, HSTS, secure cookies, the proxy settings, shared rate-limit counts), from `.env.production` where they vary ([deployment.md](deployment.md)). On Render, `render.yaml` sets the same ones.
+- **Caching:** every `/api/` response carries `Cache-Control: no-store, private` (`ApiNoStoreMiddleware`), so no browser, proxy or CDN keeps people's records.
 
 ## 15. Patch dependencies
 

@@ -1,6 +1,6 @@
 # Backend
 
-Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). The frontend calls it for access (`/me`), tenants (tenancies), rent entries (bills), payments and receipts. PostgreSQL runs in Docker (`docker compose up -d --wait db` from the root, host port 5434); Django runs on the host with pipenv, from `backend/`. Commands and the done-gate are in `CLAUDE.md`.
+Django + DRF + PostgreSQL in `backend/` (setup in `backend/README.md`). The frontend calls it for access (`/me`), tenants (tenancies), rent entries (bills), payments and receipts. PostgreSQL runs in Docker (`docker compose up -d --wait db` from the root, host port 5434); Django runs on the host with pipenv, from `backend/`. Or the whole stack runs in Docker with `docker compose --profile app up` (`backend/README.md`). Commands and the done-gate are in `CLAUDE.md`.
 
 Feature rules live in their own docs: sign-in and property access in [auth-and-access.md](auth-and-access.md), tenancies in [tenants.md](tenants.md), bills in [rent-entries.md](rent-entries.md), payments in [payments-and-receipts.md](payments-and-receipts.md).
 
@@ -10,10 +10,12 @@ Feature rules live in their own docs: sign-in and property access in [auth-and-a
 - Apps: `accounts`, `properties` (properties, memberships, tenancies), `billing` (rent entries, payments). Tests in `tests.py` or a `tests/` package per app; mock `verify_firebase_token`, never call live Firebase.
 - Add packages with `pipenv install <name>` and commit `Pipfile.lock`.
 - API JSON is camelCase with explicit serializer fields; never expose whole models.
-- DRF requires authentication by default; a public endpoint opts out with `AllowAny` and `authentication_classes([])` (only `/api/v1/health/` today). CORS is not authentication.
+- DRF requires authentication by default; a public endpoint opts out with `AllowAny` and `authentication_classes([])` (only `/api/v1/health/` and `/api/v1/ready/` today). CORS is not authentication.
 - Scope every property query through `properties/queries.py` `properties_for_user` (filter the queryset, so others' records 404 and never appear in lists), not object permissions alone.
 - Role permissions live in `properties/roles.py` (`role_can`), never in Django Groups (hidden: they're global, not per property).
 - Every API request is rate limited (per address before authentication, then per person, writes more strictly; `config/throttling.py`), and admin login failures are throttled (`config/middleware.py`). Production settings (HTTPS, HSTS, secure cookies, admin path, logging) come from the environment. Details and the rules for changes: [security.md](security.md).
+- **Health:** `/api/v1/health/` says the app responds; `/api/v1/ready/` also checks the database (503 `{"status": "unavailable"}`, nothing more, when it can't). Both are public and safe to ping from an uptime monitor: they have their own per-address limit, counted in memory so pings never load the database ([security.md](security.md) item 12). Every `/api/` response carries `Cache-Control: no-store, private`.
+- **Production** runs the `backend/Dockerfile` image (Gunicorn, WhiteNoise for admin's static files) behind Caddy: [deployment.md](deployment.md). Management commands: `ledger_summary` (counts, totals and checksums, compared by the restore test), `sheet_to_ledger` and `import_legacy_ledger` ([data-import.md](data-import.md)).
 
 ## Talking to it from the app
 

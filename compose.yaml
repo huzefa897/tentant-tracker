@@ -1,4 +1,7 @@
-# Local development only: PostgreSQL in Docker, Django runs on the host.
+# Local development only (production is compose.prod.yaml).
+#   docker compose up -d --wait db     PostgreSQL alone; run Django and Vite on the host.
+#   docker compose --profile app up    The whole stack in Docker, with live reload:
+#                                      the app at http://localhost:5173, Django at :8000.
 # `docker compose down -v` deletes the postgres_data volume (the whole database).
 services:
   db:
@@ -18,5 +21,58 @@ services:
       timeout: 5s
       retries: 10
 
+  # Django's development server on the production image's packages, with backend/ mounted so
+  # code changes reload. Rebuild (`--build`) after changing Pipfile.lock.
+  backend:
+    profiles: [app]
+    build: ./backend
+    image: rent-tracker-backend:dev
+    # Your user, not the image's, so it can read the mounted code and files it writes (e.g.
+    # migrations) are yours. If `id -u` isn't 1000: `export UID GID=$(id -g)` first.
+    user: "${UID:-1000}:${GID:-1000}"
+    depends_on:
+      db:
+        condition: service_healthy
+    # backend/.env (copy .env.example) gives DJANGO_SECRET_KEY, the Firebase project and its
+    # service-account key's fields (FIREBASE_PRIVATE_KEY and the rest) and the other settings;
+    # the values below win, pointing Django at the db container instead of the host's port.
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      POSTGRES_DB: rent_tracker
+      POSTGRES_USER: rent_tracker
+      POSTGRES_PASSWORD: local_dev_password
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    volumes:
+      - ./backend:/app
+    # Migrating on start is for development only; production migrates once per release.
+    command: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  # Vite's dev server. The repository is mounted (the root .env gives the VITE_* values);
+  # node_modules lives in its own volume, installed on start from package-lock.json.
+  frontend:
+    profiles: [app]
+    image: node:22-slim
+    working_dir: /app
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      # vite.config.ts forwards /api here instead of to 127.0.0.1:8000.
+      API_PROXY_TARGET: http://backend:8000
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --host 0.0.0.0 --port 5173 --strictPort"
+    ports:
+      - "127.0.0.1:5173:5173"
+
 volumes:
   postgres_data:
+  node_modules:

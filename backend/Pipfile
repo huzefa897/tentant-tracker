@@ -11,6 +11,10 @@ psycopg = {extras = ["binary"], version = "*"}
 python-dotenv = "*"
 firebase-admin = "*"
 argon2-cffi = "*"
+gunicorn = "*"
+whitenoise = "*"
+openpyxl = "*"
+defusedxml = "*"
 
 [dev-packages]
 

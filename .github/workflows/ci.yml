@@ -71,7 +71,7 @@ jobs:
 
       - run: python -m pip install pipenv
       # --deploy fails if Pipfile.lock is out of date with Pipfile.
-      - run: pipenv install --deploy
+      - run: pipenv install --deploy --dev
       # Known vulnerabilities in the locked Python packages fail the build.
       - run: |
           pipenv requirements --hash > "$RUNNER_TEMP/requirements.txt"

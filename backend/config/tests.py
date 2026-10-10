@@ -1,14 +1,16 @@
+import os
 import threading
 from unittest import mock
 
 from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
+from django.core.cache import cache, caches
 from django.core.management import call_command
-from django.db import connection
+from django.db import OperationalError, connection
 from django.test import (
     Client,
+    SimpleTestCase,
     TestCase,
     TransactionTestCase,
     override_settings,
@@ -21,6 +23,9 @@ from rest_framework.test import APIClient
 from rest_framework.throttling import SimpleRateThrottle
 
 from accounts.models import AdminLoginAttempts
+
+from .settings import postgres_options
+from .views import health_check, readiness_check
 
 
 @api_view(["GET"])
@@ -36,12 +41,17 @@ def write_view(request):
 urlpatterns = [
     path("protected/", protected_view),
     path("api/protected/", protected_view),
+    path("api/v1/health/", health_check),
+    path("api/v1/ready/", readiness_check),
     path("write/", write_view),
     path("admin/", admin.site.urls),
 ]
 
 # A real cache, so the limits count (the test runner otherwise uses a dummy one).
-REAL_CACHE = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+REAL_CACHE = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    "health": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "health"},
+}
 
 
 class HealthCheckTests(TestCase):
@@ -62,6 +72,90 @@ class HealthCheckTests(TestCase):
 
         self.assertEqual(response.status_code, 405)
 
+
+class ReadinessCheckTests(TestCase):
+    def test_returns_ok_when_the_database_answers(self):
+        response = APIClient().get("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_returns_503_without_details_when_the_database_is_unavailable(self):
+        error = OperationalError('connection to server at "db" failed: password for "app"')
+        with (
+            mock.patch("config.views.connection.cursor", side_effect=error),
+            self.assertLogs("config.views", "WARNING") as logs,
+        ):
+            response = APIClient().get("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        # Neither the response nor the log repeats the driver's message.
+        self.assertNotIn("password", " ".join(logs.output))
+
+    def test_ignores_tokens_so_firebase_outages_do_not_fail_it(self):
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION="Bearer not-checked")
+
+        self.assertEqual(client.get("/api/v1/ready/").status_code, 200)
+
+
+def unreachable_counts():
+    """A cache whose every call fails like the database cache with PostgreSQL down."""
+    broken = mock.Mock()
+    broken.get.side_effect = OperationalError("connection refused")
+    broken.set.side_effect = OperationalError("connection refused")
+    return mock.patch.object(SimpleRateThrottle, "cache", broken)
+
+
+class RateLimitFailsOpenTests(TestCase):
+    """Production keeps the counts in PostgreSQL: with the database down, the limits must step
+    aside instead of every request failing. Health and readiness never use these counts (their
+    own are in memory), so readiness reports 503 and health 200 without them."""
+
+    def test_readiness_still_reports_the_database_unavailable(self):
+        with (
+            unreachable_counts(),
+            mock.patch("config.views.connection.cursor", side_effect=OperationalError("down")),
+            self.assertLogs("config", "WARNING") as logs,
+        ):
+            response = APIClient().get("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("Rate limit not applied", " ".join(logs.output))
+
+    @override_settings(ROOT_URLCONF=__name__)
+    def test_requests_go_through_when_the_counts_are_unavailable(self):
+        client = APIClient()
+        client.force_authenticate(get_user_model().objects.create_user(username="me"))
+        with unreachable_counts(), self.assertLogs("config.throttling", "WARNING"):
+            self.assertEqual(client.get("/protected/").status_code, 200)
+            self.assertEqual(client.post("/write/").status_code, 200)
+
+
+class ApiCachingTests(TestCase):
+    def test_api_responses_are_never_stored(self):
+        response = APIClient().get("/api/v1/health/")
+
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        self.assertIn("private", response.headers["Cache-Control"])
+
+    def test_protected_responses_are_never_stored(self):
+        response = APIClient().get("/api/v1/me/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("no-store", response.headers["Cache-Control"])
+
+    @override_settings(CACHES=REAL_CACHE)
+    def test_rate_limited_responses_are_never_stored(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        with mock.patch.dict(SimpleRateThrottle.THROTTLE_RATES, {"address": "1/minute"}):
+            APIClient().get("/api/v1/me/")
+            response = APIClient().get("/api/v1/me/")
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("no-store", response.headers["Cache-Control"])
 
 @override_settings(ROOT_URLCONF=__name__)
 class DefaultPermissionTests(TestCase):
@@ -186,7 +280,8 @@ class RateLimitTests(TestCase):
 
 
 SHARED_CACHE = {
-    "default": {"BACKEND": "django.core.cache.backends.db.DatabaseCache", "LOCATION": "django_cache"}
+    "default": {"BACKEND": "django.core.cache.backends.db.DatabaseCache", "LOCATION": "django_cache"},
+    "health": REAL_CACHE["health"],
 }
 
 
@@ -205,6 +300,66 @@ class SharedCacheRateLimitTests(TestCase):
         statuses = [client.get("/api/protected/").status_code for _ in range(3)]
 
         self.assertEqual(statuses, [401, 401, 429])
+
+
+@override_settings(ROOT_URLCONF=__name__, CACHES=SHARED_CACHE)
+class HealthCheckRateLimitTests(TestCase):
+    """The public checks have their own per-address limit, counted in memory: with the shared
+    (PostgreSQL) cache on, a flood of pings still costs the database nothing."""
+
+    def setUp(self):
+        call_command("createcachetable", verbosity=0)
+        caches["health"].clear()
+        rates = mock.patch.dict(
+            SimpleRateThrottle.THROTTLE_RATES, {"address": "2/minute", "health": "3/minute"}
+        )
+        rates.start()
+        self.addCleanup(rates.stop)
+        self.addCleanup(caches["health"].clear)
+
+    def test_limits_each_check_per_address(self):
+        client = APIClient()
+        statuses = [client.get("/api/v1/health/").status_code for _ in range(4)]
+
+        self.assertEqual(statuses, [200, 200, 200, 429])
+        refused = client.get("/api/v1/ready/")
+        self.assertEqual(refused.status_code, 429)
+        self.assertIn("Retry-After", refused.headers)
+
+    def test_counts_other_addresses_separately(self):
+        for _ in range(3):
+            APIClient().get("/api/v1/health/", REMOTE_ADDR="10.0.0.1")
+
+        response = APIClient().get("/api/v1/health/", REMOTE_ADDR="10.0.0.2")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_health_pings_never_query_the_database(self):
+        client = APIClient()
+        with self.assertNumQueries(0):
+            for _ in range(5):  # Allowed and refused alike.
+                client.get("/api/v1/health/")
+
+    def test_readiness_only_queries_its_own_check(self):
+        with self.assertNumQueries(1):
+            response = APIClient().get("/api/v1/ready/")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_is_separate_from_the_api_limit(self):
+        # One address uses up the API's limit: the checks still answer it.
+        busy_api = APIClient(REMOTE_ADDR="10.0.0.1")
+        for _ in range(2):
+            busy_api.get("/api/protected/")
+        self.assertEqual(busy_api.get("/api/protected/").status_code, 429)
+        self.assertEqual(busy_api.get("/api/v1/health/").status_code, 200)
+
+        # Another uses up the checks' limit: the API still answers it.
+        busy_checks = APIClient(REMOTE_ADDR="10.0.0.2")
+        for _ in range(3):
+            busy_checks.get("/api/v1/health/")
+        self.assertEqual(busy_checks.get("/api/v1/health/").status_code, 429)
+        self.assertEqual(busy_checks.get("/api/protected/").status_code, 401)
 
 class AdminLoginThrottleTests(TestCase):
     def setUp(self):
@@ -275,7 +430,6 @@ class AdminLoginThrottleTests(TestCase):
         self.assertEqual(self.login("right-pass-123").status_code, 302)
 
 
-
 @skipUnlessDBFeature("has_select_for_update")
 class ConcurrentAdminLoginThrottleTests(TransactionTestCase):
     """Real transactions on separate connections (PostgreSQL), as simultaneous requests from
@@ -324,3 +478,16 @@ class SecuritySettingsTests(TestCase):
 
     def test_admin_is_served_at_the_configured_path(self):
         self.assertEqual(reverse("admin:index"), f"/{settings.ADMIN_PATH}")
+
+
+class PostgresOptionsTests(SimpleTestCase):
+    def test_requires_tls_when_asked(self):
+        with mock.patch.dict("os.environ", {"POSTGRES_SSLMODE": " require "}):
+            self.assertEqual(postgres_options(), {"sslmode": "require"})
+
+    def test_leaves_libpqs_default_when_unset_or_empty(self):
+        with mock.patch.dict("os.environ", {"POSTGRES_SSLMODE": ""}):
+            self.assertEqual(postgres_options(), {})
+        with mock.patch.dict("os.environ"):
+            os.environ.pop("POSTGRES_SSLMODE", None)
+            self.assertEqual(postgres_options(), {})

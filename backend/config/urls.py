@@ -7,7 +7,7 @@ from accounts.views import me
 from billing.views import PaymentViewSet, ReceiptViewSet, RentEntryViewSet
 from properties.views import PropertyViewSet, TenancyViewSet
 
-from .views import health_check
+from .views import health_check, readiness_check
 
 router = SimpleRouter()
 router.register("properties", PropertyViewSet, basename="property")
@@ -24,6 +24,7 @@ payment_receipt = ReceiptViewSet.as_view({"get": "retrieve", "post": "create"})
 urlpatterns = [
     path(settings.ADMIN_PATH, admin.site.urls),
     path("api/v1/health/", health_check, name="health"),
+    path("api/v1/ready/", readiness_check, name="ready"),
     path("api/v1/me/", me, name="me"),
     path(
         "api/v1/properties/<uuid:property_id>/tenancies/",
