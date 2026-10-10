@@ -8,6 +8,8 @@ backend/.env in development (see .env.example).
 import os
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
+
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -190,6 +192,9 @@ MAILERS = {
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 CORS_URLS_REGEX = r"^/api/.*$"
 CORS_ALLOW_CREDENTIALS = False
+# Saving a bill or recording a payment sends Idempotency-Key (billing/views.py), so a browser on
+# another origin (the Render static site) needs it allowed in the preflight.
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
 
 # Throttle counts live in the cache. Local memory is per process; with more than one process,
 # set DJANGO_SHARED_CACHE to keep them in PostgreSQL (run `manage.py createcachetable` once).
