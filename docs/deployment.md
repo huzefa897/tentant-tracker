@@ -171,9 +171,9 @@ How it differs from the single server:
    ```
 
    Admin is at `https://rent-tracker-api.onrender.com/<DJANGO_ADMIN_PATH>`.
+
 6. **The uptime monitor** (above), then the [checks after a deploy](#checks-after-a-deploy), with the static site's URL for the app and the API's for `/api/…`.
 
 Releases deploy themselves: each service rebuilds when a commit to `main` touching it passes CI (`autoDeployTrigger: checksPass`). Render keeps the two previous deploys for rollback on the free plan; it doesn't undo migrations ([Rolling back](#rolling-back) applies).
 
 **To check before relying on it:** `DJANGO_NUM_PROXIES` is `3`, the number of proxies users have measured in front of Render services, not a documented figure. Render appends to `X-Forwarded-For` without clearing it, so too high a number lets clients choose their own address for the rate limits, and too low makes everyone share one. Check that requests from two networks (say, Wi-Fi and mobile data) are counted separately, e.g. by running down a low `DJANGO_THROTTLE_ADDRESS` from one of them.
-
