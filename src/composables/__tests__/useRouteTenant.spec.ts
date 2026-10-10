@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import { ApiError } from '@/services/apiError'
+import { noteRateLimited, resetRateLimit } from '@/services/rateLimit'
 import { tenantService } from '@/services/tenant.service'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
@@ -34,6 +35,7 @@ function mountWith(tenantId: Ref<string>) {
 
 beforeEach(async () => {
   vi.useFakeTimers()
+  resetRateLimit()
   resetAuthService()
   resetAccessService()
   resetTenantService()
@@ -160,6 +162,27 @@ describe('useRouteTenant', () => {
     vi.advanceTimersByTime(10_000)
     await flushPromises()
     // Second call fired by the retry timer
+    expect(getTenant).toHaveBeenCalledTimes(2)
+  })
+
+  it('waits for the Retry-After window before retrying a rate-limited load', async () => {
+    // As the API client records it when the 429 arrives.
+    getTenant.mockImplementationOnce(async () => {
+      noteRateLimited('45')
+      throw new ApiError('rate-limited')
+    })
+    const { status, retryable } = mountWith(ref('tenant-001'))
+    await flushPromises()
+
+    expect(status.value).toBe('error')
+    expect(retryable.value).toBe(true)
+
+    vi.advanceTimersByTime(44_999)
+    await flushPromises()
+    expect(getTenant).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(1)
+    await flushPromises()
     expect(getTenant).toHaveBeenCalledTimes(2)
   })
 })

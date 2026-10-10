@@ -1,6 +1,7 @@
 import { computed, onUnmounted, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 
 import { isRetryableError } from '@/services/apiError'
+import { rateLimitWaitMs } from '@/services/rateLimit'
 import { entryLoadErrorMessage, useRentEntryStore } from '@/stores/rentEntry'
 
 const RETRY_MS = 10_000
@@ -56,7 +57,7 @@ export function useRouteEntry(
       error.value = entryLoadErrorMessage(err)
       loadState.value = 'error'
       retryable.value = canRetry
-      if (canRetry) retryTimer = setTimeout(load, RETRY_MS)
+      if (canRetry) retryTimer = setTimeout(load, Math.max(RETRY_MS, rateLimitWaitMs()))
     }
   }
 

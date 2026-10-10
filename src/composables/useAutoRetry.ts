@@ -1,6 +1,8 @@
 import { onMounted, onUnmounted, toValue, watch } from 'vue'
 import type { MaybeRefOrGetter } from 'vue'
 
+import { rateLimitWaitMs } from '@/services/rateLimit'
+
 const INITIAL_MS = 5_000
 const MAX_MS = 30_000
 
@@ -9,6 +11,7 @@ const MAX_MS = 30_000
 // leaves 'error' for anything other than 'loading' (i.e. on success or idle).
 // Also retries immediately when the browser comes back online or the tab
 // becomes visible — no need to wait for the next timer tick.
+// After a 429, no retry (timed or on those events) comes before the backend's Retry-After.
 // Pass retryable=false (or a getter that returns false) to suppress all retries
 // for non-transient failures that require user action (e.g. 401/403).
 export function useAutoRetry(
@@ -28,14 +31,16 @@ export function useAutoRetry(
 
   function scheduleRetry() {
     if (!toValue(retryable)) return
-    const delay = Math.min(INITIAL_MS * 2 ** attempt, MAX_MS)
+    const backoff = Math.min(INITIAL_MS * 2 ** attempt, MAX_MS)
     attempt++
-    timerId = setTimeout(retry, delay)
+    timerId = setTimeout(retry, Math.max(backoff, rateLimitWaitMs()))
   }
 
   function retryNow() {
     if (toValue(status) !== 'error') return
     if (!toValue(retryable)) return
+    // Still rate limited: the scheduled retry already waits for the window to pass.
+    if (rateLimitWaitMs() > 0) return
     stop()
     retry()
   }

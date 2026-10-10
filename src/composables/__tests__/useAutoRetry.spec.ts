@@ -3,6 +3,7 @@ import { defineComponent, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAutoRetry } from '@/composables/useAutoRetry'
+import { noteRateLimited, resetRateLimit } from '@/services/rateLimit'
 
 function makeWrapper(initialStatus: string, retryable = true) {
   const status = ref(initialStatus)
@@ -24,6 +25,7 @@ function makeWrapper(initialStatus: string, retryable = true) {
 describe('useAutoRetry', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    resetRateLimit()
   })
 
   afterEach(() => {
@@ -256,6 +258,54 @@ describe('useAutoRetry', () => {
       })
       document.dispatchEvent(new Event('visibilitychange'))
       expect(retry).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('after a 429', () => {
+    it('waits for the Retry-After window instead of the backoff', async () => {
+      noteRateLimited('60')
+      const { retry } = makeWrapper('error')
+      await flushPromises()
+
+      vi.advanceTimersByTime(59_999)
+      expect(retry).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(1)
+      expect(retry).toHaveBeenCalledOnce()
+    })
+
+    it('does not retry early on online or visibilitychange events', async () => {
+      noteRateLimited('60')
+      const { retry } = makeWrapper('error')
+      await flushPromises()
+
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        writable: true,
+        configurable: true,
+      })
+      window.dispatchEvent(new Event('online'))
+      document.dispatchEvent(new Event('visibilitychange'))
+      expect(retry).not.toHaveBeenCalled()
+
+      // The scheduled retry still runs once the window has passed.
+      vi.advanceTimersByTime(60_000)
+      expect(retry).toHaveBeenCalledOnce()
+    })
+
+    it('retries on those events again once the window has passed', async () => {
+      noteRateLimited('5')
+      const { status, retry } = makeWrapper('error')
+      await flushPromises()
+      vi.advanceTimersByTime(5_000)
+      expect(retry).toHaveBeenCalledOnce()
+
+      status.value = 'loading'
+      await flushPromises()
+      status.value = 'error'
+      await flushPromises()
+      window.dispatchEvent(new Event('online'))
+      expect(retry).toHaveBeenCalledTimes(2)
     })
   })
 })
