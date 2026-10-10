@@ -10,7 +10,8 @@ is imported, or (any record rejected, reconciliation failing, or a dry run) noth
   original references; their snapshot is built from the imported records, as at the time they
   were issued.
 - After importing, the source and the database are reconciled: counts, totals and every bill's
-  outstanding must match, or nothing is kept.
+  outstanding must match, or nothing is kept. Every payment on the source's bills counts, so a
+  bill with a payment recorded in the app (possibly the same money the source lists) fails it.
 """
 
 import hashlib
@@ -318,16 +319,21 @@ class _Importer:
                 source_id__in=payment_ids, kind=Kind.PAYMENT
             ).values("object_id")
         )
-
-        def imported_paid(entry):
-            return imported_payments.filter(entry=entry).aggregate(total=Sum("amount"))[
-                "total"
-            ] or ZERO
+        # The database side counts every payment on these bills, not only the imported ones: a
+        # payment recorded in the app since an earlier import may be the same money the source
+        # lists, and a rerun mustn't add it again and still call the bill reconciled.
+        amounts = {source_id: entry_amounts(entry) for source_id, entry in self.entries.items()}
+        not_from_source = sorted(
+            {
+                source_id
+                for source_id, entry in self.entries.items()
+                if entry.payments.exclude(pk__in=imported_payments.values("pk")).exists()
+            }
+        )
 
         source_outstanding = {b.source_id: b.total_due - b.total_paid for b in bills}
         database_outstanding = {
-            source_id: entry_amounts(entry).total_due - imported_paid(entry)
-            for source_id, entry in self.entries.items()
+            source_id: amount.total_due - amount.total_paid for source_id, amount in amounts.items()
         }
         mismatched = [
             source_id
@@ -343,14 +349,20 @@ class _Importer:
                 str(LegacyRecord.objects.filter(source_id__in=receipt_ids).count()),
             ),
             (
+                "bills with payments not from this source",
+                "0",
+                str(len(not_from_source))
+                + (f" ({', '.join(not_from_source)})" if not_from_source else ""),
+            ),
+            (
                 "total billed",
                 str(sum((b.total_due for b in bills), ZERO)),
-                str(sum((entry_amounts(e).total_due for e in self.entries.values()), ZERO)),
+                str(sum((a.total_due for a in amounts.values()), ZERO)),
             ),
             (
                 "total paid",
                 str(sum((b.total_paid for b in bills), ZERO)),
-                str(imported_payments.aggregate(total=Sum("amount"))["total"] or ZERO),
+                str(sum((a.total_paid for a in amounts.values()), ZERO)),
             ),
             (
                 "bills whose outstanding differs",

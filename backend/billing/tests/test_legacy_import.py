@@ -338,6 +338,29 @@ class ImportLedgerTests(TestCase):
 
         self.assertIn("more than the bill's outstanding 750.00", report.rejected[0])
 
+    def test_does_not_reconcile_a_bill_with_payments_recorded_in_the_app(self):
+        self.run_import()
+        september = RentEntry.objects.get(billing_month=date(2026, 9, 1))
+        make_payment(september, self.user, "500.00", paid_date=date(2026, 9, 30))
+        data = ledger_data()
+        # Fits what's left (₹11,250), but may be the same money as the app's payment.
+        data["tenants"][0]["bills"][1]["payments"].append(
+            payment("Tenant A/2026-09/payment-2", "200.00", "2026-10-01")
+        )
+
+        report = self.run_import(data)
+
+        self.assertEqual(report.rejected, [])
+        self.assertFalse(report.reconciled)
+        self.assertFalse(report.saved)
+        self.assertIn(
+            ("bills with payments not from this source", "0", "1 (Tenant A/2026-09)"),
+            report.reconciliation,
+        )
+        # The ledger says ₹5,200 paid; the database has ₹5,500 without the new payment.
+        self.assertIn(("total paid", "20950.00", "21450.00"), report.reconciliation)
+        self.assertEqual(september.payments.count(), 2)
+
     def test_refuses_a_receipt_reference_already_in_use(self):
         self.run_import()
         data = ledger_data()

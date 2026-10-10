@@ -96,13 +96,14 @@ docker compose --env-file .env.production -f compose.prod.yaml run --rm \
 
 Run the same command without `--dry-run`. It prints what it created and the reconciliation, which must all say `ok`:
 
-| Check                           | Must be                                       |
-| ------------------------------- | --------------------------------------------- |
-| bills, payments, receipts       | the same count in the ledger and the database |
-| total billed, total paid        | the same                                      |
-| bills whose outstanding differs | 0                                             |
+| Check                                    | Must be                                       |
+| ---------------------------------------- | --------------------------------------------- |
+| bills, payments, receipts                | the same count in the ledger and the database |
+| bills with payments not from this source | 0                                             |
+| total billed, total paid                 | the same                                      |
+| bills whose outstanding differs          | 0                                             |
 
-These compare the ledger with the database, so they catch an import gone wrong, or payments recorded in the app since an earlier run. They can't tell you the ledger matches the Sheet: that's step 3's warnings and your reading of `ledger.json`.
+These compare the ledger with the database, so they catch an import gone wrong, or payments recorded in the app since an earlier run: the database side counts **every** payment on the ledger's bills, not only the imported ones, so a payment entered in both the app and the Sheet can't be added twice. They can't tell you the ledger matches the Sheet: that's step 3's warnings and your reading of `ledger.json`.
 
 Then compare with what the converter printed in step 3, open a few tenants in the app (their bills, payments and receipts), and run `python manage.py ledger_summary` for the database's totals.
 
@@ -112,4 +113,4 @@ PostgreSQL is now the authoritative copy. Tell the owners to enter everything in
 
 ## Running it again
 
-Safe at any time: records already imported are reported, not created again. Use it if the import was interrupted or the Sheet gained months before the switch. If it says a record **changed since it was imported**, the Sheet was edited after the import. The import never overwrites what's there, and bills and payments can't be edited in admin: either keep what was imported (undo the edit in your working copy), or restore the backup from step 5 and import again.
+Safe at any time: records already imported are reported, not created again. Use it if the import was interrupted or the Sheet gained months before the switch. If a bill has **payments not from this source**, someone recorded a payment on it in the app after an earlier import, so the rerun can't tell whether the Sheet's payments are the same money: nothing is imported. Once payments are being recorded in the app, it's the authoritative copy (step 7) and the Sheet shouldn't be imported again; if it must be, compare those bills by hand first. If it says a record **changed since it was imported**, the Sheet was edited after the import. The import never overwrites what's there, and bills and payments can't be edited in admin: either keep what was imported (undo the edit in your working copy), or restore the backup from step 5 and import again.
