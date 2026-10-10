@@ -737,7 +737,7 @@ describe('receipts', () => {
     })
   })
 
-  it('loads an issued receipt without issuing another, then reuses it', async () => {
+  it('loads an issued receipt without issuing another, every time it’s asked for', async () => {
     const store = await withProperty()
     await store.loadPayments('tenant-001', 'sep')
     await store.getReceipt('tenant-001', store.payments.sep!.payments[0]!)
@@ -751,7 +751,8 @@ describe('receipts', () => {
     await store.getReceipt('tenant-001', payment)
 
     expect(issueReceipt).not.toHaveBeenCalled()
-    expect(getReceipt).toHaveBeenCalledTimes(1)
+    // Never reused: its payment may have been reversed since, voiding it.
+    expect(getReceipt).toHaveBeenCalledTimes(2)
     expect(receipt).toBe(fakeReceipts.get('p-1'))
   })
 
@@ -925,6 +926,7 @@ describe('receipts', () => {
 
 describe('reversing payments', () => {
   const reversePayment = vi.mocked(paymentService.reversePayment)
+  const getReceipt = vi.mocked(receiptService.getReceipt)
   const REASON = 'Entered ₹10,000 instead of ₹1,000.'
 
   beforeEach(() => {
@@ -982,6 +984,59 @@ describe('reversing payments', () => {
 
     expect(receipt).toMatchObject({ status: 'void', voidReason: REASON, paymentAmount: 10000 })
     expect(store.payments.sep!.payments[0]!.receipt?.status).toBe('void')
+  })
+
+  it('gets a receipt voided elsewhere as void, even from a history that predates it', async () => {
+    const store = await loaded()
+    await store.getReceipt('tenant-001', store.payments.sep!.payments[0]!)
+    // Reversed by someone else; this history still says the receipt is issued.
+    await paymentService.reversePayment(
+      testProperty.id,
+      'tenant-001',
+      makePayment({ id: 'p-1', entryId: 'sep' }),
+      REASON,
+    )
+    const stale = store.payments.sep!.payments[0]!
+    expect(stale.receipt?.status).toBe('issued')
+
+    const receipt = await store.getReceipt('tenant-001', stale)
+
+    expect(receipt).toMatchObject({ status: 'void', voidReason: REASON })
+    expect(store.payments.sep!.payments[0]!.receipt?.status).toBe('void')
+  })
+
+  it('reuses a void receipt, which never changes again', async () => {
+    const store = await loaded()
+    await store.getReceipt('tenant-001', store.payments.sep!.payments[0]!)
+    await store.reversePayment('tenant-001', store.payments.sep!.payments[0]!, REASON)
+    await flushPromises()
+    const reversed = store.payments.sep!.payments[0]!
+    await store.getReceipt('tenant-001', reversed)
+    getReceipt.mockClear()
+
+    const receipt = await store.getReceipt('tenant-001', reversed)
+
+    expect(receipt.status).toBe('void')
+    expect(getReceipt).not.toHaveBeenCalled()
+  })
+
+  it('reloads the history when the payment was reversed before its receipt was issued', async () => {
+    const store = await loaded()
+    // Reversed by someone else before any receipt; this history still says it counts.
+    await paymentService.reversePayment(
+      testProperty.id,
+      'tenant-001',
+      makePayment({ id: 'p-1', entryId: 'sep' }),
+      REASON,
+    )
+
+    await expect(store.getReceipt('tenant-001', store.payments.sep!.payments[0]!)).rejects.toThrow(
+      'This payment has been reversed, so it has no receipt.',
+    )
+    await flushPromises()
+
+    expect(store.payments.sep!.payments[0]!.status).toBe('reversed')
+    expect(store.getEntry('tenant-001', 'sep')?.totalPaid).toBe(0)
   })
 
   it('reloads a receipt someone else voided since it was cached', async () => {
@@ -1042,9 +1097,14 @@ describe('reversing payments', () => {
     })
 
     const error = await reversalError(store.reversePayment('tenant-001', payment, REASON))
-    const retried = await store.reversePayment('tenant-001', payment, REASON)
 
     expect(error).toMatchObject({ message: REVERSAL_UNCONFIRMED_MESSAGE, uncertain: true })
+    // Reloaded meanwhile, so the history already shows it went through.
+    await flushPromises()
+    expect(store.payments.sep!.payments[0]!.status).toBe('reversed')
+    expect(store.getEntry('tenant-001', 'sep')?.totalPaid).toBe(0)
+
+    const retried = await store.reversePayment('tenant-001', payment, REASON)
     expect(retried.replayed).toBe(true)
     expect(store.getEntry('tenant-001', 'sep')?.totalPaid).toBe(0)
   })

@@ -227,8 +227,9 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
   // leaving the page after an uncertain save (no response) never loses it: the next attempt,
   // whenever it comes, is a retry the backend recognises.
   const paymentKeys = new Map<string, string>()
-  // Issued receipts by payment id. Snapshots never change, so one loaded is reused while the
-  // payment still says it has that receipt in that status (reversing a payment voids it).
+  // Void receipts by payment id: a void receipt never changes again, so one loaded is reused.
+  // An issued one is always loaded again: someone may have reversed its payment since, and a
+  // loaded history can predate that, so only the backend can say it's still valid.
   const receipts = new Map<string, PaymentReceipt>()
 
   function nextSummarySeq(tenantId: string): number {
@@ -611,10 +612,11 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
 
   // The payment's receipt from Django: its saved snapshot if one was issued, otherwise issued
   // now (and the payment history shows it has one). Issuing again, or retrying after a lost
-  // response, returns the same receipt. Throws ReceiptError; the payment is never changed.
+  // response, returns the same receipt. Throws ReceiptError; the payment is never changed, but
+  // if it was reversed meanwhile (409 payment_reversed) the bill and its history are reloaded.
   async function getReceipt(tenantId: string, payment: Payment): Promise<PaymentReceipt> {
     const cached = receipts.get(payment.id)
-    if (cached && cached.status === (payment.receipt?.status ?? cached.status)) return cached
+    if (cached) return cached
 
     const propertyId = requireProperty()
     const gen = generation
@@ -630,11 +632,15 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         if (payment.receipt) throw new ReceiptError(RECEIPT_ERROR_MESSAGE)
         throw new ReceiptError(RECEIPT_UNCONFIRMED_MESSAGE, true)
       }
+      // Reversed since the history loaded: show that, so it stops offering a receipt.
+      if (err instanceof ApiError && err.code === 'payment_reversed') {
+        void refreshAfterConflict(tenantId, payment.entryId, gen)
+      }
       throw new ReceiptError(receiptErrorMessage(err))
     }
 
     if (gen === generation) {
-      receipts.set(payment.id, receipt)
+      if (receipt.status === 'void') receipts.set(payment.id, receipt)
       markReceiptIssued(payment.entryId, payment.id, receipt)
     }
     return receipt
@@ -695,8 +701,10 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
 
   // Reverses a payment recorded by mistake (owners only; the backend checks). Its response (the
   // payment, now reversed, and the bill's figures without it) is shown wherever the bill
-  // appears, and the history reloaded; its receipt is now void, so a cached copy is dropped.
-  // On failure nothing changes here: throws PaymentReversalError with a message.
+  // appears, and the history reloaded (its receipt, now void, is loaded again when next asked
+  // for). On failure nothing changes here, except that after an uncertain one (no usable
+  // response) the bill and history are reloaded to show whether it went through: throws
+  // PaymentReversalError with a message.
   async function reversePayment(
     tenantId: string,
     payment: Payment,
@@ -716,7 +724,6 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         reason.trim(),
       )
       if (gen === generation) {
-        receipts.delete(payment.id)
         update(reversed.entry)
         replacePayment(reversed.payment)
         void loadPayments(tenantId, payment.entryId)
@@ -726,8 +733,11 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       const kind = err instanceof ApiError ? err.kind : 'unknown'
 
       // The payment identifies its only reversal, so the same reason again is a safe retry.
-      if (isUncertainFailure(err))
+      // It may have been reversed: reload the bill and history, so they show it if it was.
+      if (isUncertainFailure(err)) {
+        void refreshAfterConflict(tenantId, payment.entryId, gen)
         throw new PaymentReversalError(REVERSAL_UNCONFIRMED_MESSAGE, true)
+      }
       if (err instanceof ApiError && err.code === 'reversal_conflict') {
         // Someone reversed it already: show that.
         void refreshAfterConflict(tenantId, payment.entryId, gen)

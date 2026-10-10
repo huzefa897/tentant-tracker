@@ -7,7 +7,8 @@ import type { PaymentReceipt } from '@/types/receipt'
 
 // A fake receiptService that issues one receipt per payment of the fake rentEntryService, like
 // the API: issuing again returns the same receipt (created: false), getting one that wasn't
-// issued is 'not-found', and the payment then carries the receipt's id and reference. Use it with
+// issued is 'not-found', issuing one for a reversed payment is 'conflict' payment_reversed, and
+// the payment then carries the receipt's id and reference. Use it with
 //   vi.mock('@/services/receipt.service', () => import('@/test/mocks/receiptService'))
 // and call resetRentEntryService(), which also resets this fake, in beforeEach.
 
@@ -41,6 +42,10 @@ export function resetReceiptService() {
         const { entry, payment } = findPayment(tenancyId, entryId, paymentId)
         const existing = fakeReceipts.get(paymentId)
         if (existing) return { receipt: existing, created: false }
+        // A reversed payment gets no new receipt; one it had is returned, void.
+        if (payment.status === 'reversed') {
+          throw new ApiError('conflict', 'Payment reversed', 'payment_reversed')
+        }
 
         const id = nextFakeId('receipt')
         const receipt = makeReceipt({
