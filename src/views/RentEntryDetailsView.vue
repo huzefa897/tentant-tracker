@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
-import { ArrowLeft, CircleCheck, Plus, User } from '@lucide/vue'
+import { ArrowLeft, Ban, CircleCheck, Link2, PencilLine, Plus, User } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
 import PaymentHistory from '@/components/rent/PaymentHistory.vue'
-import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
+import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
 import RecordPaymentForm from '@/components/rent/RecordPaymentForm.vue'
 import ReversePaymentForm from '@/components/rent/ReversePaymentForm.vue'
 import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
+import VoidEntryForm from '@/components/rent/VoidEntryForm.vue'
 import TenantChipSkeleton from '@/components/tenant/TenantChipSkeleton.vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -29,6 +30,7 @@ import { useAccessStore } from '@/stores/access'
 import {
   PAYMENT_SAVE_ERROR_MESSAGE,
   REVERSAL_ERROR_MESSAGE,
+  VOID_ERROR_MESSAGE,
   PaymentSaveError,
   useRentEntryStore,
 } from '@/stores/rentEntry'
@@ -42,6 +44,8 @@ const props = defineProps<{
   entryId: string
   // Where the page was opened from, so the back button returns there.
   from?: 'dashboard' | 'history'
+  // Opened as the replacement just made by correcting a bill.
+  corrected?: boolean
 }>()
 
 const rentEntryStore = useRentEntryStore()
@@ -86,7 +90,9 @@ function loadPayments() {
 const paymentDialogOpen = ref(false)
 const savingPayment = ref(false)
 const paymentError = ref<string | null>(null)
-const confirmation = ref<string | null>(null)
+const confirmation = ref<string | null>(
+  props.corrected ? 'Bill corrected. The original is now void and counts towards nothing.' : null,
+)
 // After a reversal: the replacement is a new payment, recorded on purpose (never pre-filled).
 const offerReplacement = ref(false)
 
@@ -107,7 +113,8 @@ function setPaymentDialogOpen(open: boolean) {
 // whether its key is kept for a retry. Signing out is the exception, since the session has
 // already ended (and the store forgets the keys).
 // The same while a reversal is in flight, so its dialog and result stay on this entry.
-const busy = () => savingPayment.value || savingReversal.value
+// And while a void is in flight.
+const busy = () => savingPayment.value || savingReversal.value || savingVoid.value
 onBeforeRouteLeave((to) => !busy() || Boolean(to.meta.guestOnly))
 onBeforeRouteUpdate((to) => !busy() || Boolean(to.meta.guestOnly))
 
@@ -186,6 +193,57 @@ async function handleReverse(reason: string) {
   }
 }
 
+// Owners void a bill that should not exist, or correct its charges (on their own page), once
+// its payments are reversed; the backend refuses anyone else and checks the payments again.
+const canCorrect = computed(() => canReverse.value && entry.value?.billStatus === 'active')
+const paymentsToReverse = computed(
+  () => entryPayments.value?.payments.filter((payment) => payment.status === 'recorded') ?? [],
+)
+const voidDialogOpen = ref(false)
+const savingVoid = ref(false)
+const voidError = ref<string | null>(null)
+
+function openVoid() {
+  voidError.value = null
+  confirmation.value = null
+  offerReplacement.value = false
+  voidDialogOpen.value = true
+}
+
+function setVoidDialogOpen(open: boolean) {
+  if (!open && savingVoid.value) return
+  voidDialogOpen.value = open
+}
+
+async function handleVoid(reason: string) {
+  const current = entry.value
+  if (!current || savingVoid.value) return
+
+  savingVoid.value = true
+  voidError.value = null
+  try {
+    const { replayed } = await rentEntryStore.voidEntry(props.tenantId, current, reason)
+    voidDialogOpen.value = false
+    confirmation.value = replayed ? 'This bill was already voided.' : 'Bill voided.'
+  } catch (error) {
+    voidError.value = error instanceof Error ? error.message : VOID_ERROR_MESSAGE
+  } finally {
+    savingVoid.value = false
+  }
+}
+
+function goToCorrection() {
+  router.push({
+    name: 'rent-entry-correct',
+    params: { tenantId: props.tenantId, entryId: props.entryId },
+  })
+}
+
+// The other bill of a correction.
+function linkedEntry(entryId: string) {
+  return { name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } }
+}
+
 // Every receipt button waits while one is prepared; the error shows above the history.
 const {
   downloadingId: downloadingPaymentId,
@@ -203,12 +261,14 @@ function handleDownloadReceipt(paymentId: string) {
 // should show on another, and its payments load.
 watch(
   () => [props.tenantId, props.entryId],
-  () => {
+  (_ids, previous) => {
     paymentDialogOpen.value = false
     paymentError.value = null
-    confirmation.value = null
+    // Kept on first load: it may be the correction's confirmation.
+    if (previous) confirmation.value = null
     offerReplacement.value = false
     reversingPayment.value = null
+    voidDialogOpen.value = false
     resetReceiptDownload()
     loadPayments()
   },
@@ -254,7 +314,7 @@ function goToHistory() {
         v-if="tenant && from !== 'dashboard'"
         variant="ghost"
         class="h-11 text-muted-foreground"
-        :disabled="savingPayment || savingReversal"
+        :disabled="busy()"
         @click="goToHistory"
       >
         <ArrowLeft aria-hidden="true" />
@@ -264,7 +324,7 @@ function goToHistory() {
         v-else
         variant="ghost"
         class="h-11 text-muted-foreground"
-        :disabled="savingPayment || savingReversal"
+        :disabled="busy()"
         @click="backToDashboard"
       >
         <ArrowLeft aria-hidden="true" />
@@ -334,7 +394,7 @@ function goToHistory() {
           <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">
             {{ formatMonthValue(entry.billingMonth) }}
           </h1>
-          <PaymentStatusBadge :status="entry.status" />
+          <EntryStatusBadge :entry="entry" />
         </div>
         <p
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
@@ -343,6 +403,67 @@ function goToHistory() {
           <User class="size-4" aria-hidden="true" />
           {{ tenant.name }} · Flat {{ tenant.flatNumber }}
         </p>
+
+        <!-- A void bill is kept as history: it says so before anything else. -->
+        <div
+          v-if="entry.voided"
+          class="mt-4 rounded-xl border-2 border-destructive/60 bg-destructive/5 p-4"
+          role="note"
+          data-testid="void-notice"
+        >
+          <p class="flex items-center gap-2 text-lg font-bold tracking-wide text-destructive">
+            <Ban class="size-5" aria-hidden="true" />
+            VOID
+          </p>
+          <p class="mt-1 text-sm">
+            This bill counts towards nothing: its charges are kept as history only.
+          </p>
+          <!-- Text interpolation, never v-html: the reason is user input. -->
+          <p class="mt-2 text-sm break-words text-muted-foreground">
+            Voided by {{ entry.voided.byName }} on {{ formatTimestamp(entry.voided.at) }}:
+            {{ entry.voided.reason }}
+          </p>
+        </div>
+
+        <p
+          v-if="entry.replacedByEntryId || entry.replacesEntryId"
+          class="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-sm"
+          data-testid="correction-links"
+        >
+          <RouterLink
+            v-if="entry.replacedByEntryId"
+            :to="linkedEntry(entry.replacedByEntryId)"
+            class="inline-flex min-h-11 items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
+          >
+            <Link2 class="size-4" aria-hidden="true" />
+            Replaced by bill · {{ formatMonthValue(entry.billingMonth) }}
+          </RouterLink>
+          <RouterLink
+            v-if="entry.replacesEntryId"
+            :to="linkedEntry(entry.replacesEntryId)"
+            class="inline-flex min-h-11 items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
+          >
+            <Link2 class="size-4" aria-hidden="true" />
+            Replaces void bill · {{ formatMonthValue(entry.billingMonth) }}
+          </RouterLink>
+        </p>
+
+        <div v-if="canCorrect" class="mt-4 flex flex-wrap gap-3" data-testid="bill-actions">
+          <Button variant="outline" class="h-11" :disabled="busy()" @click="goToCorrection">
+            <PencilLine aria-hidden="true" />
+            Correct bill
+          </Button>
+          <Button
+            variant="outline"
+            class="h-11 text-destructive"
+            :disabled="busy() || entryPayments?.status !== 'ready'"
+            @click="openVoid"
+          >
+            <Ban aria-hidden="true" />
+            Void bill
+          </Button>
+        </div>
+
         <div
           v-if="confirmation"
           :key="confirmation"
@@ -383,7 +504,9 @@ function goToHistory() {
           <dl class="space-y-2 text-sm" data-testid="payment">
             <div class="flex justify-between gap-4">
               <dt class="text-muted-foreground">Total due</dt>
-              <dd class="tabular-nums">{{ formatINR(entry.totalDue) }}</dd>
+              <dd class="tabular-nums" :class="{ 'line-through': entry.billStatus === 'void' }">
+                {{ formatINR(entry.totalDue) }}
+              </dd>
             </div>
             <div class="flex justify-between gap-4">
               <dt class="text-muted-foreground">Total paid</dt>
@@ -396,7 +519,14 @@ function goToHistory() {
           </dl>
 
           <p
-            v-if="entry.status === 'paid'"
+            v-if="entry.billStatus === 'void'"
+            class="mt-4 text-sm text-muted-foreground"
+            data-testid="void-owes-nothing"
+          >
+            Void: nothing is owed, and it takes no payments.
+          </p>
+          <p
+            v-else-if="entry.status === 'paid'"
             class="mt-4 flex h-11 items-center justify-center gap-2 rounded-lg bg-success/10 font-medium text-success"
             data-testid="fully-paid"
           >
@@ -481,6 +611,25 @@ function goToHistory() {
             :save-error="paymentError"
             @save="handleSavePayment"
             @cancel="setPaymentDialogOpen(false)"
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog :open="voidDialogOpen" @update:open="setVoidDialogOpen">
+        <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Void bill</DialogTitle>
+            <DialogDescription>For a bill that should not exist.</DialogDescription>
+          </DialogHeader>
+          <VoidEntryForm
+            v-if="voidDialogOpen"
+            :tenant="tenant"
+            :entry="entry"
+            :payments-to-reverse="paymentsToReverse"
+            :saving="savingVoid"
+            :save-error="voidError"
+            @void="handleVoid"
+            @cancel="setVoidDialogOpen(false)"
           />
         </DialogContent>
       </Dialog>

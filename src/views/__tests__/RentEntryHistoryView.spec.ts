@@ -95,6 +95,7 @@ describe('RentEntryHistoryView', () => {
     await openHistory()
 
     expect(getEntries).toHaveBeenCalledWith(expect.any(String), 'tenant-001', {
+      billStatus: 'active',
       year: undefined,
       page: 1,
     })
@@ -181,6 +182,7 @@ describe('RentEntryHistoryView', () => {
     await flushPromises()
 
     expect(getEntries).toHaveBeenLastCalledWith(expect.any(String), 'tenant-001', {
+      billStatus: 'active',
       year: '2025',
       paymentStatus: undefined,
       page: 1,
@@ -207,6 +209,7 @@ describe('RentEntryHistoryView', () => {
     await flushPromises()
 
     expect(getEntries).toHaveBeenLastCalledWith(expect.any(String), 'tenant-001', {
+      billStatus: 'active',
       year: undefined,
       paymentStatus: 'partially_paid',
       page: 1,
@@ -256,6 +259,24 @@ describe('RentEntryHistoryView', () => {
     await button('Add New Entry').trigger('click')
 
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-new'))
+  })
+
+  it('offers to show the void bills when every bill is void', async () => {
+    fakeEntries.entries = [{ ...october, billStatus: 'void' }]
+    await openHistory()
+
+    expect(view!.text()).not.toContain('No rent entries yet.')
+    expect(view!.get('[data-testid="all-bills-void"]').text()).toContain(
+      'No active bills. The only bill is void, so it’s hidden.',
+    )
+    expect(view!.find('#filter-show-void').exists()).toBe(true)
+
+    await button('Show void bills').trigger('click')
+    await flushPromises()
+
+    expect(rows()).toHaveLength(1)
+    expect(rows()[0]).toEqual(expect.arrayContaining(['October 2026', 'Void']))
+    expect(view!.get('#filter-show-void').attributes('aria-checked')).toBe('true')
   })
 
   it('shows a load error, not an empty history or zero totals, then retries', async () => {

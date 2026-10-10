@@ -1,12 +1,13 @@
 // Rent entry (bill) rules, used by the form for inline errors and again before saving.
 // Payment rules live in utils/paymentValidation.ts.
 
-import type { RentEntryInput } from '@/types/rentEntry'
+import type { EntryCorrectionInput, RentEntry, RentEntryInput } from '@/types/rentEntry'
 import { isValidMonthValue } from '@/utils/date'
 import { hasAtMostDecimals } from '@/utils/money'
 import { calculateTotalDue } from '@/utils/rentCalculations'
 
 export const NOTES_MAX_LENGTH = 500
+export const VOID_REASON_MAX_LENGTH = 500
 
 // The backend stores money with 2 decimal places and units with 3, in at most 10 digits.
 export const MAX_AMOUNT = 99_999_999.99
@@ -154,6 +155,94 @@ export function parseRentEntryDraft(tenantId: string, draft: RentEntryDraft): Pa
       electricityRate: draft.electricityRate,
       waterAmount: draft.waterAmount as number,
       notes: draft.notes.trim(),
+    },
+  }
+}
+
+// Why a bill is voided or corrected, as the backend checks it (trimmed, 1–500 characters).
+export function validateVoidReason(reason: string): string | null {
+  const trimmed = reason.trim()
+  if (trimmed === '') return 'Say why this bill is being voided.'
+  if (trimmed.length > VOID_REASON_MAX_LENGTH) {
+    return `The reason must be ${VOID_REASON_MAX_LENGTH} characters or fewer.`
+  }
+  return null
+}
+
+// A correction as typed: the replacement's charges and notes, and why. The month, tenancy and
+// electricity rate are the original's.
+export interface EntryCorrectionDraft {
+  rentAmount: NumberInputValue
+  electricityUnits: NumberInputValue
+  waterAmount: NumberInputValue
+  notes: string
+  reason: string
+}
+
+// unchanged: the replacement is the same as the original, which the backend refuses.
+export type EntryCorrectionErrors = Partial<
+  Record<
+    'rentAmount' | 'electricityUnits' | 'waterAmount' | 'notes' | 'reason' | 'unchanged',
+    string
+  >
+>
+
+export const CORRECTION_UNCHANGED_MESSAGE = 'Change at least one charge or the notes.'
+
+// The replacement's charges by the rules of a new bill, the reason, and that something changed.
+export function validateEntryCorrection(
+  original: Pick<
+    RentEntry,
+    'billingMonth' | 'rentAmount' | 'electricityUnits' | 'electricityRate' | 'waterAmount' | 'notes'
+  >,
+  draft: EntryCorrectionDraft,
+): EntryCorrectionErrors {
+  const { rentAmount, electricityUnits, waterAmount, notes } = validateRentEntryDraft({
+    billingMonth: original.billingMonth,
+    rentAmount: draft.rentAmount,
+    electricityUnits: draft.electricityUnits,
+    electricityRate: original.electricityRate,
+    waterAmount: draft.waterAmount,
+    notes: draft.notes,
+  })
+  const errors: EntryCorrectionErrors = {
+    rentAmount,
+    electricityUnits,
+    waterAmount,
+    notes,
+    reason: validateVoidReason(draft.reason) ?? undefined,
+  }
+  if (
+    !rentAmount &&
+    !electricityUnits &&
+    !waterAmount &&
+    draft.rentAmount === original.rentAmount &&
+    draft.electricityUnits === original.electricityUnits &&
+    draft.waterAmount === original.waterAmount &&
+    draft.notes.trim() === original.notes
+  ) {
+    errors.unchanged = CORRECTION_UNCHANGED_MESSAGE
+  }
+  return withoutPassingChecks(errors)
+}
+
+// The correction to send, or its errors. Notes and reason are trimmed, as the backend does.
+export function parseEntryCorrection(
+  original: Parameters<typeof validateEntryCorrection>[0],
+  draft: EntryCorrectionDraft,
+): { ok: true; input: EntryCorrectionInput } | { ok: false; errors: EntryCorrectionErrors } {
+  const errors = validateEntryCorrection(original, draft)
+  if (Object.keys(errors).length > 0) return { ok: false, errors }
+
+  // Validation guarantees these are finite numbers.
+  return {
+    ok: true,
+    input: {
+      rentAmount: draft.rentAmount as number,
+      electricityUnits: draft.electricityUnits as number,
+      waterAmount: draft.waterAmount as number,
+      notes: draft.notes.trim(),
+      reason: draft.reason.trim(),
     },
   }
 }

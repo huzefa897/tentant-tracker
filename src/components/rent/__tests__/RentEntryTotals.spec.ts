@@ -19,4 +19,20 @@ describe('RentEntryTotals', () => {
       Outstanding: '₹21,500',
     })
   })
+
+  it('says void bills on the page aren’t counted, only when there are some', () => {
+    const totals = { totalBilled: 15750, totalPaid: 0, outstanding: 15750 }
+
+    expect(mount(RentEntryTotals, { props: { totals } }).text()).not.toContain('void')
+    expect(
+      mount(RentEntryTotals, { props: { totals, voidCount: 1 } })
+        .get('[data-testid="void-not-counted"]')
+        .text(),
+    ).toBe("The void bill on this page isn't counted.")
+    expect(
+      mount(RentEntryTotals, { props: { totals, voidCount: 2 } })
+        .get('[data-testid="void-not-counted"]')
+        .text(),
+    ).toBe("The 2 void bills on this page aren't counted.")
+  })
 })

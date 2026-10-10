@@ -79,6 +79,12 @@ class CreateRentEntryTests(RentEntryApiTestCase):
                 "outstandingAmount": "15750.00",
                 "paymentStatus": "unpaid",
                 "notes": "October charges",
+                "status": "active",
+                "voidedAt": None,
+                "voidedByName": None,
+                "voidReason": "",
+                "replacesEntryId": None,
+                "replacedByEntryId": None,
             },
         )
         self.assertTrue(body["createdAt"])
@@ -240,8 +246,8 @@ class CreateRentEntryTests(RentEntryApiTestCase):
 
     def test_a_unique_constraint_race_is_also_a_409(self):
         # Another request saved the month between our check and our insert.
-        with mock.patch("billing.services.RentEntry.objects.filter") as filter_:
-            filter_.return_value.exists.return_value = False
+        with mock.patch("billing.services.RentEntry.objects.active") as active:
+            active.return_value.filter.return_value.exists.return_value = False
             self.make_entry()
             response = self.create()
 

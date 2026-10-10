@@ -14,6 +14,8 @@ from .calculations import PaymentStatus
 from .models import Payment, Receipt, RentEntry
 from .serializers import (
     BillingMonthField,
+    EntryCorrectionSerializer,
+    EntryVoidSerializer,
     PaymentCreateSerializer,
     PaymentReversalCreateSerializer,
     PaymentSerializer,
@@ -22,9 +24,12 @@ from .serializers import (
     RentEntrySerializer,
 )
 from .services import (
+    BillCorrectionNotAllowedError,
     BillingMonthOutsideTenancyError,
     DuplicateBillingMonthError,
     EntryNotFoundError,
+    EntryVoidError,
+    NothingToCorrectError,
     IdempotencyConflictError,
     PaymentExceedsOutstandingError,
     PaymentNotAllowedError,
@@ -34,15 +39,20 @@ from .services import (
     ReceiptNotAllowedError,
     ReversalConflictError,
     ReversalNotAllowedError,
+    UnreversedPaymentsError,
+    VoidConflictError,
+    correct_rent_entry,
     create_rent_entry,
     issue_payment_receipt,
     record_payment,
     reverse_payment,
+    void_rent_entry,
 )
 
 # 0001–9999: Django builds a date from the year, and there is no year 0.
 YEAR_PATTERN = re.compile(r"^(?!0000)\d{4}$")
 PAYMENT_STATUSES = (PaymentStatus.UNPAID, PaymentStatus.PARTIALLY_PAID, PaymentStatus.PAID)
+BILL_STATUSES = ("active", "void", "all")
 IDEMPOTENCY_HEADER = "Idempotency-Key"
 
 
@@ -98,6 +108,40 @@ class ReversalConflict(exceptions.APIException):
         "detail": "This payment was already reversed with a different reason.",
     }
     default_code = "reversal_conflict"
+
+
+class EntryVoid(exceptions.APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = {
+        "code": "entry_void",
+        "detail": "This bill is void, so it can't take payments or be voided or corrected.",
+    }
+    default_code = "entry_void"
+
+
+class VoidConflict(exceptions.APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = {
+        "code": "void_conflict",
+        "detail": "This bill was already voided with a different reason.",
+    }
+    default_code = "void_conflict"
+
+
+class UnreversedPayments(exceptions.APIException):
+    """The app lists the payments from the bill's own payments."""
+
+    status_code = status.HTTP_409_CONFLICT
+    default_code = "unreversed_payments"
+
+    def __init__(self, count: int):
+        payments = "payment" if count == 1 else f"{count} payments"
+        super().__init__(
+            {
+                "code": "unreversed_payments",
+                "detail": f"Reverse this bill's {payments} before voiding it.",
+            }
+        )
 
 
 class ReceiptConfigurationIncomplete(exceptions.APIException):
@@ -168,6 +212,16 @@ def payment_with_details(payment_id) -> Payment:
     return Payment.objects.select_related("receipt", "reversal__created_by").get(pk=payment_id)
 
 
+def entry_with_details(entry_id) -> RentEntry:
+    """A bill as the API shows it, after a change: its amounts, voider and replacement."""
+    return (
+        RentEntry.objects.with_amounts()
+        .select_related("voided_by", "replaced_by")
+        .get(pk=entry_id)
+    )
+
+
+
 class RentEntryPagination(PageNumberPagination):
     """{count, next, previous, results}, a year of bills per page (?page=)."""
 
@@ -181,11 +235,12 @@ class RentEntryViewSet(
     mixins.CreateModelMixin,
     viewsets.GenericViewSet,
 ):
-    """A tenancy's bills: list, retrieve and create. No update or delete: financial
-    corrections need deliberate rules first.
+    """A tenancy's bills: list, retrieve and create. No update or delete: a bill is corrected
+    by voiding it (EntryVoidViewSet) or voiding and replacing it (EntryCorrectionViewSet).
 
-    List: newest billing month first; ?year=2026, ?billing_month=2026-10 (to check whether
-    a bill exists) and ?payment_status=unpaid|partially_paid|paid, applied before paging.
+    List: newest billing month first; ?status=active (the default)|void|all, ?year=2026,
+    ?billing_month=2026-10 (to check whether a bill exists) and
+    ?payment_status=unpaid|partially_paid|paid (active bills only), applied before paging.
 
     Create takes an optional Idempotency-Key header (required with an initialPayment): a retry
     with the same key returns the bill it created (200) instead of creating another.
@@ -200,6 +255,7 @@ class RentEntryViewSet(
         return (
             RentEntry.objects.filter(tenancy=self.get_tenancy())
             .with_amounts()
+            .select_related("voided_by", "replaced_by")
             .order_by("-billing_month", "-created_at")
         )
 
@@ -208,6 +264,15 @@ class RentEntryViewSet(
             return queryset
 
         params = self.request.query_params
+        # Active by default: anything that lists bills without asking for void ones never sees
+        # them, so it can't count them.
+        bill_status = params.get("status", "active")
+        if bill_status not in BILL_STATUSES:
+            raise exceptions.ValidationError(
+                {"status": f"Choose one of: {', '.join(BILL_STATUSES)}."}
+            )
+        if bill_status != "all":
+            queryset = queryset.filter(status=bill_status)
         year = params.get("year")
         if year is not None:
             if not YEAR_PATTERN.match(year):
@@ -318,13 +383,15 @@ class PaymentViewSet(
             raise exceptions.NotFound() from None
         except PaymentNotAllowedError:
             raise exceptions.PermissionDenied("Your role can't record payments.") from None
+        except EntryVoidError:
+            raise EntryVoid() from None
         except IdempotencyConflictError:
             raise IdempotencyConflict() from None
         except PaymentExceedsOutstandingError as error:
             raise PaymentExceedsOutstanding(error.outstanding) from None
 
         # The balance as it is now: on a retry it may include later payments or reversals.
-        current = RentEntry.objects.with_amounts().get(pk=entry.pk)
+        current = entry_with_details(entry.pk)
         return Response(
             {
                 "payment": PaymentSerializer(payment_with_details(result.payment.pk)).data,
@@ -415,7 +482,108 @@ class PaymentReversalViewSet(ScopedLookupMixin, viewsets.GenericViewSet):
         return Response(
             {
                 "payment": PaymentSerializer(payment_with_details(payment.pk)).data,
-                "entry": RentEntrySerializer(result.entry).data,
+                "entry": RentEntrySerializer(entry_with_details(result.entry.pk)).data,
+            },
+            status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
+        )
+
+
+CORRECTIONS_FORBIDDEN = "Only the property's owners can void or correct bills."
+
+
+class EntryVoidViewSet(ScopedLookupMixin, viewsets.GenericViewSet):
+    """Voids a bill that should not exist: POST {"reason": "..."} (owners only; a manager is
+    403). 201 with the bill, now void. Refused while any of its payments still count (409
+    unreversed_payments): reverse them first. A retry with the same reason returns the same
+    (200); another reason is 409 void_conflict.
+
+    No Idempotency-Key: the bill identifies the only void it can have.
+    """
+
+    pagination_class = None
+
+    def create(self, request, *args, **kwargs):
+        entry = self.get_entry()
+        if not role_can(self.get_property().role, Capability.CORRECT_BILLS):
+            raise exceptions.PermissionDenied(CORRECTIONS_FORBIDDEN)
+
+        serializer = EntryVoidSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = void_rent_entry(
+                entry_id=entry.pk, actor=request.user, reason=serializer.validated_data["reason"]
+            )
+        except EntryNotFoundError:
+            raise exceptions.NotFound() from None
+        except BillCorrectionNotAllowedError:
+            raise exceptions.PermissionDenied(CORRECTIONS_FORBIDDEN) from None
+        except VoidConflictError:
+            raise VoidConflict() from None
+        except UnreversedPaymentsError as error:
+            raise UnreversedPayments(error.count) from None
+
+        return Response(
+            RentEntrySerializer(entry_with_details(result.entry.pk)).data,
+            status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
+        )
+
+
+class EntryCorrectionViewSet(ScopedLookupMixin, viewsets.GenericViewSet):
+    """Corrects a bill's charges: POST {"reason", "rentAmount", "electricityUnits",
+    "waterAmount", "notes"} with an Idempotency-Key header (owners only). Voids the bill and
+    creates its replacement for the same month, with the bill's electricity rate, in one
+    transaction. 201 with {original, replacement}; a retry with the same key and request
+    returns them (200); the same key with anything else is 409 idempotency_conflict.
+
+    Refused (nothing changes) when the bill is void (409 entry_void), still has payments that
+    count (409 unreversed_payments), or the replacement changes nothing (400).
+    """
+
+    pagination_class = None
+
+    def create(self, request, *args, **kwargs):
+        entry = self.get_entry()
+        if not role_can(self.get_property().role, Capability.CORRECT_BILLS):
+            raise exceptions.PermissionDenied(CORRECTIONS_FORBIDDEN)
+
+        serializer = EntryCorrectionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        key = idempotency_key(request, required=True)
+        data = dict(serializer.validated_data)
+        reason = data.pop("reason")
+
+        try:
+            result = correct_rent_entry(
+                entry_id=entry.pk,
+                actor=request.user,
+                reason=reason,
+                validated_data=data,
+                idempotency_key=key,
+            )
+        except EntryNotFoundError:
+            raise exceptions.NotFound() from None
+        except BillCorrectionNotAllowedError:
+            raise exceptions.PermissionDenied(CORRECTIONS_FORBIDDEN) from None
+        except EntryVoidError:
+            raise EntryVoid() from None
+        except UnreversedPaymentsError as error:
+            raise UnreversedPayments(error.count) from None
+        except NothingToCorrectError:
+            raise exceptions.ValidationError(
+                {"nonFieldErrors": ["Change at least one charge or the notes."]}
+            ) from None
+        except IdempotencyConflictError:
+            raise IdempotencyConflict() from None
+        except DuplicateBillingMonthError:
+            raise DuplicateBillingMonth() from None
+
+        return Response(
+            {
+                "original": RentEntrySerializer(entry_with_details(result.original.pk)).data,
+                "replacement": RentEntrySerializer(
+                    entry_with_details(result.replacement.pk)
+                ).data,
             },
             status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
         )

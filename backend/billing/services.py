@@ -22,7 +22,7 @@ from .models import (
     tenancy_covers_month,
 )
 
-UNIQUE_MONTH_CONSTRAINT = "unique_tenancy_billing_month"
+UNIQUE_MONTH_CONSTRAINT = "unique_active_tenancy_billing_month"
 PAYMENT_KEY_CONSTRAINT = "unique_payment_idempotency_key"
 CREATION_KEY_CONSTRAINT = "unique_rent_entry_creation_key"
 # The unique columns behind Receipt.payment and PaymentReversal.payment (PostgreSQL's names).
@@ -31,7 +31,7 @@ REVERSAL_PAYMENT_CONSTRAINT = "billing_paymentreversal_payment_id_key"
 
 
 class DuplicateBillingMonthError(Exception):
-    """The tenancy already has a bill for this month."""
+    """The tenancy already has an active bill for this month."""
 
 
 class BillingMonthOutsideTenancyError(Exception):
@@ -79,6 +79,30 @@ class ReversalConflictError(Exception):
     """The payment was already reversed, with another reason."""
 
 
+class EntryVoidError(Exception):
+    """The bill is void: it takes no payments and can't be voided or corrected again."""
+
+
+class BillCorrectionNotAllowedError(Exception):
+    """The actor's role can't void or correct bills for this property."""
+
+
+class VoidConflictError(Exception):
+    """The bill was already voided, with another reason."""
+
+
+class UnreversedPaymentsError(Exception):
+    """The bill still has payments that count: they must be reversed before it's voided."""
+
+    def __init__(self, count: int):
+        super().__init__(f"{count} payment(s) must be reversed first.")
+        self.count = count
+
+
+class NothingToCorrectError(Exception):
+    """The replacement has the same charges and notes as the bill it corrects."""
+
+
 class PaymentExceedsOutstandingError(Exception):
     """The payment is more than the bill's outstanding amount (zero when it's fully paid)."""
 
@@ -108,6 +132,24 @@ class ReversedPayment:
     created: bool
     # The bill, with its amounts annotated (with_amounts), as it stands after the reversal.
     entry: RentEntry
+
+
+@dataclass(frozen=True)
+class VoidedEntry:
+    # With its amounts annotated (with_amounts), as it stands after voiding.
+    entry: RentEntry
+    # False when the bill was already void for the same reason: a retry.
+    created: bool
+
+
+@dataclass(frozen=True)
+class CorrectedEntry:
+    # Both with their amounts annotated (with_amounts): the original, now void, and its
+    # replacement.
+    original: RentEntry
+    replacement: RentEntry
+    # False when the key's correction was already made: a retry, nothing changed now.
+    created: bool
 
 
 @dataclass(frozen=True)
@@ -165,7 +207,8 @@ def record_payment(*, entry_id, actor, idempotency_key, validated_data: dict) ->
     validated_data: amount (Decimal, > 0, two places), paid_date (not in the future) and
     optionally notes (trimmed). The bill is locked for the whole operation, so simultaneous
     payments are checked one at a time and can never together exceed it. Every way of
-    creating a payment comes through here, so they all take the same lock.
+    creating a payment comes through here, so they all take the same lock. A void bill takes
+    no payments (EntryVoidError).
     """
     try:
         with transaction.atomic():
@@ -186,6 +229,9 @@ def record_payment(*, entry_id, actor, idempotency_key, validated_data: dict) ->
                     actor=actor,
                     validated_data=validated_data,
                 )
+
+            if entry.status == RentEntry.Status.VOID:
+                raise EntryVoidError()
 
             outstanding = entry_amounts(entry).outstanding_amount
             if validated_data["amount"] > outstanding:
@@ -293,8 +339,13 @@ def create_rent_entry(
             if not tenancy_covers_month(locked, billing_month):
                 raise BillingMonthOutsideTenancyError()
 
-            # A readable error for the common case; the unique constraint still decides.
-            if RentEntry.objects.filter(tenancy=locked, billing_month=billing_month).exists():
+            # A readable error for the common case; the unique constraint still decides. Void
+            # bills don't count: a month whose bill was voided can have a new one.
+            if (
+                RentEntry.objects.active()
+                .filter(tenancy=locked, billing_month=billing_month)
+                .exists()
+            ):
                 raise DuplicateBillingMonthError()
 
             rent_amount = validated_data.get("rent_amount")
@@ -508,9 +559,11 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
         if problem is not None:
             raise ReceiptConfigurationIncompleteError(problem)
 
-        previous = RentEntry.objects.filter(
-            tenancy=tenancy, billing_month=_previous_month(entry.billing_month)
-        ).first()
+        previous = (
+            RentEntry.objects.active()
+            .filter(tenancy=tenancy, billing_month=_previous_month(entry.billing_month))
+            .first()
+        )
         previous_outstanding = (
             max(entry_amounts(previous).outstanding_amount, ZERO) if previous else ZERO
         )
@@ -600,3 +653,207 @@ def reverse_payment(*, payment_id, actor, reason: str) -> ReversedPayment:
         )
         _check_can_reverse_payments(actor, existing.payment.entry.tenancy.property_id)
         return _replay_reversal(existing, reason=reason, entry_id=existing.payment.entry_id)
+
+
+# Voiding and correcting bills.
+#
+# Lock order, shared by every operation on an existing bill (payments, reversals, receipts,
+# voids and corrections): the bill, then its payments, then its tenancy, then its property.
+# Creating a bill locks its tenancy first, but no existing bill, so the two never wait for each
+# other in a circle. Under the bill's lock no payment can be recorded or reversed, so "no
+# payments that count" stays true until the transaction ends. (The legacy import, a one-off
+# command, locks its tenancies first; PostgreSQL cancels one side if they ever deadlock, and a
+# retry with the same key is safe.)
+
+
+def _check_can_correct_bills(actor, property_id) -> None:
+    """As _check_can_record_payments: no access is "not found"."""
+    role = (
+        properties_for_user(actor).filter(pk=property_id).values_list("role", flat=True).first()
+    )
+    if role is None:
+        raise EntryNotFoundError()
+    if not role_can(role, Capability.CORRECT_BILLS):
+        raise BillCorrectionNotAllowedError()
+
+
+def _clean_reason(reason: str) -> str:
+    reason = reason.strip()
+    if not reason or len(reason) > 500:
+        raise ValueError("Voiding a bill needs a reason of 1–500 characters.")
+    return reason
+
+
+def _lock_bill_to_void(entry_id, actor) -> RentEntry:
+    """The bill, locked, once the actor may correct it (checked again inside the lock: the
+    view's lookup happened before it)."""
+    try:
+        entry = RentEntry.objects.select_for_update().get(pk=entry_id)
+    except RentEntry.DoesNotExist:
+        raise EntryNotFoundError() from None
+    _check_can_correct_bills(actor, entry.tenancy.property_id)
+    return entry
+
+
+def _check_no_payments_count(entry: RentEntry) -> None:
+    """A bill is voided only once nothing paid against it still counts: the owner reverses
+    those payments first, deliberately. Payments are never moved to another bill."""
+    count = entry.payments.effective().count()
+    if count:
+        raise UnreversedPaymentsError(count)
+
+
+def _void(entry: RentEntry, *, actor, reason: str) -> None:
+    entry.status = RentEntry.Status.VOID
+    entry.voided_at = timezone.now()
+    entry.voided_by = actor
+    entry.void_reason = reason
+    entry.save(update_fields=["status", "voided_at", "voided_by", "void_reason"])
+
+
+def void_rent_entry(*, entry_id, actor, reason: str) -> VoidedEntry:
+    """Voids a bill that should not exist. Its charges, creator and timestamp are kept; it
+    then counts towards nothing, and its month can have a new bill.
+
+    reason: why (trimmed, 1–500 characters). A bill has only one void, so a retry with the
+    same reason returns it; another reason is VoidConflictError. A bill with payments that
+    still count is UnreversedPaymentsError.
+    """
+    reason = _clean_reason(reason)
+    with transaction.atomic():
+        entry = _lock_bill_to_void(entry_id, actor)
+        if entry.status == RentEntry.Status.VOID:
+            if entry.void_reason != reason:
+                raise VoidConflictError()
+            created = False
+        else:
+            _check_no_payments_count(entry)
+            _void(entry, actor=actor, reason=reason)
+            created = True
+        return VoidedEntry(entry=RentEntry.objects.with_amounts().get(pk=entry.pk), created=created)
+
+
+def _correction_fingerprint(entry_id, reason: str, validated_data: dict) -> str:
+    request = {
+        "entry_id": str(entry_id),
+        "reason": reason,
+        "rent_amount": str(validated_data["rent_amount"]),
+        "electricity_units": str(validated_data["electricity_units"]),
+        "water_amount": str(validated_data["water_amount"]),
+        "notes": validated_data.get("notes", ""),
+    }
+    return hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+
+
+def _replay_correction(*, idempotency_key, entry_id, actor, fingerprint) -> CorrectedEntry:
+    """The correction this key already made, when the request matches it and the actor may
+    still correct bills; otherwise the key was reused for another request."""
+    existing = RentEntry.objects.select_related("tenancy").get(creation_key=idempotency_key)
+    if (
+        existing.replaces_entry_id != entry_id
+        or existing.created_by_id != actor.pk
+        or existing.creation_fingerprint != fingerprint
+    ):
+        raise IdempotencyConflictError()
+    _check_can_correct_bills(actor, existing.tenancy.property_id)
+    amounts = RentEntry.objects.with_amounts()
+    return CorrectedEntry(
+        original=amounts.get(pk=entry_id),
+        replacement=amounts.get(pk=existing.pk),
+        created=False,
+    )
+
+
+def correct_rent_entry(
+    *, entry_id, actor, reason: str, validated_data: dict, idempotency_key
+) -> CorrectedEntry:
+    """Voids a bill with wrong charges and creates its replacement, in one transaction: both
+    happen or neither, so a replacement that fails leaves the original active.
+
+    validated_data: rent_amount, electricity_units, water_amount and optionally notes, the
+    replacement's charges (the app starts from the original's). The tenancy, month and
+    electricity rate are the original's: they're historical values, never today's tenancy
+    defaults. At least one must differ from the original (NothingToCorrectError).
+
+    idempotency_key: the request's Idempotency-Key, saved as the replacement's creation key. A
+    retry with the same key and request returns the correction it made.
+
+    Refused when the bill is void (EntryVoidError) or still has payments that count
+    (UnreversedPaymentsError).
+    """
+    reason = _clean_reason(reason)
+    fingerprint = _correction_fingerprint(entry_id, reason, validated_data)
+    notes = validated_data.get("notes", "")
+
+    try:
+        with transaction.atomic():
+            original = _lock_bill_to_void(entry_id, actor)
+
+            # Before the other checks: a retry of a correction that succeeded finds the bill
+            # void and the payments' state changed since, and must still return it.
+            if RentEntry.objects.filter(creation_key=idempotency_key).exists():
+                return _replay_correction(
+                    idempotency_key=idempotency_key,
+                    entry_id=original.pk,
+                    actor=actor,
+                    fingerprint=fingerprint,
+                )
+
+            if original.status == RentEntry.Status.VOID:
+                raise EntryVoidError()
+            _check_no_payments_count(original)
+            if (
+                original.rent_amount == validated_data["rent_amount"]
+                and original.electricity_units == validated_data["electricity_units"]
+                and original.water_amount == validated_data["water_amount"]
+                and original.notes == notes
+            ):
+                raise NothingToCorrectError()
+
+            # Then the tenancy, so no new bill for it is created while this one is replaced
+            # (creating one takes a stronger lock on it). NO KEY, as receipts take it.
+            tenancy = Tenancy.objects.select_for_update(no_key=True).get(pk=original.tenancy_id)
+
+            _void(original, actor=actor, reason=reason)
+            # A readable error for the unlikely case; the unique constraint still decides.
+            if (
+                RentEntry.objects.active()
+                .filter(tenancy=tenancy, billing_month=original.billing_month)
+                .exists()
+            ):
+                raise DuplicateBillingMonthError()
+
+            replacement = RentEntry.objects.create(
+                tenancy=tenancy,
+                billing_month=original.billing_month,
+                rent_amount=validated_data["rent_amount"],
+                electricity_units=validated_data["electricity_units"],
+                electricity_rate=original.electricity_rate,
+                water_amount=validated_data["water_amount"],
+                notes=notes,
+                created_by=actor,
+                creation_key=idempotency_key,
+                creation_fingerprint=fingerprint,
+                replaces_entry=original,
+            )
+            amounts = RentEntry.objects.with_amounts()
+            return CorrectedEntry(
+                original=amounts.get(pk=original.pk),
+                replacement=amounts.get(pk=replacement.pk),
+                created=True,
+            )
+    except IntegrityError as error:
+        # Caught outside the failed transaction, which has been rolled back: the original is
+        # still active.
+        constraint = _violated_constraint(error)
+        if constraint == UNIQUE_MONTH_CONSTRAINT:
+            raise DuplicateBillingMonthError() from error
+        if constraint == CREATION_KEY_CONSTRAINT:
+            # The same key, simultaneously, used to correct another bill (another lock).
+            return _replay_correction(
+                idempotency_key=idempotency_key,
+                entry_id=entry_id,
+                actor=actor,
+                fingerprint=fingerprint,
+            )
+        raise

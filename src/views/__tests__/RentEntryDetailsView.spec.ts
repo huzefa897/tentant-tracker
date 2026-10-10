@@ -821,3 +821,131 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
     })
   })
 })
+
+describe('RentEntryDetailsView for voiding and correcting bills', () => {
+  const body = new DOMWrapper(document.body)
+  const voidEntryApi = vi.mocked(rentEntryService.voidEntry)
+  const REASON = 'Entered twice for September.'
+
+  function dialog() {
+    return body.get('[role="dialog"]')
+  }
+
+  async function openVoid() {
+    await button('Void bill').trigger('click')
+    await flushPromises()
+  }
+
+  it('offers owners Correct bill and Void bill on an active bill', async () => {
+    await openDetails('tenant-001', 'sep')
+
+    expect(
+      view!
+        .get('[data-testid="bill-actions"]')
+        .findAll('button')
+        .map((b) => b.text()),
+    ).toEqual(['Correct bill', 'Void bill'])
+  })
+
+  it('never offers them to a manager', async () => {
+    vi.mocked(accessService.getMe).mockResolvedValue(
+      identityWith([{ ...testProperty, role: 'manager' }]),
+    )
+    await openDetails('tenant-001', 'sep')
+
+    expect(view!.find('[data-testid="bill-actions"]').exists()).toBe(false)
+  })
+
+  it('opens the correction page', async () => {
+    await openDetails('tenant-001', 'sep')
+
+    await button('Correct bill').trigger('click')
+
+    // The page loads on demand.
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-correct'))
+    expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
+  })
+
+  it('voids a bill with no payments, then shows it VOID and owing nothing', async () => {
+    await openDetails('tenant-001', 'sep')
+    await openVoid()
+
+    await dialog().get('#void-reason').setValue(REASON)
+    await dialog().get('form').trigger('submit')
+    await flushPromises()
+
+    expect(voidEntryApi).toHaveBeenCalledWith(expect.any(String), 'tenant-001', 'sep', REASON)
+    expect(body.find('[role="dialog"]').exists()).toBe(false)
+    expect(view!.get('[role="status"]').text()).toBe('Bill voided.')
+    expect(view!.get('[data-testid="void-badge"]').text()).toBe('Void')
+    const notice = view!.get('[data-testid="void-notice"]').text()
+    expect(notice).toContain('VOID')
+    expect(notice).toContain(`Voided by Test Owner on`)
+    expect(notice).toContain(REASON)
+    expect(section('payment')).toMatchObject({ 'Total due': '₹14,712.50', Outstanding: '₹0' })
+    expect(view!.find('[data-testid="void-owes-nothing"]').exists()).toBe(true)
+    expect(view!.findAll('button').some((b) => b.text() === 'Record Payment')).toBe(false)
+    expect(view!.find('[data-testid="bill-actions"]').exists()).toBe(false)
+  })
+
+  it('lists the payments to reverse first, and voids nothing', async () => {
+    addFakePayment(makePayment({ id: 'p-1', entryId: 'sep', amount: 1000 }))
+    await openDetails('tenant-001', 'sep')
+    await openVoid()
+
+    expect(dialog().get('[data-testid="payments-to-reverse"]').text()).toContain(
+      'Reverse this payment first',
+    )
+    expect(dialog().find('#void-reason').exists()).toBe(false)
+    expect(voidEntryApi).not.toHaveBeenCalled()
+  })
+
+  it('keeps the dialog and the reason when voiding fails', async () => {
+    voidEntryApi.mockRejectedValueOnce(new ApiError('forbidden'))
+    await openDetails('tenant-001', 'sep')
+    await openVoid()
+
+    await dialog().get('#void-reason').setValue(REASON)
+    await dialog().get('form').trigger('submit')
+    await flushPromises()
+
+    expect(dialog().text()).toContain("Only the property's owners can void or correct bills.")
+    expect((dialog().get('#void-reason').element as HTMLTextAreaElement).value).toBe(REASON)
+    expect(view!.find('[data-testid="void-notice"]').exists()).toBe(false)
+  })
+
+  it('links a corrected bill and its replacement both ways', async () => {
+    fakeEntries.entries = [
+      makeEntry({
+        id: 'sep',
+        billingMonth: '2026-09',
+        billStatus: 'void',
+        replacedByEntryId: 'sep-2',
+      }),
+      makeEntry({ id: 'sep-2', billingMonth: '2026-09', replacesEntryId: 'sep' }),
+    ]
+    await openDetails('tenant-001', 'sep')
+
+    const toReplacement = view!.get('[data-testid="correction-links"] a')
+    expect(toReplacement.text()).toBe('Replaced by bill · September 2026')
+    expect(toReplacement.attributes('href')).toBe('/tenants/tenant-001/entries/sep-2')
+
+    await toReplacement.trigger('click')
+    await flushPromises()
+
+    expect(view!.find('[data-testid="void-notice"]').exists()).toBe(false)
+    const toOriginal = view!.get('[data-testid="correction-links"] a')
+    expect(toOriginal.text()).toBe('Replaces void bill · September 2026')
+    expect(toOriginal.attributes('href')).toBe('/tenants/tenant-001/entries/sep')
+  })
+
+  it('confirms a correction on the replacement it opens', async () => {
+    fakeEntries.entries = [makeEntry({ id: 'sep-2', replacesEntryId: 'sep' })]
+
+    await openDetails('tenant-001', 'sep-2', '?corrected=1')
+
+    expect(view!.get('[role="status"]').text()).toBe(
+      'Bill corrected. The original is now void and counts towards nothing.',
+    )
+  })
+})

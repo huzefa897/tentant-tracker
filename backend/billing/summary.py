@@ -1,7 +1,7 @@
 """A summary of everything the database holds that matters for recovery: counts, money totals
 and checksums. Two databases with the same summary hold the same people, properties, access,
-tenancies, bills, payments, reversals and receipts (void or not), down to their details
-(scripts/restore-test.sh compares a restored backup with the live one).
+tenancies, bills (void or not), payments, reversals and receipts (void or not), down to their
+details (scripts/restore-test.sh compares a restored backup with the live one).
 
 Only counts, totals and hashes: never names, phone numbers or amounts per person.
 """
@@ -54,11 +54,13 @@ def _digest(rows) -> str:
 
 
 def ledger_summary() -> list[tuple[str, str]]:
-    # Reversed payments don't count towards the totals (with_amounts sums the effective ones).
+    # Reversed payments don't count towards the totals (with_amounts sums the effective ones),
+    # and nor do void bills (kept as history, owing nothing).
     entries = list(RentEntry.objects.with_amounts())
     amounts = {entry.pk: entry_amounts(entry) for entry in entries}
-    total_due = sum((a.total_due for a in amounts.values()), Decimal("0.00"))
-    total_paid = sum((a.total_paid for a in amounts.values()), Decimal("0.00"))
+    active = [amounts[entry.pk] for entry in entries if entry.status == RentEntry.Status.ACTIVE]
+    total_due = sum((a.total_due for a in active), Decimal("0.00"))
+    total_paid = sum((a.total_paid for a in active), Decimal("0.00"))
     memberships = PropertyMembership.objects.values_list(
         "user_id", "property_id", "role", "is_active"
     )
@@ -73,6 +75,7 @@ def ledger_summary() -> list[tuple[str, str]]:
         ("tenancies", str(Tenancy.objects.count())),
         ("tenancies digest", _digest(Tenancy.objects.values_list(*TENANCY_FIELDS))),
         ("bills", str(len(entries))),
+        ("void bills", str(len(entries) - len(active))),
         ("payments", str(Payment.objects.count())),
         ("payment reversals", str(PaymentReversal.objects.count())),
         ("receipts", str(Receipt.objects.count())),
@@ -86,6 +89,11 @@ def ledger_summary() -> list[tuple[str, str]]:
                     entry.pk,
                     entry.tenancy_id,
                     entry.billing_month,
+                    entry.status,
+                    entry.voided_at,
+                    entry.voided_by_id,
+                    entry.void_reason,
+                    entry.replaces_entry_id,
                     amounts[entry.pk].total_due,
                     amounts[entry.pk].total_paid,
                     amounts[entry.pk].outstanding_amount,

@@ -12,7 +12,10 @@ from billing.calculations import entry_amounts
 from billing.models import Payment, PaymentReversal, Receipt, RentEntry
 from billing.services import (
     DuplicateBillingMonthError,
+    EntryVoidError,
     PaymentReversedError,
+    UnreversedPaymentsError,
+    correct_rent_entry,
     create_rent_entry,
     issue_payment_receipt,
     record_payment,
@@ -75,8 +78,8 @@ class ConcurrentRentEntryTests(TransactionTestCase):
 
     def test_the_unique_constraint_decides_when_the_check_misses_a_duplicate(self):
         # As if every request checked before any had saved: the insert itself must refuse.
-        with mock.patch("billing.services.RentEntry.objects.filter") as filter_:
-            filter_.return_value.exists.return_value = False
+        with mock.patch("billing.services.RentEntry.objects.active") as active:
+            active.return_value.filter.return_value.exists.return_value = False
             outcomes = self.create_simultaneously(3)
 
         self.assertEqual(sorted(outcomes), ["created", "duplicate", "duplicate"])
@@ -104,6 +107,29 @@ def run_simultaneously(count, action):
     for thread in threads:
         thread.join(timeout=30)
     return outcomes
+
+
+def run_in_thread(action):
+    """Starts action on its own connection, and returns a function that waits for it and gives
+    its outcome (a value, or the exception)."""
+    outcome = {}
+
+    def run():
+        try:
+            outcome["value"] = action()
+        except Exception as error:  # noqa: BLE001 - returned to the test
+            outcome["value"] = error
+        finally:
+            connection.close()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+
+    def result():
+        thread.join(timeout=30)
+        return outcome["value"]
+
+    return result
 
 
 def wait_until_another_connection_waits_on_a_lock(timeout=10):
@@ -420,28 +446,6 @@ class ConcurrentReversalTests(TransactionTestCase):
     def issue(self, _=None):
         return issue_payment_receipt(payment_id=self.payment.pk, actor=self.user).receipt
 
-    def run_in_thread(self, action):
-        """Starts action on its own connection, and returns a function that waits for it and
-        gives its outcome (a value, or the exception)."""
-        outcome = {}
-
-        def run():
-            try:
-                outcome["value"] = action()
-            except Exception as error:  # noqa: BLE001 - returned to the test
-                outcome["value"] = error
-            finally:
-                connection.close()
-
-        thread = threading.Thread(target=run)
-        thread.start()
-
-        def result():
-            thread.join(timeout=30)
-            return outcome["value"]
-
-        return result
-
     def test_simultaneous_matching_reversals_make_one(self):
         outcomes = run_simultaneously(4, self.reverse)
 
@@ -461,7 +465,7 @@ class ConcurrentReversalTests(TransactionTestCase):
     def test_a_reversal_waits_for_a_receipt_being_issued_and_voids_it(self):
         with transaction.atomic():
             self.issue()
-            reversed_ = self.run_in_thread(self.reverse)
+            reversed_ = run_in_thread(self.reverse)
             wait_until_another_connection_waits_on_a_lock()
 
         self.assertEqual(reversed_(), "created")
@@ -470,7 +474,7 @@ class ConcurrentReversalTests(TransactionTestCase):
     def test_a_receipt_waits_for_a_reversal_and_is_refused(self):
         with transaction.atomic():
             self.reverse()
-            issued = self.run_in_thread(self.issue)
+            issued = run_in_thread(self.issue)
             wait_until_another_connection_waits_on_a_lock()
 
         self.assertIsInstance(issued(), PaymentReversedError)
@@ -487,7 +491,7 @@ class ConcurrentReversalTests(TransactionTestCase):
         # ₹10,000 of ₹15,750 paid; the reversal frees the whole bill for the waiting payment.
         with transaction.atomic():
             self.reverse()
-            paid = self.run_in_thread(
+            paid = run_in_thread(
                 lambda: record_payment(
                     entry_id=self.entry.pk,
                     actor=self.user,
@@ -499,3 +503,130 @@ class ConcurrentReversalTests(TransactionTestCase):
 
         self.assertTrue(paid().created)
         self.assertEqual(entry_amounts(self.entry).payment_status, "paid")
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class ConcurrentBillCorrectionTests(TransactionTestCase):
+    """Corrections on separate connections: the bill's lock, taken by payments, reversals,
+    receipts and corrections alike, must never leave a void bill with a payment that counts,
+    nor two active bills for a month."""
+
+    REASON = "Electricity units were wrong."
+
+    def setUp(self):
+        self.user = make_user()
+        self.tenancy = make_tenancy(make_property(member=self.user, role="owner"))
+        self.entry = make_bill(self.tenancy, self.user)
+
+    def correct(self, units="80.000", key=None):
+        result = correct_rent_entry(
+            entry_id=self.entry.pk,
+            actor=self.user,
+            reason=self.REASON,
+            validated_data={
+                "rent_amount": Decimal("15000.00"),
+                "electricity_units": Decimal(units),
+                "water_amount": Decimal("300.00"),
+                "notes": "",
+            },
+            idempotency_key=key or uuid.uuid4(),
+        )
+        return "created" if result.created else "returned"
+
+    def pay(self):
+        return record_payment(
+            entry_id=self.entry.pk,
+            actor=self.user,
+            idempotency_key=uuid.uuid4(),
+            validated_data=PAYMENT,
+        ).payment
+
+    def assert_one_active_bill(self):
+        active = RentEntry.objects.active().filter(
+            tenancy=self.tenancy, billing_month=self.entry.billing_month
+        )
+        self.assertEqual(active.count(), 1)
+        for entry in RentEntry.objects.filter(status="void"):
+            self.assertFalse(entry.payments.effective().exists())
+
+    def test_a_payment_waiting_on_the_bill_is_refused_once_it_is_corrected(self):
+        with transaction.atomic():
+            self.correct()
+            paid = run_in_thread(self.pay)
+            wait_until_another_connection_waits_on_a_lock()
+
+        self.assertIsInstance(paid(), EntryVoidError)
+        self.assertFalse(Payment.objects.exists())
+        self.assert_one_active_bill()
+
+    def test_a_correction_waiting_on_the_bill_is_refused_once_it_is_paid(self):
+        with transaction.atomic():
+            self.pay()
+            corrected = run_in_thread(self.correct)
+            wait_until_another_connection_waits_on_a_lock()
+
+        self.assertIsInstance(corrected(), UnreversedPaymentsError)
+        self.assertEqual(RentEntry.objects.get(pk=self.entry.pk).status, "active")
+        self.assertEqual(RentEntry.objects.count(), 1)
+
+    def test_simultaneous_payment_and_correction_leave_consistent_records(self):
+        outcomes = run_simultaneously(2, lambda i: self.correct() if i else self.pay().pk)
+
+        # Whichever took the bill first wins; the other is refused.
+        if outcomes[1] == "UnreversedPaymentsError":
+            self.assertTrue(Payment.objects.filter(pk=outcomes[0]).exists())
+        else:
+            self.assertEqual(outcomes, ["EntryVoidError", "created"])
+        self.assert_one_active_bill()
+
+    def test_simultaneous_corrections_make_one_replacement(self):
+        outcomes = run_simultaneously(4, lambda i: self.correct(units=f"{80 + i}.000"))
+
+        self.assertEqual(sorted(outcomes), ["EntryVoidError"] * 3 + ["created"])
+        self.assertEqual(RentEntry.objects.count(), 2)
+        self.assert_one_active_bill()
+
+    def test_simultaneous_retries_of_one_correction_make_one_replacement(self):
+        key = uuid.uuid4()
+        outcomes = run_simultaneously(3, lambda i: self.correct(key=key))
+
+        self.assertEqual(sorted(outcomes), ["created", "returned", "returned"])
+        self.assertEqual(RentEntry.objects.count(), 2)
+
+    def test_a_new_bill_for_the_month_waits_for_a_correction_and_is_refused(self):
+        def create():
+            return create_rent_entry(
+                tenancy=self.tenancy,
+                actor=self.user,
+                validated_data={
+                    "billing_month": self.entry.billing_month,
+                    "electricity_units": Decimal("75.000"),
+                    "water_amount": Decimal("300.00"),
+                },
+            )
+
+        with transaction.atomic():
+            self.correct()
+            created = run_in_thread(create)
+            wait_until_another_connection_waits_on_a_lock()
+
+        self.assertIsInstance(created(), DuplicateBillingMonthError)
+        self.assert_one_active_bill()
+
+    def test_a_receipt_for_another_month_and_a_correction_do_not_deadlock(self):
+        october = make_bill(self.tenancy, self.user, month=date(2026, 10, 1))
+        payment = record_payment(
+            entry_id=october.pk,
+            actor=self.user,
+            idempotency_key=uuid.uuid4(),
+            validated_data=PAYMENT,
+        ).payment
+
+        outcomes = run_simultaneously(
+            2,
+            lambda i: self.correct()
+            if i
+            else issue_payment_receipt(payment_id=payment.pk, actor=self.user).created,
+        )
+
+        self.assertEqual(outcomes, [True, "created"])

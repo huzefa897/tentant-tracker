@@ -12,7 +12,8 @@ import {
 // them without importing the router.
 
 // A saved bill as the backend returns it; tests override what they care about. The figures
-// follow the charges (and totalPaid) unless overridden too.
+// follow the charges (and totalPaid) unless overridden too. billStatus: 'void' gives it void
+// details and the figures of a void bill.
 export function makeEntry(overrides: Partial<RentEntry> = {}): RentEntry {
   const charges = {
     rentAmount: 15000,
@@ -23,6 +24,8 @@ export function makeEntry(overrides: Partial<RentEntry> = {}): RentEntry {
   }
   const totalPaid = overrides.totalPaid ?? 0
   const totalDue = calculateTotalDue(charges)
+  // A void bill owes nothing and has no payment status.
+  const isVoid = overrides.billStatus === 'void'
 
   return {
     id: 'entry-1',
@@ -35,10 +38,16 @@ export function makeEntry(overrides: Partial<RentEntry> = {}): RentEntry {
     waterAmount: charges.waterAmount,
     totalDue,
     totalPaid,
-    outstanding: calculateOutstanding(totalDue, totalPaid),
-    status: getPaymentStatus(totalDue, totalPaid),
+    outstanding: isVoid ? 0 : calculateOutstanding(totalDue, totalPaid),
+    status: isVoid ? null : getPaymentStatus(totalDue, totalPaid),
     notes: '',
     createdAt: '2026-10-03T06:00:00.000Z',
+    billStatus: 'active',
+    voided: isVoid
+      ? { at: '2026-10-08T06:00:00.000Z', byName: 'Test Owner', reason: 'Entered twice' }
+      : null,
+    replacesEntryId: null,
+    replacedByEntryId: null,
     ...overrides,
   }
 }

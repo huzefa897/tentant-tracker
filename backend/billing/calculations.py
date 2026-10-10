@@ -47,10 +47,13 @@ def payment_status(total_due: Decimal, total_paid: Decimal) -> str:
 @dataclass(frozen=True)
 class EntryAmounts:
     electricity_amount: Decimal
+    # A void bill's charges, kept as history: it owes nothing.
     total_due: Decimal
     total_paid: Decimal
+    # Zero for a void bill.
     outstanding_amount: Decimal
-    payment_status: str
+    # None for a void bill: it isn't paid or unpaid, it doesn't count.
+    payment_status: str | None
 
 
 def total_paid_for(entry) -> Decimal:
@@ -65,16 +68,18 @@ def total_paid_for(entry) -> Decimal:
 
 def entry_amounts(entry, total_paid: Decimal | None = None) -> EntryAmounts:
     """Everything derived for one bill, from its stored historical charges and its effective
-    payments (summed by total_paid_for unless given)."""
+    payments (summed by total_paid_for unless given). A void bill keeps its total due, to show,
+    but owes nothing and has no payment status. Totals across bills leave void ones out."""
     if total_paid is None:
         total_paid = total_paid_for(entry)
     total_due = calculate_total_due(
         entry.rent_amount, entry.electricity_units, entry.electricity_rate, entry.water_amount
     )
+    void = entry.status == "void"
     return EntryAmounts(
         electricity_amount=calculate_electricity(entry.electricity_units, entry.electricity_rate),
         total_due=total_due,
         total_paid=to_paise(total_paid),
-        outstanding_amount=calculate_outstanding(total_due, total_paid),
-        payment_status=payment_status(total_due, total_paid),
+        outstanding_amount=ZERO if void else calculate_outstanding(total_due, total_paid),
+        payment_status=None if void else payment_status(total_due, total_paid),
     )

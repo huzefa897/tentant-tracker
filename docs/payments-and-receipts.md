@@ -54,12 +54,12 @@ A receipt confirms **one payment**: a ₹3,000 payment against a ₹15,750 bill 
 
 A payment recorded by mistake (the wrong amount, date or bill) is **reversed**, then its replacement is recorded as a new payment. The original stays, unchanged, in the history; editing it would make it and its receipt misleading. Reversing is an accounting correction in the app: no money is moved or refunded.
 
-| Mistake                        | Correction                                          |
-| ------------------------------ | --------------------------------------------------- |
-| Wrong payment amount or date   | Reverse it, then record the replacement             |
-| Payment against the wrong bill | Reverse it, then record it against the correct bill |
-| Wrong bill charges             | Not yet: needs its own bill-correction workflow     |
-| Wrong receipt details          | Not yet: void and reissue needs its own workflow    |
+| Mistake                        | Correction                                                                                         |
+| ------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Wrong payment amount or date   | Reverse it, then record the replacement                                                            |
+| Payment against the wrong bill | Reverse it, then record it against the correct bill                                                |
+| Wrong bill charges             | Reverse its payments, then **Correct bill** ([rent-entries.md](rent-entries.md#correcting-a-bill)) |
+| Wrong receipt details          | Not yet: void and reissue needs its own workflow                                                   |
 
 ### Backend
 
