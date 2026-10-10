@@ -5,8 +5,8 @@ import { ArrowLeft, ChevronRight, CircleCheck, User } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
+import SlowLoadScreen from '@/components/common/SlowLoadScreen.vue'
 import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
-import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import RentEntryForm from '@/components/rent/RentEntryForm.vue'
 import {
   AlertDialog,
@@ -39,7 +39,7 @@ const {
   tenant,
   status: tenantStatus,
   error: tenantError,
-  retry: retryTenants,
+  retryable: tenantRetryable,
 } = useRouteTenant(() => props.tenantId)
 
 const saving = ref(false)
@@ -170,10 +170,10 @@ function handleDialogOpenChange(open: boolean) {
       </div>
     </LoadingRegion>
 
-    <RentEntriesLoadError
+    <SlowLoadScreen
       v-else-if="tenantStatus === 'error'"
-      :message="tenantError ?? ''"
-      @retry="retryTenants"
+      :error="tenantError"
+      :retryable="tenantRetryable"
     />
 
     <template v-else-if="!tenant">

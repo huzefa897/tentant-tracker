@@ -6,8 +6,9 @@ import { Building2, LogOut } from '@lucide/vue'
 import PropertyPicker from '@/components/access/PropertyPicker.vue'
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
-import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
+import SlowLoadScreen from '@/components/common/SlowLoadScreen.vue'
 import { Button } from '@/components/ui/button'
+import { useAutoRetry } from '@/composables/useAutoRetry'
 import { useLogout } from '@/composables/useLogout'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
@@ -21,6 +22,12 @@ const logout = useLogout()
 onMounted(() => {
   accessStore.load()
 })
+
+useAutoRetry(
+  () => accessStore.status,
+  () => accessStore.load(),
+  () => accessStore.retryable,
+)
 
 // Shown so the owner knows which account to grant access to.
 const signedInAs = computed(() => {
@@ -72,10 +79,10 @@ async function handleSelect(propertyId: string) {
         <SkeletonRows bordered :rows="2" />
       </LoadingRegion>
 
-      <RentEntriesLoadError
+      <SlowLoadScreen
         v-else-if="accessStore.status === 'error'"
-        :message="accessStore.error ?? ''"
-        @retry="accessStore.load"
+        :error="accessStore.error"
+        :retryable="accessStore.retryable"
       />
 
       <div

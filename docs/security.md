@@ -119,7 +119,7 @@ For any future upload:
 
 ## 12. Rate-limit all requests
 
-Every API request is limited (`config/throttling.py`); over a limit is 429 with `Retry-After`, and the app says to wait a minute (`ApiError` `'rate-limited'`, `RATE_LIMITED_MESSAGE`). There are three limits:
+Every API request is limited (`config/throttling.py`); over a limit is 429 with `Retry-After`, and the app says to wait a minute (`ApiError` `'rate-limited'`, `RATE_LIMITED_MESSAGE`) and its automatic retries wait for `Retry-After` (`services/rateLimit.ts`), so a throttled page doesn't keep hitting the limit. There are three limits:
 
 - **Per address, before authentication** (`ApiRateLimitMiddleware`, `DJANGO_THROTTLE_ADDRESS`, default 300/minute). It covers every `/api/` request except the health and readiness checks (below). It's middleware because DRF checks its throttles only after authentication and permissions, so requests with no token or a bad one would otherwise never be counted.
 - **Per signed-in person** (`UserRateThrottle`, `DJANGO_THROTTLE_USER`, default 300/minute).

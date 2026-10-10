@@ -30,3 +30,10 @@ export class ApiError extends Error {
 
 // The same words wherever a request was refused for coming too often.
 export const RATE_LIMITED_MESSAGE = 'Too many requests. Wait a minute and try again.'
+
+// Errors where retrying without user action will never succeed.
+const NON_RETRYABLE: ReadonlySet<ApiErrorKind> = new Set(['unauthorized', 'forbidden'])
+
+export function isRetryableError(err: unknown): boolean {
+  return !(err instanceof ApiError) || !NON_RETRYABLE.has(err.kind)
+}

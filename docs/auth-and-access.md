@@ -10,6 +10,8 @@ Login accepts India, Australia and US mobiles. Countries live in one table (`uti
 
 Logout (`composables/useLogout.ts`) clears the selected tenant, property access and the bills loaded from the backend, then `signOut()`s.
 
+**Inactivity timeout** (`composables/useInactivityTimer.ts`, mounted in `App.vue`): the session ends after 15 minutes of no user activity (no mouse, keyboard, scroll or touch events on `window`). Activity events reset the countdown; resets are throttled to once per second. On expiry the user is fully signed out via `useLogout` and `loginNotice` is set so the login page explains why. The timer only runs while `authStore.isAuthenticated` is true.
+
 ## Sign-in (backend)
 
 - `AUTH_USER_MODEL` is `accounts.User` (`AbstractUser` + nullable unique `firebase_uid`, `phone_number`). Roles belong on property membership, never on the user.

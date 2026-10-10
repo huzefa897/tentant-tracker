@@ -5,14 +5,15 @@ import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
 import { authService } from '@/services/auth.service'
 import { AuthError } from '@/services/authErrors'
+import { rateLimitWaitMs, resetRateLimit } from '@/services/rateLimit'
 import { resetAuthService } from '@/test/mocks/authService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 
-function axiosError(status?: number, data: unknown = {}) {
+function axiosError(status?: number, data: unknown = {}, headers: Record<string, string> = {}) {
   const config = { headers: new AxiosHeaders() } as InternalAxiosRequestConfig
   const response =
-    status === undefined ? undefined : { status, statusText: '', headers: {}, config, data }
+    status === undefined ? undefined : { status, statusText: '', headers, config, data }
   return new AxiosError('request failed', undefined, config, undefined, response)
 }
 
@@ -30,6 +31,7 @@ async function sentHeaders() {
 
 beforeEach(() => {
   resetAuthService()
+  resetRateLimit()
 })
 
 describe('api client', () => {
@@ -45,6 +47,29 @@ describe('api client', () => {
     vi.mocked(authService.getIdToken).mockResolvedValue(null)
 
     expect((await sentHeaders()).has('Authorization')).toBe(false)
+  })
+
+  it('remembers how long a 429 says to wait, so automatic retries wait for it', async () => {
+    const request = api.get('/me/', {
+      adapter: async () => {
+        throw axiosError(429, {}, { 'retry-after': '45' })
+      },
+    })
+
+    await expect(request).rejects.toBeInstanceOf(AxiosError)
+    expect(rateLimitWaitMs()).toBeGreaterThan(44_000)
+    expect(rateLimitWaitMs()).toBeLessThanOrEqual(45_000)
+  })
+
+  it('leaves the rate limit window alone for other failures', async () => {
+    const request = api.get('/me/', {
+      adapter: async () => {
+        throw axiosError(503, {}, { 'retry-after': '45' })
+      },
+    })
+
+    await expect(request).rejects.toBeInstanceOf(AxiosError)
+    expect(rateLimitWaitMs()).toBe(0)
   })
 })
 

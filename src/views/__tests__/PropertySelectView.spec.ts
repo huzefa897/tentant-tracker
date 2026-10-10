@@ -61,24 +61,25 @@ describe('PropertySelectView', () => {
     expect(panel.text()).toContain('+91 83414 13827')
   })
 
-  it('shows a load failure with Retry, not as missing access', async () => {
-    vi.mocked(accessService.getMe).mockRejectedValueOnce(new ApiError('unavailable'))
+  it('shows the slow-load screen on failure, not as missing access, then recovers', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(accessService.getMe).mockRejectedValueOnce(new ApiError('unavailable'))
 
-    await open()
+      await open()
 
-    expect(view!.get('[role="alert"]').text()).toContain(
-      "Sign-in couldn't be checked right now. Please try again shortly.",
-    )
-    expect(view!.find('[data-testid="no-property-access"]').exists()).toBe(false)
+      expect(view!.text()).toContain("It's taking longer than usual")
+      expect(view!.findAll('button').some((b) => b.text() === 'Reload')).toBe(true)
+      expect(view!.find('[data-testid="no-property-access"]').exists()).toBe(false)
 
-    await view!
-      .findAll('button')
-      .find((b) => b.text() === 'Retry')!
-      .trigger('click')
-    await flushPromises()
+      vi.advanceTimersByTime(5000)
+      await flushPromises()
 
-    expect(view!.find('[role="alert"]').exists()).toBe(false)
-    expect(view!.text()).toContain('Test Towers')
+      expect(view!.text()).not.toContain("It's taking longer than usual")
+      expect(view!.text()).toContain('Test Towers')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows a loading state until access has loaded', async () => {

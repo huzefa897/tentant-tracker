@@ -1,10 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, ref, type Ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import { ApiError } from '@/services/apiError'
+import { noteRateLimited, resetRateLimit } from '@/services/rateLimit'
 import { tenantService } from '@/services/tenant.service'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
@@ -21,7 +22,7 @@ const getTenant = vi.mocked(tenantService.getTenant)
 
 function mountWith(tenantId: Ref<string>) {
   let result!: ReturnType<typeof useRouteTenant>
-  mount(
+  const wrapper = mount(
     defineComponent({
       setup() {
         result = useRouteTenant(tenantId)
@@ -29,10 +30,12 @@ function mountWith(tenantId: Ref<string>) {
       },
     }),
   )
-  return result
+  return { ...result, wrapper }
 }
 
 beforeEach(async () => {
+  vi.useFakeTimers()
+  resetRateLimit()
   resetAuthService()
   resetAccessService()
   resetTenantService()
@@ -41,6 +44,10 @@ beforeEach(async () => {
   signInAs()
   await useAuthStore().init()
   await useAccessStore().load()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('useRouteTenant', () => {
@@ -104,14 +111,95 @@ describe('useRouteTenant', () => {
       new Promise((_, reject) => (failOld = () => reject(new ApiError('unavailable')))),
     )
     const id = ref('tenant-001')
-    const tenant = mountWith(id)
+    const { status, tenant } = mountWith(id)
 
     id.value = 'tenant-002'
     await flushPromises()
     failOld()
     await flushPromises()
 
-    expect(tenant.status.value).toBe('ready')
-    expect(tenant.tenant.value?.name).toBe('Mohammed Yusuf')
+    expect(status.value).toBe('ready')
+    expect(tenant.value?.name).toBe('Mohammed Yusuf')
+  })
+
+  it('does not schedule a retry when unmount happens while a load is in flight', async () => {
+    let rejectLoad!: () => void
+    getTenant.mockReturnValueOnce(
+      new Promise((_, reject) => (rejectLoad = () => reject(new Error('network')))),
+    )
+    const { wrapper } = mountWith(ref('tenant-001'))
+
+    wrapper.unmount()
+    rejectLoad()
+    await flushPromises()
+
+    vi.advanceTimersByTime(30_000)
+    // getTenant was called once on mount; it must not be called again after unmount
+    expect(getTenant).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry and marks retryable=false on unauthorized errors', async () => {
+    getTenant.mockRejectedValueOnce(new ApiError('unauthorized'))
+    const { status, retryable } = mountWith(ref('tenant-001'))
+    await flushPromises()
+
+    expect(status.value).toBe('error')
+    expect(retryable.value).toBe(false)
+
+    vi.advanceTimersByTime(30_000)
+    // No retry scheduled: getTenant was called only once
+    expect(getTenant).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries and marks retryable=true on transient errors', async () => {
+    getTenant.mockRejectedValueOnce(new ApiError('unavailable'))
+    const { status, retryable } = mountWith(ref('tenant-001'))
+    await flushPromises()
+
+    expect(status.value).toBe('error')
+    expect(retryable.value).toBe(true)
+
+    vi.advanceTimersByTime(10_000)
+    await flushPromises()
+    // Second call fired by the retry timer
+    expect(getTenant).toHaveBeenCalledTimes(2)
+  })
+
+  it('waits for the Retry-After window before retrying a rate-limited load', async () => {
+    // As the API client records it when the 429 arrives.
+    getTenant.mockImplementationOnce(async () => {
+      noteRateLimited('45')
+      throw new ApiError('rate-limited')
+    })
+    const { status, retryable } = mountWith(ref('tenant-001'))
+    await flushPromises()
+
+    expect(status.value).toBe('error')
+    expect(retryable.value).toBe(true)
+
+    vi.advanceTimersByTime(44_999)
+    await flushPromises()
+    expect(getTenant).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(1)
+    await flushPromises()
+    expect(getTenant).toHaveBeenCalledTimes(2)
+  })
+
+  it('honors a rate limit recorded after its retry timer was scheduled', async () => {
+    getTenant.mockRejectedValueOnce(new ApiError('unavailable'))
+    mountWith(ref('tenant-001'))
+    await flushPromises()
+
+    vi.advanceTimersByTime(1_000)
+    noteRateLimited('45')
+
+    vi.advanceTimersByTime(44_999)
+    await flushPromises()
+    expect(getTenant).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(1)
+    await flushPromises()
+    expect(getTenant).toHaveBeenCalledTimes(2)
   })
 })

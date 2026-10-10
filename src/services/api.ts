@@ -3,6 +3,7 @@ import axios, { isAxiosError } from 'axios'
 import { ApiError } from '@/services/apiError'
 import { authService } from '@/services/auth.service'
 import { AuthError } from '@/services/authErrors'
+import { noteRateLimited } from '@/services/rateLimit'
 
 // Same-origin /api/v1 by default: the Vite dev server proxies /api to Django (vite.config.ts).
 // Set VITE_API_BASE_URL to call another origin (that origin must allow it through CORS).
@@ -19,6 +20,14 @@ api.interceptors.request.use(async (config) => {
   }
 
   return config
+})
+
+// A 429 says how long to wait (Retry-After): remembered so automatic retries wait that long.
+api.interceptors.response.use(undefined, (error: unknown) => {
+  if (isAxiosError(error) && error.response?.status === 429) {
+    noteRateLimited(error.response.headers['retry-after'])
+  }
+  return Promise.reject(error)
 })
 
 // DRF validation errors: {"field": ["message", ...]}. Keeps the first message of each field.

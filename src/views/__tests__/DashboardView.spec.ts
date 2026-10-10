@@ -11,7 +11,7 @@ import { tenantService } from '@/services/tenant.service'
 import { authService } from '@/services/auth.service'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
-import { ENTRIES_LOAD_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
+import { useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
@@ -21,7 +21,6 @@ import { makeEntry, makePayment } from '@/test/rentEntries'
 import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import DashboardView from '@/views/DashboardView.vue'
 import { SEARCH_DEBOUNCE_MS } from '@/components/tenant/TenantSelector.vue'
-import { TENANTS_LOAD_ERROR_MESSAGE } from '@/stores/tenant'
 import { resetTenantService } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
@@ -169,23 +168,21 @@ describe('DashboardView', () => {
       expect(useTenantStore().results).toHaveLength(3)
     })
 
-    it('shows a failed load with Retry, then the tenants', async () => {
-      vi.mocked(tenantService.getTenants).mockRejectedValueOnce(new Error('boom'))
-      await mountView()
+    it('auto-retries a failed tenant load silently, then shows tenants', async () => {
+      vi.useFakeTimers()
+      try {
+        vi.mocked(tenantService.getTenants).mockRejectedValueOnce(new Error('boom'))
+        await mountView()
 
-      expect(view!.get('[data-testid="tenants-error"]').text()).toContain(
-        TENANTS_LOAD_ERROR_MESSAGE,
-      )
+        expect(view!.find('[data-testid="tenants-error"]').exists()).toBe(false)
 
-      await view!
-        .get('[data-testid="tenants-error"]')
-        .findAll('button')
-        .find((b) => b.text() === 'Retry')!
-        .trigger('click')
-      await flushPromises()
+        vi.advanceTimersByTime(5000)
+        await flushPromises()
 
-      expect(view!.find('[data-testid="tenants-error"]').exists()).toBe(false)
-      expect(useTenantStore().results).toHaveLength(3)
+        expect(useTenantStore().results).toHaveLength(3)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 
@@ -220,28 +217,27 @@ describe('DashboardView', () => {
       expect(previousEntriesText()).toBe('Previous Entries (0)')
     })
 
-    it('shows a load error with Retry instead of a count or latest entry', async () => {
-      saveEntries('2026-09')
-      vi.mocked(rentEntryService.getEntries).mockRejectedValueOnce(new ApiError('unknown'))
-      await mountView()
-      useTenantStore().selectTenant('tenant-001')
-      await flushPromises()
+    it('shows a skeleton instead of a count or latest entry on error, then auto-retries', async () => {
+      vi.useFakeTimers()
+      try {
+        saveEntries('2026-09')
+        vi.mocked(rentEntryService.getEntries).mockRejectedValueOnce(new ApiError('unknown'))
+        await mountView()
+        useTenantStore().selectTenant('tenant-001')
+        await flushPromises()
 
-      expect(view!.get('[data-testid="entries-error"]').text()).toContain(
-        ENTRIES_LOAD_ERROR_MESSAGE,
-      )
-      expect(previousEntriesText()).toBe('Previous Entries')
-      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
+        expect(view!.find('[data-testid="entries-error"]').exists()).toBe(false)
+        expect(previousEntriesText()).toBe('Previous Entries')
+        expect(view!.find('[data-testid="latest-entry-loading"]').exists()).toBe(true)
 
-      await view!
-        .get('[data-testid="entries-error"]')
-        .findAll('button')
-        .find((b) => b.text() === 'Retry')!
-        .trigger('click')
-      await flushPromises()
+        vi.advanceTimersByTime(5000)
+        await flushPromises()
 
-      expect(view!.find('[data-testid="entries-error"]').exists()).toBe(false)
-      expect(previousEntriesText()).toBe('Previous Entries (1)')
+        expect(previousEntriesText()).toBe('Previous Entries (1)')
+        expect(view!.find('[data-testid="latest-entry-loading"]').exists()).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('shows the selected tenant’s latest entry below the name', async () => {
