@@ -209,6 +209,22 @@ class CorsTests(TestCase):
 
         self.assertNotIn("Access-Control-Allow-Origin", response.headers)
 
+    def test_preflight_allows_the_idempotency_key_header(self):
+        # Saving a bill or recording a payment sends it; without it the browser blocks the POST.
+        with self.settings(CORS_ALLOWED_ORIGINS=["http://localhost:5173"]):
+            response = self.client.options(
+                "/api/v1/health/",
+                headers={
+                    "Origin": "http://localhost:5173",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "authorization, content-type, idempotency-key",
+                },
+            )
+
+        allowed = response.headers.get("Access-Control-Allow-Headers", "").split(", ")
+        self.assertIn("idempotency-key", allowed)
+        self.assertIn("authorization", allowed)
+
     def test_admin_sends_no_cors_headers(self):
         with self.settings(CORS_ALLOWED_ORIGINS=["http://localhost:5173"]):
             response = self.client.get(

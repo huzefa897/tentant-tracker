@@ -144,6 +144,7 @@ Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry ov
 
 - `CORS_ALLOWED_ORIGINS` is an explicit list from the environment: no wildcards, no `CORS_ALLOW_ALL_ORIGINS`. In production, list only the app's own origin. In development the Vite proxy means the list can stay empty.
 - Only `/api/` sends CORS headers (`CORS_URLS_REGEX`); admin is same-origin only.
+- Allowed request headers are django-cors-headers' defaults plus `Idempotency-Key` (`CORS_ALLOW_HEADERS`), which saving a bill or recording a payment sends. A new custom request header must be added there too, or browsers on another origin (the Render static site) block the request.
 - Credentials are never allowed (`CORS_ALLOW_CREDENTIALS = False`): the API uses bearer tokens, not cookies.
 - CORS is not authentication: it only controls which browser origins may read responses.
 
