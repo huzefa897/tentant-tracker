@@ -209,6 +209,9 @@ export interface EntryHistory {
   count: number
   hasNext: boolean
   hasPrevious: boolean
+  // Void bills left out of an empty, unfiltered list of active ones: the tenant has bills,
+  // all of them void. Zero otherwise (not counted when the list has bills or is filtered).
+  hiddenVoidCount: number
   status: EntryListStatus
   error: string | null
 }
@@ -239,6 +242,7 @@ function emptyHistory(): EntryHistory {
     count: 0,
     hasNext: false,
     hasPrevious: false,
+    hiddenVoidCount: 0,
     status: 'idle',
     error: null,
   }
@@ -350,6 +354,17 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       })
       if (seq !== historySeq || gen !== generation) return
 
+      // No active bills, unfiltered: whether there are void ones decides between "no bills
+      // yet" and offering to show them.
+      let hiddenVoidCount = 0
+      if (result.count === 0 && !includeVoid && !year && !paymentStatus) {
+        const voided = await rentEntryService.getEntries(propertyId, tenantId, {
+          billStatus: 'void',
+        })
+        if (seq !== historySeq || gen !== generation) return
+        hiddenVoidCount = voided.count
+      }
+
       remember(result.entries)
       history.value = {
         ...filters,
@@ -358,6 +373,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         count: result.count,
         hasNext: result.hasNext,
         hasPrevious: result.hasPrevious,
+        hiddenVoidCount,
         status: 'ready',
         error: null,
       }

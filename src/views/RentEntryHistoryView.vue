@@ -141,6 +141,13 @@ const noMatchesMessage = computed(() => {
   return `No ${status}entries${year}.`
 })
 
+const allVoidMessage = computed(() => {
+  const count = history.value.hiddenVoidCount
+  return count === 1
+    ? 'No active bills. The only bill is void, so it’s hidden.'
+    : `No active bills. All ${count} bills are void, so they’re hidden.`
+})
+
 function clearFilters() {
   selectedYear.value = 'all'
   selectedStatus.value = 'all'
@@ -242,7 +249,12 @@ function viewEntry(entryId: string) {
       </LoadingRegion>
 
       <div
-        v-else-if="history.status === 'ready' && history.count === 0 && !filtered"
+        v-else-if="
+          history.status === 'ready' &&
+          history.count === 0 &&
+          !filtered &&
+          history.hiddenVoidCount === 0
+        "
         class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
       >
         <div
@@ -329,6 +341,24 @@ function viewEntry(entryId: string) {
             </Button>
           </nav>
         </template>
+
+        <!-- Every bill is void: they're hidden, not missing. -->
+        <div
+          v-else-if="history.hiddenVoidCount > 0"
+          class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-10 text-center"
+          data-testid="all-bills-void"
+        >
+          <p class="max-w-sm text-muted-foreground">{{ allVoidMessage }}</p>
+          <div class="mt-4 flex flex-wrap justify-center gap-3">
+            <Button variant="outline" class="h-11 px-6" @click="showVoid = true">
+              Show void bills
+            </Button>
+            <Button class="h-11 px-6" @click="addEntry">
+              <Plus aria-hidden="true" />
+              Add New Entry
+            </Button>
+          </div>
+        </div>
 
         <div
           v-else

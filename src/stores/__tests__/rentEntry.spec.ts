@@ -196,6 +196,44 @@ describe('loadHistory', () => {
     expect(store.history.entries.map((entry) => entry.id)).toEqual(['oct', 'sep'])
   })
 
+  it('counts the void bills hidden from an empty, unfiltered history', async () => {
+    fakeEntries.entries = [
+      { ...october, billStatus: 'void' },
+      { ...september, billStatus: 'void' },
+    ]
+    const store = await withProperty()
+
+    await store.loadHistory('tenant-001', {})
+
+    expect(getEntries).toHaveBeenLastCalledWith(testProperty.id, 'tenant-001', {
+      billStatus: 'void',
+    })
+    expect(store.history).toMatchObject({ status: 'ready', count: 0, hiddenVoidCount: 2 })
+  })
+
+  it('doesn’t count void bills when the history has bills or is filtered', async () => {
+    fakeEntries.entries = [october, { ...september, billStatus: 'void' }]
+    const store = await withProperty()
+
+    await store.loadHistory('tenant-001', {})
+    await store.loadHistory('tenant-001', { year: '2025' })
+
+    expect(getEntries).toHaveBeenCalledTimes(2)
+    expect(store.history).toMatchObject({ count: 0, hiddenVoidCount: 0 })
+  })
+
+  it('reports a failed void count as an error, never as an empty history', async () => {
+    fakeEntries.entries = [{ ...october, billStatus: 'void' }]
+    const store = await withProperty()
+    getEntries
+      .mockResolvedValueOnce({ entries: [], count: 0, page: 1, hasNext: false, hasPrevious: false })
+      .mockRejectedValueOnce(new ApiError('unknown'))
+
+    await store.loadHistory('tenant-001', {})
+
+    expect(store.history).toMatchObject({ status: 'error', error: ENTRIES_LOAD_ERROR_MESSAGE })
+  })
+
   it('does nothing without a selected property', async () => {
     const store = useRentEntryStore()
 
