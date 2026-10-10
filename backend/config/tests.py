@@ -1,3 +1,4 @@
+import os
 import threading
 from unittest import mock
 
@@ -9,6 +10,7 @@ from django.core.management import call_command
 from django.db import OperationalError, connection
 from django.test import (
     Client,
+    SimpleTestCase,
     TestCase,
     TransactionTestCase,
     override_settings,
@@ -22,6 +24,7 @@ from rest_framework.throttling import SimpleRateThrottle
 
 from accounts.models import AdminLoginAttempts
 
+from .settings import postgres_options
 from .views import health_check, readiness_check
 
 
@@ -476,3 +479,15 @@ class SecuritySettingsTests(TestCase):
     def test_admin_is_served_at_the_configured_path(self):
         self.assertEqual(reverse("admin:index"), f"/{settings.ADMIN_PATH}")
 
+
+class PostgresOptionsTests(SimpleTestCase):
+    def test_requires_tls_when_asked(self):
+        with mock.patch.dict("os.environ", {"POSTGRES_SSLMODE": " require "}):
+            self.assertEqual(postgres_options(), {"sslmode": "require"})
+
+    def test_leaves_libpqs_default_when_unset_or_empty(self):
+        with mock.patch.dict("os.environ", {"POSTGRES_SSLMODE": ""}):
+            self.assertEqual(postgres_options(), {})
+        with mock.patch.dict("os.environ"):
+            os.environ.pop("POSTGRES_SSLMODE", None)
+            self.assertEqual(postgres_options(), {})

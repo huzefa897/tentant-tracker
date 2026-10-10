@@ -157,6 +157,7 @@ Tests run with a dummy cache (`config/test_runner.py`), so limits don't carry ov
 - **Cookies:** admin's session and CSRF cookies are HTTPS-only unless `DEBUG` is on (`DJANGO_SECURE_COOKIES` overrides). `DJANGO_CSRF_TRUSTED_ORIGINS` lists admin's HTTPS origin if it's behind a proxy.
 - **Email:** the app sends none yet. The backend is console in development and SMTP otherwise (`DJANGO_EMAIL_BACKEND`).
 - **CI** runs `manage.py check --deploy --fail-level WARNING` with production-like settings, so a setting that weakens production fails the build.
+- **Database connections over the internet** use TLS: `POSTGRES_SSLMODE=require` (libpq's `sslmode`) refuses an unencrypted connection. Unset, the default (`prefer`) only encrypts when the server offers it, which is fine on one machine or Docker network. `require` doesn't verify the server's certificate; `verify-full` with the provider's CA certificate would.
 - **In production** `compose.prod.yaml` sets all of these (DEBUG off, the HTTPS redirect, HSTS, secure cookies, the proxy settings, shared rate-limit counts), from `.env.production` where they vary ([deployment.md](deployment.md)).
 - **Caching:** every `/api/` response carries `Cache-Control: no-store, private` (`ApiNoStoreMiddleware`), so no browser, proxy or CDN keeps people's records.
 

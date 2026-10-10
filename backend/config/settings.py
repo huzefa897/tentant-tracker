@@ -33,6 +33,14 @@ def env_int(name: str, default: int) -> int:
     return default if value is None or not value.strip() else int(value)
 
 
+def postgres_options() -> dict[str, str]:
+    """POSTGRES_SSLMODE (libpq's sslmode): "require" for a database reached over the internet,
+    e.g. Supabase. Unset, libpq's default ("prefer") uses TLS only when the server offers it,
+    which is fine for the database on the same machine or Docker network."""
+    sslmode = os.getenv("POSTGRES_SSLMODE", "").strip()
+    return {"sslmode": sslmode} if sslmode else {}
+
+
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
@@ -127,6 +135,7 @@ DATABASES = {
         "PASSWORD": os.environ["POSTGRES_PASSWORD"],
         "HOST": os.environ["POSTGRES_HOST"],
         "PORT": os.getenv("POSTGRES_PORT", "5432"),
+        "OPTIONS": postgres_options(),
     },
 }
 
