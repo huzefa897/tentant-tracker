@@ -189,7 +189,7 @@ function viewEntry(entryId: string) {
         <Skeleton class="h-11 w-44" />
       </div>
       <div class="space-y-6">
-        <Skeleton class="h-[4.25rem] w-full max-w-lg" />
+        <Skeleton class="ml-auto h-11 w-full max-w-sm" />
         <SkeletonRows bordered />
       </div>
     </LoadingRegion>
@@ -243,7 +243,7 @@ function viewEntry(entryId: string) {
         data-testid="history-loading"
       >
         <div class="space-y-6">
-          <Skeleton class="h-[4.25rem] w-full max-w-lg" />
+          <Skeleton class="ml-auto h-11 w-full max-w-sm" />
           <SkeletonRows bordered />
         </div>
       </LoadingRegion>
@@ -273,14 +273,8 @@ function viewEntry(entryId: string) {
       </div>
 
       <div v-else class="space-y-6">
-        <!-- Wide screens: filters and totals share a row, so the table starts higher. -->
-        <div class="grid gap-6 xl:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] xl:items-end">
-          <RentEntryFilters
-            v-model:year="selectedYear"
-            v-model:status="selectedStatus"
-            v-model:show-void="showVoid"
-            :years="years"
-          />
+        <!-- The page's totals, then the filters below them on the right, then the bills. -->
+        <div class="space-y-4">
           <RentEntryTotals
             v-if="history.status === 'ready' && entries.length > 0"
             :totals="totals"
@@ -291,6 +285,12 @@ function viewEntry(entryId: string) {
             v-else-if="history.status !== 'ready'"
             class="h-[18.5rem] sm:h-28"
             aria-hidden="true"
+          />
+          <RentEntryFilters
+            v-model:year="selectedYear"
+            v-model:status="selectedStatus"
+            v-model:show-void="showVoid"
+            :years="years"
           />
         </div>
 

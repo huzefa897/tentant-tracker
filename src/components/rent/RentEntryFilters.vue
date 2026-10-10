@@ -39,8 +39,9 @@ const selectClass =
 
 <template>
   <div>
-    <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-      <div class="flex flex-wrap items-center gap-2">
+    <!-- One compact group on the right, under the page's totals. -->
+    <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+      <div class="flex items-center gap-1">
         <Button
           variant="outline"
           class="h-11"
@@ -66,6 +67,8 @@ const selectClass =
         </Button>
       </div>
 
+      <span class="h-6 w-px bg-border" aria-hidden="true" />
+
       <label
         class="flex min-h-11 cursor-pointer items-center gap-3 text-sm select-none"
         for="filter-show-void"
@@ -84,7 +87,7 @@ const selectClass =
     >
       <!-- Padded out so the clipped panel doesn't cut off the selects' focus rings. -->
       <div class="-mx-1 px-1 pb-1">
-        <div class="flex flex-col gap-3 pt-3 sm:flex-row sm:items-end">
+        <div class="flex flex-col gap-3 pt-3 sm:ml-auto sm:max-w-xl sm:flex-row sm:items-end">
           <div class="grid flex-1 gap-1.5">
             <Label for="filter-year">Billing year</Label>
             <select id="filter-year" v-model="year" :class="selectClass">
