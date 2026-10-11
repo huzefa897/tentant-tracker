@@ -15,6 +15,7 @@ import { ENTRIES_LOAD_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntr
 import { useTenantStore } from '@/stores/tenant'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
+import { openUserMenu } from '@/test/userMenu'
 import { fakeReceipts } from '@/test/mocks/receiptService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { makeEntry, makePayment } from '@/test/rentEntries'
@@ -386,7 +387,8 @@ describe('DashboardView', () => {
     await mountView()
     useTenantStore().selectTenant('tenant-002')
 
-    await view!.get('button[aria-label="Logout"]').trigger('click')
+    await openUserMenu()
+    await new DOMWrapper(document.body).get('[data-testid="user-menu-logout"]').trigger('click')
     await flushPromises()
 
     expect(authService.logout).toHaveBeenCalled()
@@ -402,7 +404,8 @@ describe('DashboardView', () => {
     await flushPromises()
     expect(useRentEntryStore().summaries['tenant-001']).toBeDefined()
 
-    await view!.get('button[aria-label="Logout"]').trigger('click')
+    await openUserMenu()
+    await new DOMWrapper(document.body).get('[data-testid="user-menu-logout"]').trigger('click')
     await flushPromises()
 
     expect(useRentEntryStore().summaries).toEqual({})
@@ -424,7 +427,10 @@ describe('DashboardView', () => {
     it('offers no property switch with a single property', async () => {
       await mountView()
 
-      expect(view!.find('button[aria-label="Switch property"]').exists()).toBe(false)
+      await openUserMenu()
+      expect(
+        new DOMWrapper(document.body).find('[data-testid="user-menu-switch-property"]').exists(),
+      ).toBe(false)
     })
 
     it('switches property when there are several', async () => {
@@ -437,7 +443,10 @@ describe('DashboardView', () => {
       })
       expect(view!.get('[data-testid="selected-property"]').text()).toBe('Annex')
 
-      await view!.get('button[aria-label="Switch property"]').trigger('click')
+      await openUserMenu()
+      await new DOMWrapper(document.body)
+        .get('[data-testid="user-menu-switch-property"]')
+        .trigger('click')
 
       await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('property-select'))
     })

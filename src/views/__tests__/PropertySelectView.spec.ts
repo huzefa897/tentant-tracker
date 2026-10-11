@@ -1,4 +1,4 @@
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { h } from 'vue'
 import { RouterView } from 'vue-router'
@@ -11,6 +11,7 @@ import { authService } from '@/services/auth.service'
 import { useAccessStore } from '@/stores/access'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
+import { openUserMenu } from '@/test/userMenu'
 import { resetTenantService } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
@@ -119,11 +120,24 @@ describe('PropertySelectView', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('dashboard'))
   })
 
+  it('offers no property switch on the property page itself', async () => {
+    vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty, annex]))
+    await open()
+
+    await openUserMenu()
+
+    expect(new DOMWrapper(document.body).text()).toContain('Logout')
+    expect(
+      new DOMWrapper(document.body).find('[data-testid="user-menu-switch-property"]').exists(),
+    ).toBe(false)
+  })
+
   it('logs out', async () => {
     vi.mocked(accessService.getMe).mockResolvedValue(identityWith([]))
     await open()
 
-    await view!.get('button[aria-label="Logout"]').trigger('click')
+    await openUserMenu()
+    await new DOMWrapper(document.body).get('[data-testid="user-menu-logout"]').trigger('click')
     await flushPromises()
 
     expect(authService.logout).toHaveBeenCalled()

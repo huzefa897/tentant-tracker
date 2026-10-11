@@ -173,8 +173,12 @@ function viewEntry(entryId: string) {
 
 <template>
   <AppLayout>
-    <template #header-actions>
-      <Button variant="ghost" class="h-11 text-muted-foreground" @click="goToDashboard">
+    <template #back>
+      <Button
+        variant="ghost"
+        class="-ml-3 h-11 text-primary hover:text-primary"
+        @click="goToDashboard"
+      >
         <ArrowLeft aria-hidden="true" />
         Back to Dashboard
       </Button>

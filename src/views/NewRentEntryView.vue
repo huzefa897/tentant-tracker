@@ -139,15 +139,15 @@ function handleDialogOpenChange(open: boolean) {
 
 <template>
   <AppLayout>
-    <template #header-actions>
+    <template #back>
       <Button
         variant="ghost"
-        class="h-11 text-muted-foreground"
+        class="-ml-3 h-11 text-primary hover:text-primary"
         :disabled="saving"
         @click="goToDashboard"
       >
         <ArrowLeft aria-hidden="true" />
-        Dashboard
+        Back to Dashboard
       </Button>
     </template>
 
