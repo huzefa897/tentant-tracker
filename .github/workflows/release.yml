@@ -1,0 +1,98 @@
+name: Release
+
+# Work lands on dev; main is production, and Render deploys every main commit whose CI passes
+# (render.yaml). This keeps one "Release: dev → main" PR open while dev is ahead: merging it
+# is the deploy button. After main moves, dev is brought level with it again, so a squash-merged
+# release or a hotfix straight to main doesn't leave the two branches diverged.
+# docs/deployment.md ("Branches and releases").
+#
+# Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+# Pushes and PRs made with GITHUB_TOKEN don't start other workflows: the release PR shows the
+# CI run from the push to dev, which ran on the same commit.
+
+on:
+  push:
+    branches: [dev, main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-pr:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Open or update the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Commits on dev that main doesn't have, merge commits aside (the syncs below).
+          commits="$(git log --no-merges --format='- %s' origin/main..origin/dev)"
+          existing="$(gh pr list --base main --head dev --state open --json number --jq '.[0].number // empty')"
+
+          if [[ -z "$commits" ]]; then
+            echo 'dev has nothing main lacks; no release PR needed.'
+            exit 0
+          fi
+
+          changed="$(git diff --name-only origin/main...origin/dev)"
+          services=''
+          if grep -q '^backend/' <<<"$changed"; then services="${services}- the API (rent-tracker-api)"$'\n'; fi
+          if grep -qvE '^(backend|docs|google-api|whatsapp-bot)/' <<<"$changed"; then services="${services}- the app (rent-tracker)"$'\n'; fi
+          [[ -n "$services" ]] || services=$'- nothing: no deployed code changed\n'
+
+          body="$RUNNER_TEMP/release-pr.md"
+          cat >"$body" <<EOF
+          Merging this deploys to production: Render deploys main once CI passes on it.
+
+          **Use "Create a merge commit"**, not squash, so dev and main keep the same history.
+
+          ### What's in it
+          ${commits}
+
+          ### What deploys
+          ${services}
+          Check the migrations in \`backend/**/migrations/\` before merging: rolling back doesn't undo them (docs/deployment.md, "Rolling back").
+          EOF
+
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --body-file "$body"
+            echo "Updated release PR #$existing"
+          else
+            gh pr create --base main --head dev --title 'Release: dev → main' --body-file "$body"
+          fi
+
+  sync-dev:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Merge main into dev
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo 'dev already has everything on main.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if ! git merge --no-ff --no-edit -m 'Sync main into dev' origin/main; then
+            echo '::error::main conflicts with dev: merge main into dev by hand and push.'
+            exit 1
+          fi
+          git push origin HEAD:dev
