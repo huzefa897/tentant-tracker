@@ -11,6 +11,8 @@ export interface PropertyAccess {
 // but access not configured yet.
 export interface AppIdentity {
   id: number
+  // The person's name as set in admin; empty when nobody has set it.
+  name: string
   phoneNumber: string
   properties: PropertyAccess[]
 }

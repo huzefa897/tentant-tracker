@@ -14,7 +14,7 @@ export const testProperty: PropertyAccess = {
 }
 
 export function identityWith(properties: PropertyAccess[]): AppIdentity {
-  return { id: 1, phoneNumber: '+918341413827', properties }
+  return { id: 1, name: 'Test Owner', phoneNumber: '+918341413827', properties }
 }
 
 export const accessService = {

@@ -17,7 +17,7 @@ class MeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("id", "phoneNumber", "properties")
+        fields = ("id", "name", "phoneNumber", "properties")
         read_only_fields = fields
 
     def get_properties(self, user):
