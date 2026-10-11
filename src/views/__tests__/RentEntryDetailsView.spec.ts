@@ -8,7 +8,6 @@ import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
 import {
-  ENTRIES_LOAD_ERROR_MESSAGE,
   PAYMENT_SAVE_ERROR_MESSAGE,
   PAYMENT_UNCONFIRMED_MESSAGE,
   RECEIPT_UNCONFIRMED_MESSAGE,
@@ -208,18 +207,23 @@ describe('RentEntryDetailsView', () => {
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 
-  it('shows a load error rather than Entry not found, then retries', async () => {
-    view = await openPage('/tenants/tenant-001/entries/sep', () => {
-      getEntry.mockRejectedValueOnce(new ApiError('unknown'))
-    })
+  it('shows the slow-load screen rather than Entry not found, then auto-retries', async () => {
+    vi.useFakeTimers()
+    try {
+      view = await openPage('/tenants/tenant-001/entries/sep', () => {
+        getEntry.mockRejectedValueOnce(new ApiError('unknown'))
+      })
 
-    expect(view.get('[role="alert"]').text()).toContain(ENTRIES_LOAD_ERROR_MESSAGE)
-    expect(view.text()).not.toContain('Entry not found')
+      expect(view.text()).toContain("It's taking longer than usual")
+      expect(view.text()).not.toContain('Entry not found')
 
-    await button('Retry').trigger('click')
-    await flushPromises()
+      vi.advanceTimersByTime(10_000)
+      await flushPromises()
 
-    expect(view.get('h1').text()).toBe('September 2026')
+      expect(view.get('h1').text()).toBe('September 2026')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('goes back to the tenant’s history by route, not browser history', async () => {
@@ -265,20 +269,24 @@ describe('RentEntryDetailsView when the URL changes in place', () => {
 })
 
 describe('RentEntryDetailsView when tenants fail to load', () => {
-  it('shows the error with Retry instead of Loading or Tenant not found, then recovers', async () => {
-    view = await openPage('/tenants/tenant-001/entries/sep', () => {
-      // The tenancy request fails once; Retry succeeds.
-      vi.mocked(tenantService.getTenant).mockRejectedValueOnce(new Error('boom'))
-    })
+  it('shows the slow-load screen instead of Loading or Tenant not found, then auto-retries', async () => {
+    vi.useFakeTimers()
+    try {
+      view = await openPage('/tenants/tenant-001/entries/sep', () => {
+        vi.mocked(tenantService.getTenant).mockRejectedValueOnce(new Error('boom'))
+      })
 
-    expect(view.get('[role="alert"]').text()).toContain('Unable to load tenants. Please try again.')
-    expect(view.text()).not.toContain('Loading')
-    expect(view.text()).not.toContain('Tenant not found')
+      expect(view.text()).toContain("It's taking longer than usual")
+      expect(view.text()).not.toContain('Loading')
+      expect(view.text()).not.toContain('Tenant not found')
 
-    await button('Retry').trigger('click')
-    await flushPromises()
+      vi.advanceTimersByTime(10_000)
+      await flushPromises()
 
-    expect(view.get('h1').text()).toBe('September 2026')
+      expect(view.get('h1').text()).toBe('September 2026')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   describe('payments', () => {
@@ -327,17 +335,22 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       ])
     })
 
-    it('shows a failed payment load as an error with Retry, never as no payments', async () => {
-      getPayments.mockRejectedValueOnce(new ApiError('network'))
-      await openDetails('tenant-001', 'sep')
+    it('shows skeleton on a failed payment load, never no payments, then auto-retries', async () => {
+      vi.useFakeTimers()
+      try {
+        getPayments.mockRejectedValueOnce(new ApiError('network'))
+        await openDetails('tenant-001', 'sep')
 
-      expect(view!.text()).not.toContain('No payments recorded')
-      expect(view!.text()).toContain("Couldn't reach the server.")
+        expect(view!.text()).not.toContain('No payments recorded')
+        expect(view!.find('[data-testid="payments-loading"]').exists()).toBe(true)
 
-      await button('Retry').trigger('click')
-      await flushPromises()
+        vi.advanceTimersByTime(5000)
+        await flushPromises()
 
-      expect(paymentRows()).toHaveLength(1)
+        expect(paymentRows()).toHaveLength(1)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('shows the bill and its outstanding amount in the dialog', async () => {

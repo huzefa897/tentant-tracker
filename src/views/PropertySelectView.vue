@@ -6,7 +6,8 @@ import { Building2 } from '@lucide/vue'
 import PropertyPicker from '@/components/access/PropertyPicker.vue'
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
-import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
+import SlowLoadScreen from '@/components/common/SlowLoadScreen.vue'
+import { useAutoRetry } from '@/composables/useAutoRetry'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
 import { formatPhoneNumber } from '@/utils/phone'
@@ -18,6 +19,12 @@ const router = useRouter()
 onMounted(() => {
   accessStore.load()
 })
+
+useAutoRetry(
+  () => accessStore.status,
+  () => accessStore.load(),
+  () => accessStore.retryable,
+)
 
 // Shown so the owner knows which account to grant access to.
 const signedInAs = computed(() => {
@@ -56,10 +63,10 @@ async function handleSelect(propertyId: string) {
         <SkeletonRows bordered :rows="2" />
       </LoadingRegion>
 
-      <RentEntriesLoadError
+      <SlowLoadScreen
         v-else-if="accessStore.status === 'error'"
-        :message="accessStore.error ?? ''"
-        @retry="accessStore.load"
+        :error="accessStore.error"
+        :retryable="accessStore.retryable"
       />
 
       <div

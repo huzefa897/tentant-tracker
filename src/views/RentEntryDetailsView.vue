@@ -6,11 +6,11 @@ import { ArrowLeft, Ban, CircleCheck, Link2, PencilLine, Plus, User } from '@luc
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
+import SlowLoadScreen from '@/components/common/SlowLoadScreen.vue'
 import PaymentHistory from '@/components/rent/PaymentHistory.vue'
 import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
 import RecordPaymentForm from '@/components/rent/RecordPaymentForm.vue'
 import ReversePaymentForm from '@/components/rent/ReversePaymentForm.vue'
-import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import VoidEntryForm from '@/components/rent/VoidEntryForm.vue'
 import TenantChipSkeleton from '@/components/tenant/TenantChipSkeleton.vue'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useAutoRetry } from '@/composables/useAutoRetry'
 import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteEntry } from '@/composables/useRouteEntry'
 import { useRouteTenant } from '@/composables/useRouteTenant'
@@ -57,7 +58,7 @@ const {
   tenant,
   status: tenantStatus,
   error: tenantError,
-  retry: retryTenants,
+  retryable: tenantRetryable,
 } = useRouteTenant(() => props.tenantId)
 
 // Loaded from the backend by its URL, matched on both ids, so it survives a refresh and never
@@ -66,7 +67,7 @@ const {
   entry,
   status: entryStatus,
   error: entryError,
-  retry: retryEntry,
+  retryable: entryRetryable,
 } = useRouteEntry(
   () => props.tenantId,
   () => props.entryId,
@@ -86,6 +87,8 @@ const entryPayments = computed(() => rentEntryStore.payments[props.entryId] ?? n
 function loadPayments() {
   rentEntryStore.loadPayments(props.tenantId, props.entryId)
 }
+
+useAutoRetry(() => entryPayments.value?.status ?? 'idle', loadPayments)
 
 const paymentDialogOpen = ref(false)
 const savingPayment = ref(false)
@@ -352,10 +355,10 @@ function goToHistory() {
       </div>
     </LoadingRegion>
 
-    <RentEntriesLoadError
+    <SlowLoadScreen
       v-else-if="tenantStatus === 'error'"
-      :message="tenantError ?? ''"
-      @retry="retryTenants"
+      :error="tenantError"
+      :retryable="tenantRetryable"
     />
 
     <div
@@ -370,10 +373,10 @@ function goToHistory() {
       <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to Dashboard</Button>
     </div>
 
-    <RentEntriesLoadError
+    <SlowLoadScreen
       v-else-if="entryStatus === 'error'"
-      :message="entryError ?? ''"
-      @retry="retryEntry"
+      :error="entryError"
+      :retryable="entryRetryable"
     />
 
     <div
@@ -544,16 +547,12 @@ function goToHistory() {
           class="rounded-xl border p-4 sm:p-6 lg:col-span-2 xl:order-last xl:col-span-3"
         >
           <h2 id="payment-history-heading" class="mb-3 font-semibold">Payment history</h2>
-          <!-- A failed load must never look like "no payments". -->
-          <RentEntriesLoadError
-            v-if="entryPayments?.status === 'error'"
-            :message="entryPayments.error ?? ''"
-            @retry="loadPayments"
-          />
+          <!-- A failed load must never look like "no payments": keep skeleton while retrying. -->
           <LoadingRegion
-            v-else-if="
+            v-if="
               !entryPayments ||
-              (entryPayments.status === 'loading' && entryPayments.payments.length === 0)
+              entryPayments.status === 'loading' ||
+              entryPayments.status === 'error'
             "
             label="Loading payments…"
             data-testid="payments-loading"

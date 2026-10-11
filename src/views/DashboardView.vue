@@ -6,9 +6,9 @@ import { Users } from '@lucide/vue'
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
 import LatestEntryCard from '@/components/rent/LatestEntryCard.vue'
-import RentEntriesLoadError from '@/components/rent/RentEntriesLoadError.vue'
 import TenantDetails from '@/components/tenant/TenantDetails.vue'
 import TenantSelector from '@/components/tenant/TenantSelector.vue'
+import { useAutoRetry } from '@/composables/useAutoRetry'
 import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
@@ -48,9 +48,12 @@ const selectedTenantEntryCount = computed(() =>
 // The newest bill by billing month; null while loading, on failure and when there's none.
 const latestBill = computed(() => (summary.value?.status === 'ready' ? summary.value.latest : null))
 
-// Holds the latest entry's place while the selected tenant's bills load.
+// Holds the latest entry's place while the selected tenant's bills load or have errored
+// (auto-retry is in progress); never collapses to nothing so it can't read as "no entry".
 const summaryLoading = computed(
-  () => !!tenantStore.selectedTenantId && (!summary.value || summary.value.status === 'loading'),
+  () =>
+    !!tenantStore.selectedTenantId &&
+    (!summary.value || summary.value.status === 'loading' || summary.value.status === 'error'),
 )
 
 // The latest bill's receipt (its most recent payment's), from Django, as a PDF.
@@ -71,6 +74,12 @@ function downloadReceipt(entryId: string) {
 function retrySummary() {
   if (tenantStore.selectedTenantId) rentEntryStore.loadSummary(tenantStore.selectedTenantId)
 }
+
+useAutoRetry(
+  () => tenantStore.status,
+  () => tenantStore.searchTenants(),
+)
+useAutoRetry(() => summary.value?.status ?? 'idle', retrySummary)
 
 function openNewEntry() {
   const tenant = tenantStore.selectedTenant
@@ -129,22 +138,6 @@ function openHistory() {
         View tenant details, rent information and manage entries.
       </p>
     </header>
-
-    <RentEntriesLoadError
-      v-if="tenantStore.status === 'error' && tenantStore.error"
-      class="mb-6"
-      data-testid="tenants-error"
-      :message="tenantStore.error"
-      @retry="tenantStore.loadTenants"
-    />
-
-    <RentEntriesLoadError
-      v-if="summary?.status === 'error'"
-      class="mb-6"
-      data-testid="entries-error"
-      :message="summary.error ?? ''"
-      @retry="retrySummary"
-    />
 
     <!-- Keyed, so switching tenants plays the rise-in again. -->
     <TenantDetails

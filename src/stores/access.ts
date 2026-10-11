@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import { accessService } from '@/services/access.service'
-import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
+import { ApiError, isRetryableError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { useAuthStore } from '@/stores/auth'
 import type { AppIdentity } from '@/types/access'
 
@@ -36,6 +36,7 @@ export const useAccessStore = defineStore('access', () => {
   const identity = ref<AppIdentity | null>(null)
   const status = ref<AccessStatus>('idle')
   const error = ref<string | null>(null)
+  const retryable = ref(true)
   const selectedPropertyId = ref<string | null>(null)
   // The Firebase user the identity belongs to, so another account never sees stale access.
   const loadedForUserId = ref<string | null>(null)
@@ -97,6 +98,7 @@ export const useAccessStore = defineStore('access', () => {
         loadedForUserId.value = null
         selectedPropertyId.value = null
         error.value = messageFor(err)
+        retryable.value = isRetryableError(err)
         status.value = 'error'
       } finally {
         if (inFlight === request) inFlight = null
@@ -118,6 +120,7 @@ export const useAccessStore = defineStore('access', () => {
     identity.value = null
     status.value = 'idle'
     error.value = null
+    retryable.value = true
     selectedPropertyId.value = null
     loadedForUserId.value = null
   }
@@ -126,6 +129,7 @@ export const useAccessStore = defineStore('access', () => {
     identity,
     status,
     error,
+    retryable,
     selectedPropertyId,
     properties,
     selectedProperty,

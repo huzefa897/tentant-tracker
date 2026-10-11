@@ -466,19 +466,23 @@ describe('NewRentEntryView', () => {
 })
 
 describe('NewRentEntryView when tenants fail to load', () => {
-  it('shows the error with Retry instead of Tenant not found, then shows the form', async () => {
-    app = await openPage('/tenants/tenant-001/entries/new', () => {
-      // The tenancy request fails once; Retry succeeds.
-      vi.mocked(tenantService.getTenant).mockRejectedValueOnce(new Error('boom'))
-    })
+  it('shows the slow-load screen instead of Tenant not found, then auto-retries', async () => {
+    vi.useFakeTimers()
+    try {
+      app = await openPage('/tenants/tenant-001/entries/new', () => {
+        vi.mocked(tenantService.getTenant).mockRejectedValueOnce(new Error('boom'))
+      })
 
-    expect(app.get('[role="alert"]').text()).toContain('Unable to load tenants. Please try again.')
-    expect(app.text()).not.toContain('Tenant not found')
-    expect(app.find('form').exists()).toBe(false)
+      expect(app.text()).toContain("It's taking longer than usual")
+      expect(app.text()).not.toContain('Tenant not found')
+      expect(app.find('form').exists()).toBe(false)
 
-    await button('Retry').trigger('click')
-    await flushPromises()
+      vi.advanceTimersByTime(10_000)
+      await flushPromises()
 
-    expect(app.find('form').exists()).toBe(true)
+      expect(app.find('form').exists()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
