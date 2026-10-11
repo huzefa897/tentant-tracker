@@ -10,14 +10,14 @@
 # and a new caller of the old name on another). CI's build of the merged PR catches that for
 # the base; for other branches, merge them locally and run the checks.
 #
-# Usage: scripts/check-merge-conflicts.sh [--base origin/main] [--self <branch>] [--strict] [--no-fetch]
+# Usage: scripts/check-merge-conflicts.sh [--base origin/dev] [--self <branch>] [--strict] [--no-fetch]
 #
 # Runs on macOS's bash 3.2 as well as CI's bash 5: no mapfile, ${var^^} or empty arrays under
 # set -u, and no quotes inside comments in $(...) or <(...), which bash 3.2 misparses.
 
 set -euo pipefail
 
-base='origin/main'
+base='origin/dev'
 self=''
 strict=false
 fetch=true
