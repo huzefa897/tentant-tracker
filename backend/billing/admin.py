@@ -171,6 +171,7 @@ class ReceiptAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
         "issuer_address",
         "issuer_contact_number",
         "received_by_name",
+        "authorized_by_name",
         "tenant_name",
         "flat_number",
         "tenant_mobile_number",

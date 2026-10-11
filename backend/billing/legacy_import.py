@@ -310,6 +310,7 @@ class _Importer:
                 entry,
                 tenancy,
                 prop,
+                self.imported_by,
                 previous_outstanding=self.previous_outstanding(entry, receipt.issued_date),
             ),
         )

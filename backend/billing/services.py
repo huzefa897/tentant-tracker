@@ -443,12 +443,13 @@ def receipt_snapshot(
     entry: RentEntry,
     tenancy: Tenancy,
     prop: Property,
+    actor,
     *,
     previous_outstanding,
 ) -> dict:
-    """Everything a receipt prints, copied from the stored records: the issuer (the property,
-    and the payment's recorder as who received it), the tenancy, the bill as it stood right after
-    this payment and the payment. previous_outstanding is what the previous month's bill still
+    """Everything a receipt prints, copied from the stored records: the issuer (the property, the
+    payment's recorder as who received it and the actor issuing it as who authorized it), the
+    tenancy, the bill as it stood right after this payment and the payment. previous_outstanding is what the previous month's bill still
     owed when the receipt was issued. Callers hold the bill's, tenancy's and property's locks and
     pass those rows, read again under them.
     """
@@ -471,6 +472,7 @@ def receipt_snapshot(
         # Whoever recorded the payment received the money, not whoever first issues its receipt
         # (often an owner downloading it later).
         "received_by_name": payment.created_by.name,
+        "authorized_by_name": actor.name,
         "tenant_name": tenancy.name,
         "flat_number": tenancy.flat_number,
         "tenant_mobile_number": tenancy.mobile_number,
@@ -577,7 +579,7 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
             issued_at=timezone.now(),
             issued_date=business_date(),
             **receipt_snapshot(
-                payment, entry, tenancy, prop, previous_outstanding=previous_outstanding
+                payment, entry, tenancy, prop, actor, previous_outstanding=previous_outstanding
             ),
         )
         return IssuedReceipt(receipt=receipt, created=True)
