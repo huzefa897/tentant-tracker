@@ -152,8 +152,9 @@ async function handleSavePayment(input: PaymentInput) {
   }
 }
 
-// Owners correct payments recorded by mistake; the backend refuses anyone else.
-const canReverse = computed(() => accessStore.selectedProperty?.role === 'owner')
+// Owners and managers correct payments recorded by mistake; the backend checks the role.
+const role = computed(() => accessStore.selectedProperty?.role)
+const canReverse = computed(() => role.value === 'owner' || role.value === 'manager')
 const reversingPayment = ref<Payment | null>(null)
 const savingReversal = ref(false)
 const reversalError = ref<string | null>(null)
@@ -198,7 +199,7 @@ async function handleReverse(reason: string) {
 
 // Owners void a bill that should not exist, or correct its charges (on their own page), once
 // its payments are reversed; the backend refuses anyone else and checks the payments again.
-const canCorrect = computed(() => canReverse.value && entry.value?.billStatus === 'active')
+const canCorrect = computed(() => role.value === 'owner' && entry.value?.billStatus === 'active')
 const paymentsToReverse = computed(
   () => entryPayments.value?.payments.filter((payment) => payment.status === 'recorded') ?? [],
 )

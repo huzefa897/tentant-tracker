@@ -24,13 +24,14 @@ Role = PropertyMembership.Role
 
 ROLE_CAPABILITIES: dict[str, frozenset[Capability]] = {
     Role.OWNER: frozenset(Capability),
-    # Managers record payments but can't reverse them or void bills: corrections are the
-    # owners'.
+    # Managers record payments and can reverse one recorded by mistake, but voiding or
+    # correcting a bill is the owners'.
     Role.MANAGER: frozenset(
         {
             Capability.MANAGE_TENANTS,
             Capability.RECORD_PAYMENTS,
             Capability.ISSUE_RECEIPTS,
+            Capability.REVERSE_PAYMENTS,
         }
     ),
 }
