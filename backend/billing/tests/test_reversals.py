@@ -79,6 +79,11 @@ class ReversalTestCase(TestCase):
         PropertyMembership.objects.create(user=manager, property=self.property, role="manager")
         return manager
 
+    def make_second_owner(self):
+        owner = make_user("second-owner", name="Second Owner")
+        PropertyMembership.objects.create(user=owner, property=self.property, role="owner")
+        return owner
+
 
 class ReversePaymentServiceTests(ReversalTestCase):
     def test_a_reversed_payment_stops_counting_and_stays_as_recorded(self):
@@ -195,6 +200,32 @@ class ReversePaymentServiceTests(ReversalTestCase):
 
         self.assertEqual(PaymentReversal.objects.get().created_by, manager)
         self.assertEqual(self.amounts().total_paid, Decimal("0.00"))
+
+    def test_another_owner_can_reverse_a_payment_they_did_not_record(self):
+        second_owner = self.make_second_owner()
+
+        result = self.reverse(actor=second_owner)
+
+        self.assertTrue(result.created)
+        self.assertEqual(result.reversal.created_by, second_owner)
+        self.assertEqual(self.amounts().total_paid, Decimal("0.00"))
+
+    def test_a_second_owner_giving_the_same_reason_gets_the_first_reversal(self):
+        self.reverse()
+
+        result = self.reverse(actor=self.make_second_owner())
+
+        self.assertFalse(result.created)
+        self.assertEqual(result.reversal.created_by, self.owner)
+        self.assertEqual(PaymentReversal.objects.count(), 1)
+
+    def test_a_second_owner_giving_another_reason_conflicts(self):
+        self.reverse()
+
+        with self.assertRaises(ReversalConflictError):
+            self.reverse(actor=self.make_second_owner(), reason="Wrong bill.")
+
+        self.assertEqual(PaymentReversal.objects.get().created_by, self.owner)
 
     def test_a_role_without_the_capability_cant_reverse(self):
         manager = self.make_manager()
@@ -422,6 +453,17 @@ class ReversalApiTests(ReversalTestCase):
         self.issue_receipt()
         client = APIClient()
         client.force_authenticate(self.make_manager())
+
+        response = self.post(client=client)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["payment"]["status"], "reversed")
+        self.assertIsNotNone(Receipt.objects.get().voided_at)
+
+    def test_another_owner_can_reverse(self):
+        self.issue_receipt()
+        client = APIClient()
+        client.force_authenticate(self.make_second_owner())
 
         response = self.post(client=client)
 

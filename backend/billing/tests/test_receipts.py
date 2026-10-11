@@ -60,6 +60,15 @@ class IssueReceiptServiceTests(ReceiptTestCase):
         self.assertEqual(receipt.received_by_name, "Farhan Manager")
         self.assertEqual(receipt.issued_by, self.user)
 
+    def test_another_owner_issuing_it_still_names_the_owner_who_recorded_it(self):
+        second_owner = make_user("second-owner", name="Ayesha Saleem")
+        PropertyMembership.objects.create(user=second_owner, property=self.property, role="owner")
+
+        receipt = issue_payment_receipt(payment_id=self.payment.pk, actor=second_owner).receipt
+
+        self.assertEqual(receipt.received_by_name, "Imran Khan")
+        self.assertEqual(receipt.issued_by, second_owner)
+
     def test_snapshots_the_payment_and_the_bill_as_it_stood(self):
         result = self.issue()
         receipt = result.receipt
