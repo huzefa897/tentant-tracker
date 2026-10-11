@@ -1,9 +1,11 @@
-// Who issued a receipt, copied from the property (and the person issuing it) when it was issued.
+// Who issued a receipt, copied when it was issued: the property, the person who recorded the
+// payment (received the money) and the person who issued the receipt (authorized it).
 export interface ReceiptIssuer {
   name: string // property / building
   address: string
   contactNumber: string // E.164, or '' for none
   receivedBy: string // whoever recorded the payment; '' when they have no name
+  authorizedBy: string // whoever issued the receipt; '' when they have no name
 }
 
 // issued: confirms its payment. void: the payment was reversed, so it confirms nothing; its

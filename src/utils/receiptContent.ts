@@ -193,7 +193,7 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
     remarks: receipt.paymentNotes.trim()
       ? [receipt.paymentNotes, STANDARD_REMARKS]
       : [STANDARD_REMARKS],
-    authorizedBy: `AUTHORIZED BY · ${issuer.receivedBy || issuer.name}`,
+    authorizedBy: `AUTHORIZED BY · ${issuer.authorizedBy || issuer.name}`,
     footer: isVoid ? `${VOID_BANNER}.` : 'Thank you for your payment.',
   }
 }
