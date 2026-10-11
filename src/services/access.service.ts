@@ -27,6 +27,7 @@ export function parseAppIdentity(data: unknown): AppIdentity {
   if (
     !isRecord(data) ||
     typeof data.id !== 'number' ||
+    typeof data.name !== 'string' ||
     typeof data.phoneNumber !== 'string' ||
     !Array.isArray(data.properties)
   ) {
@@ -35,6 +36,7 @@ export function parseAppIdentity(data: unknown): AppIdentity {
 
   return {
     id: data.id,
+    name: data.name,
     phoneNumber: data.phoneNumber,
     properties: data.properties.map(parsePropertyAccess),
   }

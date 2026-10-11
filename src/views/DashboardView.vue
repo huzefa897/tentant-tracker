@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeftRight, LogOut, Users } from '@lucide/vue'
+import { Users } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
 import LatestEntryCard from '@/components/rent/LatestEntryCard.vue'
 import TenantDetails from '@/components/tenant/TenantDetails.vue'
 import TenantSelector from '@/components/tenant/TenantSelector.vue'
-import { Button } from '@/components/ui/button'
 import { useAutoRetry } from '@/composables/useAutoRetry'
-import { useLogout } from '@/composables/useLogout'
 import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
@@ -21,7 +19,6 @@ const accessStore = useAccessStore()
 const tenantStore = useTenantStore()
 const rentEntryStore = useRentEntryStore()
 const router = useRouter()
-const handleLogout = useLogout()
 
 onMounted(() => {
   // The full list: the selector's search box starts empty.
@@ -84,10 +81,6 @@ useAutoRetry(
 )
 useAutoRetry(() => summary.value?.status ?? 'idle', retrySummary)
 
-function switchProperty() {
-  router.push({ name: 'property-select' })
-}
-
 function openNewEntry() {
   const tenant = tenantStore.selectedTenant
   if (!tenant) return
@@ -117,44 +110,19 @@ function openHistory() {
 
 <template>
   <AppLayout>
-    <template #header-actions>
-      <div class="flex w-full items-center gap-2 sm:w-auto">
-        <div class="min-w-0 flex-1 sm:w-80">
-          <TenantSelector
-            :tenants="tenantStore.results"
-            :selected-tenant="tenantStore.selectedTenant"
-            :query="tenantStore.query"
-            :status="tenantStore.status"
-            :error="tenantStore.error"
-            :has-more="tenantStore.hasMore"
-            :loading-more="tenantStore.loadingMore"
-            @select="tenantStore.selectTenant"
-            @search="tenantStore.searchTenants"
-            @load-more="tenantStore.loadMore"
-          />
-        </div>
-        <Button
-          v-if="accessStore.properties.length > 1"
-          variant="ghost"
-          size="icon"
-          class="size-11 shrink-0 text-muted-foreground"
-          aria-label="Switch property"
-          title="Switch property"
-          @click="switchProperty"
-        >
-          <ArrowLeftRight class="size-5!" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="size-11 shrink-0 text-muted-foreground"
-          aria-label="Logout"
-          title="Logout"
-          @click="handleLogout"
-        >
-          <LogOut class="size-5!" />
-        </Button>
-      </div>
+    <template #toolbar>
+      <TenantSelector
+        :tenants="tenantStore.results"
+        :selected-tenant="tenantStore.selectedTenant"
+        :query="tenantStore.query"
+        :status="tenantStore.status"
+        :error="tenantStore.error"
+        :has-more="tenantStore.hasMore"
+        :loading-more="tenantStore.loadingMore"
+        @select="tenantStore.selectTenant"
+        @search="tenantStore.searchTenants"
+        @load-more="tenantStore.loadMore"
+      />
     </template>
 
     <header class="mb-8">

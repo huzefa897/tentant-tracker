@@ -292,7 +292,7 @@ describe('NewRentEntryView', () => {
     await app!.get('form').trigger('submit')
 
     expect(button('Cancel').attributes('disabled')).toBeDefined()
-    expect(button('Dashboard').attributes('disabled')).toBeDefined()
+    expect(button('Back to Dashboard').attributes('disabled')).toBeDefined()
     // Any other navigation (a link, Back) is refused without offering to discard.
     await router.push('/dashboard')
     await flushPromises()
@@ -456,7 +456,7 @@ describe('NewRentEntryView', () => {
       await openEntryPage()
       await fill({ notes: 'Paid via UPI' })
 
-      await button('Dashboard').trigger('click')
+      await button('Back to Dashboard').trigger('click')
       await flushPromises()
 
       expect(router.currentRoute.value.name).toBe('rent-entry-new')

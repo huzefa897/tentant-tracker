@@ -313,11 +313,11 @@ function goToHistory() {
 
 <template>
   <AppLayout>
-    <template #header-actions>
+    <template #back>
       <Button
         v-if="tenant && from !== 'dashboard'"
         variant="ghost"
-        class="h-11 text-muted-foreground"
+        class="-ml-3 h-11 text-primary hover:text-primary"
         :disabled="busy()"
         @click="goToHistory"
       >
@@ -327,7 +327,7 @@ function goToHistory() {
       <Button
         v-else
         variant="ghost"
-        class="h-11 text-muted-foreground"
+        class="-ml-3 h-11 text-primary hover:text-primary"
         :disabled="busy()"
         @click="backToDashboard"
       >

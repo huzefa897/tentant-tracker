@@ -8,6 +8,8 @@ Sign-in is **Firebase phone auth** (`services/auth.service.ts`, the only module 
 
 Login accepts India, Australia and US mobiles. Countries live in one table (`utils/phoneCountries.ts`) that drives validation, input grouping, display and the login country picker; add a country there (and its flag in `components/brand/CountryFlag.vue`). Phone numbers are stored as E.164 (`+918341413827`); format for display only (`utils/phone.ts`).
 
+`AppLayout` puts the logo and the account menu (`components/access/UserMenu.vue`) on the backdrop above the card, on every signed-in screen. The menu shows the person's `name` from `/me` with their initials (their number when no name is set, or the Firebase number until `/me` answers, so logout is always there) and holds **Switch property** (with several properties, except on the property page) and **Logout**. The layout wires it to the stores and router itself, so views don't. Inside the card, a row holds a screen's way back on the left (`#back` slot) and its main control centred (`#toolbar`, the dashboard's tenant search).
+
 Logout (`composables/useLogout.ts`) clears the selected tenant, property access and the bills loaded from the backend, then `signOut()`s.
 
 **Inactivity timeout** (`composables/useInactivityTimer.ts`, mounted in `App.vue`): the session ends after 15 minutes of no user activity (no mouse, keyboard, scroll or touch events on `window`). Activity events reset the countdown; resets are throttled to once per second. On expiry the user is fully signed out via `useLogout` and `loginNotice` is set so the login page explains why. The timer only runs while `authStore.isAuthenticated` is true.
@@ -22,7 +24,7 @@ Logout (`composables/useLogout.ts`) clears the selected tenant, property access 
 
 **Signing in is not access.** Access comes only from an active `PropertyMembership` of an active `Property`, granted in admin (which records `granted_by`). Memberships are ended (inactive), never deleted. Admin portal access (`is_staff`) and app sign-in are separate permissions on one person; admins get no API access without a membership. Granting access is manual (backend README "Granting access"): sign in once, then add an owner membership in Django admin.
 
-In the app: if `GET /api/v1/me/` answers 403 `not_registered`, the access store ends the Firebase session (`authStore.endSession`) and login explains why. `stores/access.ts` holds the identity and the selected property: one property is selected automatically, several need a choice, none means "no property access", and a failed load is an **error with Retry**, never no access. Property selection is separate from tenant selection.
+`GET /api/v1/me/` answers the person's `id`, `name` (empty when unset), `phoneNumber` and their `properties`. In the app: if it answers 403 `not_registered`, the access store ends the Firebase session (`authStore.endSession`) and login explains why. `stores/access.ts` holds the identity and the selected property: one property is selected automatically, several need a choice, none means "no property access", and a failed load is an **error with Retry**, never no access. Property selection is separate from tenant selection.
 
 ## Route guards
 
