@@ -49,6 +49,17 @@ class ReceiptTestCase(TestCase):
 
 
 class IssueReceiptServiceTests(ReceiptTestCase):
+    def test_names_whoever_recorded_the_payment_as_received_by_not_the_issuer(self):
+        manager = make_user("manager", name="Farhan Manager")
+        PropertyMembership.objects.create(user=manager, property=self.property, role="manager")
+        payment = make_payment(self.entry, manager, "1000.00", paid_date=date(2026, 10, 7))
+
+        # An owner issues it later, e.g. by downloading it.
+        receipt = self.issue(payment).receipt
+
+        self.assertEqual(receipt.received_by_name, "Farhan Manager")
+        self.assertEqual(receipt.issued_by, self.user)
+
     def test_snapshots_the_payment_and_the_bill_as_it_stood(self):
         result = self.issue()
         receipt = result.receipt

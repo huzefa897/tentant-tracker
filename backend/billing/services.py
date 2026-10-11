@@ -443,14 +443,14 @@ def receipt_snapshot(
     entry: RentEntry,
     tenancy: Tenancy,
     prop: Property,
-    actor,
     *,
     previous_outstanding,
 ) -> dict:
-    """Everything a receipt prints, copied from the stored records: the issuer, the tenancy, the
-    bill as it stood right after this payment and the payment. previous_outstanding is what the
-    previous month's bill still owed when the receipt was issued. Callers hold the bill's,
-    tenancy's and property's locks and pass those rows, read again under them.
+    """Everything a receipt prints, copied from the stored records: the issuer (the property,
+    and the payment's recorder as who received it), the tenancy, the bill as it stood right after
+    this payment and the payment. previous_outstanding is what the previous month's bill still
+    owed when the receipt was issued. Callers hold the bill's, tenancy's and property's locks and
+    pass those rows, read again under them.
     """
 
     # The bill as it stood right after this payment: payments are never edited, and later ones
@@ -468,7 +468,9 @@ def receipt_snapshot(
         "issuer_name": prop.name.strip(),
         "issuer_address": prop.address.strip(),
         "issuer_contact_number": prop.contact_number,
-        "received_by_name": actor.name,
+        # Whoever recorded the payment received the money, not whoever first issues its receipt
+        # (often an owner downloading it later).
+        "received_by_name": payment.created_by.name,
         "tenant_name": tenancy.name,
         "flat_number": tenancy.flat_number,
         "tenant_mobile_number": tenancy.mobile_number,
@@ -575,7 +577,7 @@ def _issue_payment_receipt(*, payment_id, actor) -> IssuedReceipt:
             issued_at=timezone.now(),
             issued_date=business_date(),
             **receipt_snapshot(
-                payment, entry, tenancy, prop, actor, previous_outstanding=previous_outstanding
+                payment, entry, tenancy, prop, previous_outstanding=previous_outstanding
             ),
         )
         return IssuedReceipt(receipt=receipt, created=True)

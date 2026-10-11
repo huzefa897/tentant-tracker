@@ -3,7 +3,7 @@ export interface ReceiptIssuer {
   name: string // property / building
   address: string
   contactNumber: string // E.164, or '' for none
-  receivedBy: string // the person who issued it; '' when they have no name
+  receivedBy: string // whoever recorded the payment; '' when they have no name
 }
 
 // issued: confirms its payment. void: the payment was reversed, so it confirms nothing; its
