@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Building2, LogOut } from '@lucide/vue'
+import { Building2 } from '@lucide/vue'
 
 import PropertyPicker from '@/components/access/PropertyPicker.vue'
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
 import SlowLoadScreen from '@/components/common/SlowLoadScreen.vue'
-import { Button } from '@/components/ui/button'
 import { useAutoRetry } from '@/composables/useAutoRetry'
-import { useLogout } from '@/composables/useLogout'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
 import { formatPhoneNumber } from '@/utils/phone'
@@ -17,7 +15,6 @@ import { formatPhoneNumber } from '@/utils/phone'
 const accessStore = useAccessStore()
 const route = useRoute()
 const router = useRouter()
-const logout = useLogout()
 
 onMounted(() => {
   accessStore.load()
@@ -53,19 +50,6 @@ async function handleSelect(propertyId: string) {
 
 <template>
   <AppLayout>
-    <template #header-actions>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="size-11 shrink-0 text-muted-foreground"
-        aria-label="Logout"
-        title="Logout"
-        @click="logout"
-      >
-        <LogOut class="size-5!" />
-      </Button>
-    </template>
-
     <div class="mx-auto w-full max-w-xl">
       <!-- The picker's own shape while properties load, so nothing jumps when they arrive. -->
       <LoadingRegion

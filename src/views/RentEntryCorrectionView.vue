@@ -146,10 +146,10 @@ function goToDashboard() {
 
 <template>
   <AppLayout>
-    <template #header-actions>
+    <template #back>
       <Button
         variant="ghost"
-        class="h-11 text-muted-foreground"
+        class="-ml-3 h-11 text-primary hover:text-primary"
         :disabled="saving"
         @click="backToEntry"
       >
