@@ -1,0 +1,145 @@
+name: Release
+
+# Work lands on dev; main is production, and Render deploys every main commit whose CI passes
+# (render.yaml). This keeps one "Release: dev → main" PR open while dev is ahead: merging it
+# is the deploy button. After main moves, dev is brought level with it again, so a squash-merged
+# release or a hotfix straight to main doesn't leave the two branches diverged.
+# docs/deployment.md ("Branches and releases").
+#
+# Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+# Pushes and PRs made with GITHUB_TOKEN don't start other workflows, except workflow_dispatch:
+# the release PR shows the CI run from the push to dev, and after sync-dev pushes to dev it
+# dispatches CI and this workflow for the new head, so the release PR is never left unchecked.
+
+on:
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-pr:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Open or update the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --base main --head dev --state open --json number --jq '.[0].number // empty')"
+
+          # The files decide, not the commits: after a squashed release, dev keeps commits main
+          # never got, though their changes are on main.
+          if git diff --quiet origin/main origin/dev; then
+            echo 'dev matches main; nothing to release.'
+            if [[ -n "$existing" ]]; then
+              gh pr close "$existing" --comment 'dev now matches main: nothing left to release.'
+            fi
+            exit 0
+          fi
+
+          # Commits since the last release PR's head (already released, even if squashed) that
+          # main doesn't have, merge commits aside (the syncs below).
+          released="$(gh pr list --base main --head dev --state merged --limit 1 --json headRefOid --jq '.[0].headRefOid // empty')"
+          exclude=()
+          if [[ -n "$released" ]] && git cat-file -e "$released^{commit}" 2>/dev/null; then
+            exclude=("^$released")
+          fi
+          commits="$(git log --no-merges --format='- %s' origin/main..origin/dev "${exclude[@]}")"
+          [[ -n "$commits" ]] || commits='- (only merges: see the diff)'
+
+          changed="$(git diff --name-only origin/main...origin/dev)"
+          services=''
+          if grep -q '^backend/' <<<"$changed"; then services="${services}- the API (rent-tracker-api)"$'\n'; fi
+          if grep -qvE '^(backend|docs|google-api|whatsapp-bot)/' <<<"$changed"; then services="${services}- the app (rent-tracker)"$'\n'; fi
+          [[ -n "$services" ]] || services=$'- nothing: no deployed code changed\n'
+
+          body="$RUNNER_TEMP/release-pr.md"
+          cat >"$body" <<EOF
+          Merging this deploys to production: Render deploys main once CI passes on it.
+
+          **Use "Create a merge commit"**, not squash, so dev and main keep the same history.
+
+          ### What's in it
+          ${commits}
+
+          ### What deploys
+          ${services}
+          Check the migrations in \`backend/**/migrations/\` before merging: rolling back doesn't undo them (docs/deployment.md, "Rolling back").
+          EOF
+
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --body-file "$body"
+            echo "Updated release PR #$existing"
+          else
+            gh pr create --base main --head dev --title 'Release: dev → main' --body-file "$body"
+          fi
+
+  # Never fails: its result is a check on the main commit, and Render deploys a main commit only
+  # once all its checks pass. Anything it can't do is left as a warning or a PR to dev.
+  sync-dev:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # After a merged release dev just fast-forwards; a squashed release or a hotfix needs a merge.
+      - name: Merge main into dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          if ! git rev-parse --verify --quiet origin/dev >/dev/null; then
+            echo '::notice::No dev branch yet: nothing to sync.'
+            exit 0
+          fi
+          git switch --quiet -C dev origin/dev
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo 'dev already has everything on main.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # Conflicts: hand them over as a PR from a copy of main (never main itself, which
+          # auto-delete would remove on merge), to be resolved there.
+          if ! git merge --no-edit -m 'Sync main into dev' origin/main; then
+            git merge --abort
+            branch="sync/main-$(git rev-parse --short origin/main)"
+            echo "::warning::main conflicts with dev: resolve it in the PR from $branch."
+            git push --quiet origin "origin/main:refs/heads/$branch" &&
+              gh pr create --base dev --head "$branch" --title 'Sync main into dev (conflicts)' \
+                --body 'main has changes dev lacks, and they conflict. Resolve the conflicts here, then merge with a merge commit.' ||
+              echo '::warning::Could not open the sync PR: merge main into dev by hand.'
+            exit 0
+          fi
+          if ! git push --quiet origin HEAD:dev; then
+            echo '::warning::Could not push to dev (it may have moved): merge main into dev by hand.'
+            exit 0
+          fi
+
+          # Fast-forwarded: dev is main's commit, which CI is already checking.
+          if [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]]; then
+            exit 0
+          fi
+          # Merged: that push started nothing (GITHUB_TOKEN), and dev has a new head, so check it
+          # and bring the release PR up to date.
+          gh workflow run ci.yml --ref dev || echo '::warning::Could not start CI on dev: run it from the Actions tab.'
+          gh workflow run release.yml --ref dev || echo '::warning::Could not update the release PR: run Release on dev from the Actions tab.'

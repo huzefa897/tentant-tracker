@@ -174,6 +174,23 @@ How it differs from the single server:
 
 6. **The uptime monitor** (above), then the [checks after a deploy](#checks-after-a-deploy), with the static site's URL for the app and the API's for `/api/…`.
 
-Releases are deployed by hand (`autoDeployTrigger: "off"`): once CI has passed on the `main` commit, use **Manual Deploy → Deploy latest commit** on each service whose code changed (the API for `backend/`, the static site for the rest). Turning auto-deploy off in the dashboard alone isn't enough: a Blueprint sync applies `render.yaml` again. Render keeps the two previous deploys for rollback on the free plan; it doesn't undo migrations ([Rolling back](#rolling-back) applies).
+Each service deploys `main` by itself once its GitHub checks pass (`branch: main`, `autoDeployTrigger: checksPass`), and only when its own files changed (`buildFilter`: the API for `backend/`, the static site for the rest). A change to these settings in the dashboard alone isn't enough: a Blueprint sync applies `render.yaml` again, so sync the Blueprint after changing them. **Manual Deploy** still works for a redeploy. Render keeps the two previous deploys for rollback on the free plan; it doesn't undo migrations ([Rolling back](#rolling-back) applies).
+
+### Branches and releases
+
+```
+ feature branch ──PR (squash)──▶ dev ──"Release: dev → main" PR (merge commit)──▶ main ──CI passes──▶ Render deploys
+                                  ▲                                                 │
+                                  └──────────── sync-dev: main merged back ─────────┘
+```
+
+- **`dev`** is where work lands: branch from it and open PRs against it (it's the repository's default branch, so new PRs and Dependabot's target it). CI runs on every PR and on every push to `dev`. Nothing deploys it.
+- **`main`** is production. Everything on it deploys, so it only moves through the release PR (or a hotfix, below).
+- **The release PR** ([.github/workflows/release.yml](../.github/workflows/release.yml)): after each push to `dev`, the `release-pr` job opens "Release: dev → main", or updates the one already open, listing the commits it brings and which services will deploy. **Merging it is the deploy button.** Merge with **Create a merge commit**, not squash: a squash gives `main` a commit `dev` doesn't have. Check its migrations first; rolling back doesn't undo them.
+- **Keeping the two level:** after every push to `main`, the `sync-dev` job merges `main` into `dev` if `dev` lacks anything (a squashed release, a hotfix). If they conflict, it opens a "Sync main into dev (conflicts)" PR from a copy of `main` for you to resolve. It never fails: its result is a check on the `main` commit, and Render deploys only once every check passes. It does nothing until `dev` exists.
+- **A hotfix** can go straight to `main` through a PR against it; `sync-dev` then brings it into `dev`.
+- **Two repository settings it needs** (Settings): *General > Default branch* is `dev`, which also keeps "Automatically delete head branches" from deleting `dev` when a release merges; and *Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests*, or `release-pr` can't open the PR.
+- PRs and pushes made by the workflows (with `GITHUB_TOKEN`) don't start CI themselves. The release PR shows the CI run from the push to `dev`, on the same commit. When `sync-dev` moves `dev` (a hotfix while work is pending), it starts CI and `release-pr` for the new head by `workflow_dispatch`, which `GITHUB_TOKEN` may trigger, so the release PR is never left unchecked. The merge to `main` is yours, so CI runs on it and Render waits for that.
+- **What counts as a release:** the files. If `dev` matches `main`, no release PR opens and an open one is closed. Its commit list leaves out commits from the last release PR's head and earlier, so work released by a squash isn't listed again.
 
 **To check before relying on it:** `DJANGO_NUM_PROXIES` is `3`, the number of proxies users have measured in front of Render services, not a documented figure. Render appends to `X-Forwarded-For` without clearing it, so too high a number lets clients choose their own address for the rate limits, and too low makes everyone share one. Check that requests from two networks (say, Wi-Fi and mobile data) are counted separately, e.g. by running down a low `DJANGO_THROTTLE_ADDRESS` from one of them.

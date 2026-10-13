@@ -3,7 +3,9 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]
+  # Release workflow's sync-dev starts it for dev's new head (its own pushes start nothing).
+  workflow_dispatch:
 
 # A new push to the same branch cancels the run already in progress.
 concurrency:

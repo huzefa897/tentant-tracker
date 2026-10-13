@@ -23,8 +23,10 @@ services:
     dockerCommand: sh render-start.sh
     # The app alone, no database query: Render calls it every few seconds.
     healthCheckPath: /api/v1/health/
-    # Deployed by hand (Manual Deploy in the dashboard), once CI has passed on the commit.
-    autoDeployTrigger: "off"
+    # main is production: each main commit deploys once its GitHub checks (CI) pass. Work lands
+    # on dev; merging the "Release: dev → main" PR is the deploy (docs/deployment.md).
+    branch: main
+    autoDeployTrigger: checksPass
     buildFilter:
       paths:
         - backend/**
@@ -100,7 +102,8 @@ services:
     # Dev dependencies too: the build needs Vite and vue-tsc.
     buildCommand: npm ci --include=dev && npm run build
     staticPublishPath: ./dist
-    autoDeployTrigger: "off"
+    branch: main
+    autoDeployTrigger: checksPass
     buildFilter:
       ignoredPaths:
         - backend/**
