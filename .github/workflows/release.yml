@@ -7,12 +7,14 @@ name: Release
 # docs/deployment.md ("Branches and releases").
 #
 # Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
-# Pushes and PRs made with GITHUB_TOKEN don't start other workflows: the release PR shows the
-# CI run from the push to dev, which ran on the same commit.
+# Pushes and PRs made with GITHUB_TOKEN don't start other workflows, except workflow_dispatch:
+# the release PR shows the CI run from the push to dev, and after sync-dev pushes to dev it
+# dispatches CI and this workflow for the new head, so the release PR is never left unchecked.
 
 on:
   push:
     branches: [dev, main]
+  workflow_dispatch:
 
 concurrency:
   group: release
@@ -35,14 +37,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Commits on dev that main doesn't have, merge commits aside (the syncs below).
-          commits="$(git log --no-merges --format='- %s' origin/main..origin/dev)"
           existing="$(gh pr list --base main --head dev --state open --json number --jq '.[0].number // empty')"
 
-          if [[ -z "$commits" ]]; then
-            echo 'dev has nothing main lacks; no release PR needed.'
+          # The files decide, not the commits: after a squashed release, dev keeps commits main
+          # never got, though their changes are on main.
+          if git diff --quiet origin/main origin/dev; then
+            echo 'dev matches main; nothing to release.'
+            if [[ -n "$existing" ]]; then
+              gh pr close "$existing" --comment 'dev now matches main: nothing left to release.'
+            fi
             exit 0
           fi
+
+          # Commits since the last release PR's head (already released, even if squashed) that
+          # main doesn't have, merge commits aside (the syncs below).
+          released="$(gh pr list --base main --head dev --state merged --limit 1 --json headRefOid --jq '.[0].headRefOid // empty')"
+          exclude=()
+          if [[ -n "$released" ]] && git cat-file -e "$released^{commit}" 2>/dev/null; then
+            exclude=("^$released")
+          fi
+          commits="$(git log --no-merges --format='- %s' origin/main..origin/dev "${exclude[@]}")"
+          [[ -n "$commits" ]] || commits='- (only merges: see the diff)'
 
           changed="$(git diff --name-only origin/main...origin/dev)"
           services=''
@@ -76,6 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -84,6 +100,8 @@ jobs:
 
       # After a merged release dev just fast-forwards; a squashed release or a hotfix needs a merge.
       - name: Merge main into dev
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if git merge-base --is-ancestor origin/main HEAD; then
@@ -97,3 +115,8 @@ jobs:
             exit 1
           fi
           git push origin HEAD:dev
+
+          # That push started nothing (GITHUB_TOKEN), and dev has a new head: check it, and bring
+          # the release PR up to date.
+          gh workflow run ci.yml --ref dev
+          gh workflow run release.yml --ref dev
