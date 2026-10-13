@@ -22,7 +22,7 @@ from billing.services import (
     reverse_payment,
 )
 
-from properties.models import Property, Tenancy
+from properties.models import Property, PropertyMembership, Tenancy
 
 from .factories import make_property, make_tenancy, make_user
 
@@ -430,7 +430,8 @@ class ConcurrentReversalTests(TransactionTestCase):
 
     def setUp(self):
         self.user = make_user()
-        self.tenancy = make_tenancy(make_property(member=self.user, role="owner"))
+        self.property = make_property(member=self.user, role="owner")
+        self.tenancy = make_tenancy(self.property)
         self.entry = make_bill(self.tenancy, self.user)
         self.payment = record_payment(
             entry_id=self.entry.pk,
@@ -451,6 +452,24 @@ class ConcurrentReversalTests(TransactionTestCase):
 
         self.assertEqual(sorted(outcomes), ["created"] + ["returned"] * 3)
         self.assertEqual(PaymentReversal.objects.count(), 1)
+        self.assertEqual(entry_amounts(self.entry).total_paid, Decimal("0.00"))
+
+    def test_two_owners_reversing_at_once_for_different_reasons_make_one(self):
+        second_owner = make_user("second-owner")
+        PropertyMembership.objects.create(user=second_owner, property=self.property, role="owner")
+        owners = [self.user, second_owner]
+        reasons = [self.REASON, "Recorded against the wrong bill."]
+
+        def reverse_as(index):
+            reverse_payment(payment_id=self.payment.pk, actor=owners[index], reason=reasons[index])
+            return "created"
+
+        outcomes = run_simultaneously(2, reverse_as)
+
+        self.assertEqual(sorted(outcomes), ["ReversalConflictError", "created"])
+        reversal = PaymentReversal.objects.get()
+        # Whichever owner got there first, its reason and its author are saved together.
+        self.assertEqual(reasons[owners.index(reversal.created_by)], reversal.reason)
         self.assertEqual(entry_amounts(self.entry).total_paid, Decimal("0.00"))
 
     def test_the_unique_column_decides_when_both_reach_the_insert(self):

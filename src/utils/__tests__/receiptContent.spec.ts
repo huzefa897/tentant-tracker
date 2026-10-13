@@ -14,6 +14,7 @@ const paidInFull: Partial<PaymentReceipt> = {
     address: '1 Example Road,\nHyderabad – 500001',
     contactNumber: '+919876543210',
     receivedBy: 'Test Manager',
+    authorizedBy: 'Test Manager',
   },
   tenant: {
     name: 'Test Tenant',
@@ -92,7 +93,13 @@ describe('getReceiptContent', () => {
   it('leaves out details that are not set, and is authorized by the property then', () => {
     const content = getReceiptContent(
       makeReceipt({
-        issuer: { name: 'Saleem Towers', address: 'Addr', contactNumber: '', receivedBy: '' },
+        issuer: {
+          name: 'Saleem Towers',
+          address: 'Addr',
+          contactNumber: '',
+          receivedBy: '',
+          authorizedBy: '',
+        },
         tenant: { name: 'Test Tenant', flatNumber: '102', mobileNumber: '', depositAmount: 0 },
       }),
     )
@@ -104,6 +111,19 @@ describe('getReceiptContent', () => {
     expect(content.tenant.map((field) => field.label)).not.toContain('Tenant Mobile Number')
     expect(content.tenant.slice(-1)[0]).toEqual({ label: 'Tenant Deposit Amount', value: '₹0' })
     expect(content.authorizedBy).toBe('AUTHORIZED BY · Saleem Towers')
+  })
+
+  it('names who received the money and who authorized the receipt separately', () => {
+    // A manager recorded the payment; an owner issued its receipt later.
+    const content = getReceiptContent(
+      makeReceipt({
+        ...paidInFull,
+        issuer: { ...paidInFull.issuer!, receivedBy: 'Test Manager', authorizedBy: 'Test Owner' },
+      }),
+    )
+
+    expect(content.issuer).toContainEqual({ label: 'Received By', value: 'Test Manager' })
+    expect(content.authorizedBy).toBe('AUTHORIZED BY · Test Owner')
   })
 
   it('prints the saved electricity amount, never recalculating it', () => {
