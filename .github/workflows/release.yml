@@ -86,16 +86,18 @@ jobs:
             gh pr create --base main --head dev --title 'Release: dev → main' --body-file "$body"
           fi
 
+  # Never fails: its result is a check on the main commit, and Render deploys a main commit only
+  # once all its checks pass. Anything it can't do is left as a warning or a PR to dev.
   sync-dev:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       actions: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: dev
           fetch-depth: 0
 
       # After a merged release dev just fast-forwards; a squashed release or a hotfix needs a merge.
@@ -103,20 +105,41 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          if ! git rev-parse --verify --quiet origin/dev >/dev/null; then
+            echo '::notice::No dev branch yet: nothing to sync.'
+            exit 0
+          fi
+          git switch --quiet -C dev origin/dev
           if git merge-base --is-ancestor origin/main HEAD; then
             echo 'dev already has everything on main.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if ! git merge --no-edit -m 'Sync main into dev' origin/main; then
-            echo '::error::main conflicts with dev: merge main into dev by hand and push.'
-            exit 1
-          fi
-          git push origin HEAD:dev
 
-          # That push started nothing (GITHUB_TOKEN), and dev has a new head: check it, and bring
-          # the release PR up to date.
-          gh workflow run ci.yml --ref dev
-          gh workflow run release.yml --ref dev
+          # Conflicts: hand them over as a PR from a copy of main (never main itself, which
+          # auto-delete would remove on merge), to be resolved there.
+          if ! git merge --no-edit -m 'Sync main into dev' origin/main; then
+            git merge --abort
+            branch="sync/main-$(git rev-parse --short origin/main)"
+            echo "::warning::main conflicts with dev: resolve it in the PR from $branch."
+            git push --quiet origin "origin/main:refs/heads/$branch" &&
+              gh pr create --base dev --head "$branch" --title 'Sync main into dev (conflicts)' \
+                --body 'main has changes dev lacks, and they conflict. Resolve the conflicts here, then merge with a merge commit.' ||
+              echo '::warning::Could not open the sync PR: merge main into dev by hand.'
+            exit 0
+          fi
+          if ! git push --quiet origin HEAD:dev; then
+            echo '::warning::Could not push to dev (it may have moved): merge main into dev by hand.'
+            exit 0
+          fi
+
+          # Fast-forwarded: dev is main's commit, which CI is already checking.
+          if [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]]; then
+            exit 0
+          fi
+          # Merged: that push started nothing (GITHUB_TOKEN), and dev has a new head, so check it
+          # and bring the release PR up to date.
+          gh workflow run ci.yml --ref dev || echo '::warning::Could not start CI on dev: run it from the Actions tab.'
+          gh workflow run release.yml --ref dev || echo '::warning::Could not update the release PR: run Release on dev from the Actions tab.'
