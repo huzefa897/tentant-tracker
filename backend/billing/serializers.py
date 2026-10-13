@@ -237,6 +237,7 @@ class ReceiptSerializer(serializers.BaseSerializer):
                 "address": receipt.issuer_address,
                 "contactNumber": receipt.issuer_contact_number,
                 "receivedBy": receipt.received_by_name,
+                "authorizedBy": receipt.authorized_by_name,
             },
             "tenant": {
                 "name": receipt.tenant_name,

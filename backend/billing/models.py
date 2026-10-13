@@ -332,11 +332,14 @@ class Receipt(models.Model):
     # issued_at, which would depend on the time zone of whoever downloads it.
     issued_date = models.DateField()
 
-    # Who issued it, from the property and the issuing person.
+    # Who issued it, from the property; who received the money (the payment's recorder); and who
+    # authorized the receipt (the person issuing it). Two people when, say, an owner issues the
+    # receipt for a manager's payment.
     issuer_name = models.CharField(max_length=150)
     issuer_address = models.TextField()
     issuer_contact_number = models.CharField(max_length=20, blank=True)
     received_by_name = models.CharField(max_length=150, blank=True)
+    authorized_by_name = models.CharField(max_length=150, blank=True)
 
     # The tenancy.
     tenant_name = models.CharField(max_length=150)

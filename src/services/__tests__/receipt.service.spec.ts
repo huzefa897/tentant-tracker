@@ -32,6 +32,7 @@ const receiptDto = {
     address: '1 Example Road',
     contactNumber: '',
     receivedBy: 'Test Manager',
+    authorizedBy: 'Test Manager',
   },
   tenant: {
     name: 'Shaik Zahid Ali',
@@ -89,6 +90,7 @@ describe('parseReceipt', () => {
         address: '1 Example Road',
         contactNumber: '',
         receivedBy: 'Test Manager',
+        authorizedBy: 'Test Manager',
       },
       tenant: {
         name: 'Shaik Zahid Ali',
@@ -145,6 +147,10 @@ describe('parseReceipt', () => {
     ['a rent due day of 0', { rentDueDay: 0 }],
     ['no issuer', { issuer: null }],
     ['an issuer without an address', { issuer: { ...receiptDto.issuer, address: ' ' } }],
+    [
+      'an issuer without an authorizer',
+      { issuer: { ...receiptDto.issuer, authorizedBy: undefined } },
+    ],
     ['a tenant without a flat', { tenant: { ...receiptDto.tenant, flatNumber: '' } }],
     ['units with two decimals', { charges: { ...receiptDto.charges, electricityUnits: '75.00' } }],
     ['missing notes', { paymentNotes: undefined }],

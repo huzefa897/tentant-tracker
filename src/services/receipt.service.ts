@@ -12,7 +12,13 @@ export interface ReceiptDto {
   entryId: string
   issuedAt: string
   issuedDate: string // YYYY-MM-DD
-  issuer: { name: string; address: string; contactNumber: string; receivedBy: string }
+  issuer: {
+    name: string
+    address: string
+    contactNumber: string
+    receivedBy: string
+    authorizedBy: string
+  }
   tenant: { name: string; flatNumber: string; mobileNumber: string; depositAmount: string }
   billingMonth: string // YYYY-MM
   rentDueDay: number
@@ -98,6 +104,7 @@ export function parseReceipt(value: unknown): ReceiptDto {
   text(issuer, 'address', { required: true })
   text(issuer, 'contactNumber')
   text(issuer, 'receivedBy')
+  text(issuer, 'authorizedBy')
 
   const tenant = record(receipt.tenant, 'tenant')
   text(tenant, 'name', { required: true })

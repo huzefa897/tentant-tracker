@@ -49,6 +49,28 @@ class ReceiptTestCase(TestCase):
 
 
 class IssueReceiptServiceTests(ReceiptTestCase):
+    def test_names_the_recorder_as_received_by_and_the_issuer_as_authorized_by(self):
+        manager = make_user("manager", name="Farhan Manager")
+        PropertyMembership.objects.create(user=manager, property=self.property, role="manager")
+        payment = make_payment(self.entry, manager, "1000.00", paid_date=date(2026, 10, 7))
+
+        # An owner issues it later, e.g. by downloading it.
+        receipt = self.issue(payment).receipt
+
+        self.assertEqual(receipt.received_by_name, "Farhan Manager")
+        self.assertEqual(receipt.authorized_by_name, "Imran Khan")
+        self.assertEqual(receipt.issued_by, self.user)
+
+    def test_another_owner_issuing_it_still_names_the_owner_who_recorded_it(self):
+        second_owner = make_user("second-owner", name="Ayesha Saleem")
+        PropertyMembership.objects.create(user=second_owner, property=self.property, role="owner")
+
+        receipt = issue_payment_receipt(payment_id=self.payment.pk, actor=second_owner).receipt
+
+        self.assertEqual(receipt.received_by_name, "Imran Khan")
+        self.assertEqual(receipt.authorized_by_name, "Ayesha Saleem")
+        self.assertEqual(receipt.issued_by, second_owner)
+
     def test_snapshots_the_payment_and_the_bill_as_it_stood(self):
         result = self.issue()
         receipt = result.receipt
@@ -69,6 +91,7 @@ class IssueReceiptServiceTests(ReceiptTestCase):
             ("Saleem Towers", "1 Main Road", "+919000000001"),
         )
         self.assertEqual(receipt.received_by_name, "Imran Khan")
+        self.assertEqual(receipt.authorized_by_name, "Imran Khan")
         self.assertEqual(
             (receipt.tenant_name, receipt.flat_number, receipt.tenant_mobile_number),
             ("Shaik Zahid Ali", "202", "+919000000101"),
@@ -270,6 +293,7 @@ class ReceiptApiTests(ReceiptTestCase):
                     "address": "1 Main Road",
                     "contactNumber": "+919000000001",
                     "receivedBy": "Imran Khan",
+                    "authorizedBy": "Imran Khan",
                 },
                 "tenant": {
                     "name": "Shaik Zahid Ali",

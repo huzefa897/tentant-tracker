@@ -820,15 +820,14 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
         expect(view!.get('[role="status"]').text()).toBe('Payment of ₹10,000 reversed.')
       })
 
-      it('never offers reversing to a manager', async () => {
+      it('offers reversing to a manager too', async () => {
         vi.mocked(accessService.getMe).mockResolvedValue(
           identityWith([{ ...testProperty, role: 'manager' }]),
         )
         await openDetails('tenant-001', 'sep')
 
-        expect(view!.find('[data-testid="reverse-payment"]').exists()).toBe(false)
         expect(paymentRows()).toEqual([
-          ['3 Oct 2026', '₹10,000', 'Initial payment', 'Issue receipt'],
+          ['3 Oct 2026', '₹10,000', 'Initial payment', 'Issue receipt Reverse'],
         ])
       })
     })

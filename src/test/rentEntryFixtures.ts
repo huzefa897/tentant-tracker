@@ -83,6 +83,7 @@ export function makeReceipt(overrides: Partial<PaymentReceipt> = {}): PaymentRec
       address: '1 Example Road\nHyderabad',
       contactNumber: '',
       receivedBy: 'Test Manager',
+      authorizedBy: 'Test Manager',
     },
     tenant: {
       name: 'Shaik Zahid Ali',

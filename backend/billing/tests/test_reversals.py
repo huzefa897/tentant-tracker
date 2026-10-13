@@ -26,6 +26,7 @@ from billing.services import (
 )
 from billing.summary import ledger_summary
 from properties.models import PropertyMembership
+from properties.roles import ROLE_CAPABILITIES, Role
 
 from .factories import make_property, make_tenancy, make_user
 from .test_payments_api import TODAY, entries_url, make_entry, make_payment, payments_url
@@ -77,6 +78,11 @@ class ReversalTestCase(TestCase):
         manager = make_user("manager", name="Manager")
         PropertyMembership.objects.create(user=manager, property=self.property, role="manager")
         return manager
+
+    def make_second_owner(self):
+        owner = make_user("second-owner", name="Second Owner")
+        PropertyMembership.objects.create(user=owner, property=self.property, role="owner")
+        return owner
 
 
 class ReversePaymentServiceTests(ReversalTestCase):
@@ -187,9 +193,46 @@ class ReversePaymentServiceTests(ReversalTestCase):
             self.reverse(reason="Wrong bill.")
         self.assertEqual(PaymentReversal.objects.get().reason, REASON)
 
-    def test_managers_cant_reverse(self):
-        with self.assertRaises(ReversalNotAllowedError):
-            self.reverse(actor=self.make_manager())
+    def test_managers_can_reverse(self):
+        manager = self.make_manager()
+
+        self.reverse(actor=manager)
+
+        self.assertEqual(PaymentReversal.objects.get().created_by, manager)
+        self.assertEqual(self.amounts().total_paid, Decimal("0.00"))
+
+    def test_another_owner_can_reverse_a_payment_they_did_not_record(self):
+        second_owner = self.make_second_owner()
+
+        result = self.reverse(actor=second_owner)
+
+        self.assertTrue(result.created)
+        self.assertEqual(result.reversal.created_by, second_owner)
+        self.assertEqual(self.amounts().total_paid, Decimal("0.00"))
+
+    def test_a_second_owner_giving_the_same_reason_gets_the_first_reversal(self):
+        self.reverse()
+
+        result = self.reverse(actor=self.make_second_owner())
+
+        self.assertFalse(result.created)
+        self.assertEqual(result.reversal.created_by, self.owner)
+        self.assertEqual(PaymentReversal.objects.count(), 1)
+
+    def test_a_second_owner_giving_another_reason_conflicts(self):
+        self.reverse()
+
+        with self.assertRaises(ReversalConflictError):
+            self.reverse(actor=self.make_second_owner(), reason="Wrong bill.")
+
+        self.assertEqual(PaymentReversal.objects.get().created_by, self.owner)
+
+    def test_a_role_without_the_capability_cant_reverse(self):
+        manager = self.make_manager()
+
+        with mock.patch.dict(ROLE_CAPABILITIES, {Role.MANAGER: frozenset()}):
+            with self.assertRaises(ReversalNotAllowedError):
+                self.reverse(actor=manager)
 
         self.assertFalse(PaymentReversal.objects.exists())
 
@@ -406,12 +449,35 @@ class ReversalApiTests(ReversalTestCase):
         self.assertEqual(conflict.json()["code"], "reversal_conflict")
         self.assertEqual(PaymentReversal.objects.count(), 1)
 
-    def test_managers_are_refused_and_nothing_changes(self):
+    def test_managers_can_reverse(self):
         self.issue_receipt()
         client = APIClient()
         client.force_authenticate(self.make_manager())
 
         response = self.post(client=client)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["payment"]["status"], "reversed")
+        self.assertIsNotNone(Receipt.objects.get().voided_at)
+
+    def test_another_owner_can_reverse(self):
+        self.issue_receipt()
+        client = APIClient()
+        client.force_authenticate(self.make_second_owner())
+
+        response = self.post(client=client)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["payment"]["status"], "reversed")
+        self.assertIsNotNone(Receipt.objects.get().voided_at)
+
+    def test_a_role_without_the_capability_is_refused_and_nothing_changes(self):
+        self.issue_receipt()
+        client = APIClient()
+        client.force_authenticate(self.make_manager())
+
+        with mock.patch.dict(ROLE_CAPABILITIES, {Role.MANAGER: frozenset()}):
+            response = self.post(client=client)
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(PaymentReversal.objects.exists())

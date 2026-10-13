@@ -145,3 +145,24 @@ class BillVoidRollbackTests(TransactionTestCase):
         with connection.cursor() as cursor:
             table = connection.introspection.get_table_description(cursor, "billing_rententry")
         self.assertNotIn("status", [column.name for column in table])
+
+
+class ReceiptAuthorizedByBackfillTests(TransactionTestCase):
+    """billing.0010 copies each existing receipt's received-by name, until then the issuing
+    person's, as its authorized-by name, so receipts already issued print as they did."""
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_existing_receipts_keep_their_issuer_as_authorized_by(self):
+        receipt = issue_in_new_property(make_user(name="Imran Khan"), "Property A", role="owner")
+        Receipt.objects.filter(pk=receipt.pk).update(received_by_name="Issued By Then")
+
+        MigrationExecutor(connection).migrate([("billing", "0009_bill_void_and_replacement")])
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+        receipt.refresh_from_db()
+        self.assertEqual(receipt.authorized_by_name, "Issued By Then")
+        self.assertEqual(receipt.received_by_name, "Issued By Then")

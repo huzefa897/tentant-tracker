@@ -22,7 +22,7 @@ A bill is never edited or deleted. Two owner-only actions correct one; both only
 | **Void bill**    | The bill shouldn't exist (entered twice, wrong tenancy)  | The bill becomes void; its month can have a new bill                              |
 | **Correct bill** | Its charges are wrong (e.g. October's electricity units) | The bill becomes void and its replacement, for the same month, is created with it |
 
-**Payments first.** A bill is voided or corrected only when none of its payments still count. Otherwise the owner reverses each one first ([payments-and-receipts.md](payments-and-receipts.md#corrections-reversing-a-payment); that voids its receipt), then corrects the bill, then records the payments again against the replacement, deliberately. Payments are never moved, and a reversal refunds nothing.
+**Payments first.** A bill is voided or corrected only when none of its payments still count. Otherwise an owner or manager reverses each one first ([payments-and-receipts.md](payments-and-receipts.md#corrections-reversing-a-payment); that voids its receipt), then corrects the bill, then records the payments again against the replacement, deliberately. Payments are never moved, and a reversal refunds nothing.
 
 ### Backend
 
