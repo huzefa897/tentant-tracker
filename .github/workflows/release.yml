@@ -82,6 +82,7 @@ jobs:
           ref: dev
           fetch-depth: 0
 
+      # After a merged release dev just fast-forwards; a squashed release or a hotfix needs a merge.
       - name: Merge main into dev
         run: |
           set -euo pipefail
@@ -91,7 +92,7 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if ! git merge --no-ff --no-edit -m 'Sync main into dev' origin/main; then
+          if ! git merge --no-edit -m 'Sync main into dev' origin/main; then
             echo '::error::main conflicts with dev: merge main into dev by hand and push.'
             exit 1
           fi
