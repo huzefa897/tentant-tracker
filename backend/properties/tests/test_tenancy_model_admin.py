@@ -189,6 +189,12 @@ class TenancyAdminTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(Tenancy.objects.get().flat_number, "G-01")
 
+    def test_an_empty_due_day_is_the_start_dates_day(self):
+        response = self.post(rent_due_day="", start_date="2026-09-15")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Tenancy.objects.get().rent_due_day, 15)
+
     def test_invalid_amounts_and_dates_block_the_record(self):
         for overrides in (
             {"rent_amount": "0"},
