@@ -46,6 +46,7 @@ class RentEntryAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
     list_display = (
         "tenancy",
         "billing_month",
+        "due_date",
         "status",
         "rent_amount",
         "total_due",
@@ -61,6 +62,8 @@ class RentEntryAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
         "id",
         "tenancy",
         "billing_month",
+        "payment_timing",
+        "due_date",
         "rent_amount",
         "electricity_units",
         "electricity_rate",

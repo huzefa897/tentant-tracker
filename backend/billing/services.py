@@ -18,6 +18,7 @@ from .models import (
     PaymentReversal,
     Receipt,
     RentEntry,
+    bill_due,
     receipt_reference,
     tenancy_covers_month,
 )
@@ -310,7 +311,8 @@ def create_rent_entry(
 
     validated_data: billing_month (first of the month), electricity_units, water_amount,
     and optionally rent_amount (defaults to the tenancy's rent) and notes. The electricity
-    rate always comes from the tenancy.
+    rate always comes from the tenancy, and the payment timing and due date from the property
+    and tenancy (bill_due).
 
     creation_key: the request's Idempotency-Key (required with an initial payment). A retry
     with the same key and request returns the bill it created; the initial payment is recorded
@@ -349,6 +351,7 @@ def create_rent_entry(
                 raise DuplicateBillingMonthError()
 
             rent_amount = validated_data.get("rent_amount")
+            payment_timing, due_date = bill_due(locked, billing_month)
             entry = RentEntry.objects.create(
                 tenancy=locked,
                 billing_month=billing_month,
@@ -357,6 +360,8 @@ def create_rent_entry(
                 electricity_rate=locked.electricity_rate,
                 water_amount=validated_data["water_amount"],
                 notes=validated_data.get("notes", ""),
+                payment_timing=payment_timing,
+                due_date=due_date,
                 created_by=actor,
                 creation_key=creation_key,
                 creation_fingerprint=fingerprint,
@@ -775,9 +780,9 @@ def correct_rent_entry(
     happen or neither, so a replacement that fails leaves the original active.
 
     validated_data: rent_amount, electricity_units, water_amount and optionally notes, the
-    replacement's charges (the app starts from the original's). The tenancy, month and
-    electricity rate are the original's: they're historical values, never today's tenancy
-    defaults. At least one must differ from the original (NothingToCorrectError).
+    replacement's charges (the app starts from the original's). The tenancy, month,
+    electricity rate and due date are the original's: they're historical values, never today's
+    tenancy defaults. At least one must differ from the original (NothingToCorrectError).
 
     idempotency_key: the request's Idempotency-Key, saved as the replacement's creation key. A
     retry with the same key and request returns the correction it made.
@@ -835,6 +840,8 @@ def correct_rent_entry(
                 electricity_rate=original.electricity_rate,
                 water_amount=validated_data["water_amount"],
                 notes=notes,
+                payment_timing=original.payment_timing,
+                due_date=original.due_date,
                 created_by=actor,
                 creation_key=idempotency_key,
                 creation_fingerprint=fingerprint,

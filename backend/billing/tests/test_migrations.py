@@ -137,7 +137,9 @@ class BillVoidRollbackTests(TransactionTestCase):
         with self.assertRaisesMessage(IrreversibleError, "1 void bill(s)"):
             self.migrate_back()
 
-        self.assertEqual(RentEntry.objects.get(pk=self.entry.pk).status, "void")
+        # Only the status: the rollback undid the later migrations' columns before it stopped.
+        status = RentEntry.objects.filter(pk=self.entry.pk).values_list("status", flat=True)
+        self.assertEqual(status.get(), "void")
 
     def test_rolling_back_works_without_void_bills(self):
         self.migrate_back()

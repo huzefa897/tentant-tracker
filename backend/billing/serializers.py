@@ -6,7 +6,7 @@ from rest_framework import serializers
 
 from properties.models import business_date
 
-from .calculations import entry_amounts
+from .calculations import due_status, entry_amounts
 from .models import Payment, PaymentReversal, Receipt, RentEntry
 
 MONTH_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
@@ -32,6 +32,8 @@ SERVER_ASSIGNED_FIELDS = {
     "voidReason",
     "replacesEntryId",
     "replacedByEntryId",
+    "paymentTiming",
+    "dueDate",
 }
 # Derived from the charges and payments, never typed in.
 DERIVED_FIELDS = {
@@ -42,6 +44,7 @@ DERIVED_FIELDS = {
     "outstandingAmount",
     "paymentStatus",
     "status",
+    "dueStatus",
 }
 # Payments are separate records: one received with a new bill is sent as initialPayment.
 PAYMENT_FIELDS = {
@@ -375,6 +378,10 @@ class RentEntrySerializer(serializers.ModelSerializer):
     (outstandingAmount "0.00") and has no paymentStatus (null). replacesEntryId and
     replacedByEntryId link a correction's two bills (else null). Lists load the voider and
     replacement in the same query (select_related("voided_by", "replaced_by")).
+
+    paymentTiming ("prepaid" | "postpaid") and dueDate are saved with the bill. dueStatus
+    ("settled", "overdue", "due_today", "upcoming") compares them with today at the property;
+    all three are null on a bill from before due dates, and dueStatus is null on a void bill.
     """
 
     tenancyId = serializers.UUIDField(source="tenancy_id")
@@ -420,6 +427,11 @@ class RentEntrySerializer(serializers.ModelSerializer):
             "totalPaid": str(amounts.total_paid),
             "outstandingAmount": str(amounts.outstanding_amount),
             "paymentStatus": amounts.payment_status,
+            "paymentTiming": instance.payment_timing,
+            "dueDate": None if instance.due_date is None else instance.due_date.isoformat(),
+            "dueStatus": None
+            if instance.status == RentEntry.Status.VOID
+            else due_status(instance.due_date, amounts.outstanding_amount, business_date()),
             "notes": data["notes"],
             "createdAt": data["createdAt"],
             "status": instance.status,

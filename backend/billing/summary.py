@@ -89,6 +89,8 @@ def ledger_summary() -> list[tuple[str, str]]:
                     entry.pk,
                     entry.tenancy_id,
                     entry.billing_month,
+                    entry.payment_timing,
+                    entry.due_date,
                     entry.status,
                     entry.voided_at,
                     entry.voided_by_id,

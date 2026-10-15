@@ -8,7 +8,9 @@ from django.db import models
 from django.db.models import DecimalField, F, Q, Sum, Value
 from django.db.models.functions import Coalesce, Round
 
-from properties.models import Property, Tenancy
+from properties.models import PaymentTiming, Property, Tenancy
+
+from .calculations import due_date_for
 
 
 def month_end(billing_month: date) -> date:
@@ -21,6 +23,14 @@ def tenancy_covers_month(tenancy: Tenancy, billing_month: date) -> bool:
     return tenancy.start_date <= month_end(billing_month) and (
         tenancy.end_date is None or tenancy.end_date >= billing_month
     )
+
+
+def bill_due(tenancy: Tenancy, billing_month: date) -> tuple[str, date]:
+    """The payment timing and due date a new bill for this month gets: the property's timing
+    and the tenancy's due day as they are now. Saved on the bill, never worked out again, so
+    changing either later doesn't move an existing bill's due date."""
+    timing = tenancy.property.payment_timing
+    return timing, due_date_for(billing_month, tenancy.rent_due_day, timing)
 
 
 MONEY = DecimalField(max_digits=12, decimal_places=2)
@@ -99,6 +109,13 @@ class RentEntry(models.Model):
     water_amount = models.DecimalField(max_digits=10, decimal_places=2)
     # A bounded column (varchar), so the database enforces the 500-character limit too.
     notes = models.CharField(max_length=500, blank=True)
+    # When it's due (bill_due), saved when the bill is created from the property's timing and the
+    # tenancy's due day at the time. Empty only on bills from before due dates, until
+    # `fill_bill_due_dates` gives them one.
+    payment_timing = models.CharField(
+        max_length=8, choices=PaymentTiming.choices, null=True, blank=True
+    )
+    due_date = models.DateField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -185,6 +202,18 @@ class RentEntry(models.Model):
             models.CheckConstraint(
                 condition=Q(billing_month__day=1),
                 name="rent_entry_billing_month_first_day",
+            ),
+            # Both or neither, and never due before the month it bills. The isnull checks are
+            # needed: a comparison with NULL isn't false, and a CHECK only refuses false.
+            models.CheckConstraint(
+                condition=Q(payment_timing__isnull=True, due_date__isnull=True)
+                | Q(
+                    payment_timing__isnull=False,
+                    due_date__isnull=False,
+                    payment_timing__in=PaymentTiming.values,
+                    due_date__gte=F("billing_month"),
+                ),
+                name="rent_entry_due_date_with_timing",
             ),
             models.UniqueConstraint(
                 fields=["creation_key"],

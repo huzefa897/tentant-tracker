@@ -185,6 +185,9 @@ class ImportLedgerTests(TestCase):
         # Historical rent, not the tenancy's current ₹15,000.
         self.assertEqual(september.rent_amount, Decimal("16000.00"))
         self.assertEqual(september.payments.get().paid_date, date(2026, 9, 20))
+        # The property's timing (postpaid) and the tenancy's due day (11th) as they are now.
+        self.assertEqual(september.payment_timing, "postpaid")
+        self.assertEqual(september.due_date, date(2026, 10, 11))
 
     def test_keeps_receipt_references_and_snapshots_them_as_issued(self):
         self.run_import()

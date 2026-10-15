@@ -31,7 +31,7 @@ from properties.models import Property, Tenancy
 
 from .calculations import ZERO, entry_amounts
 from .legacy_ledger import RECEIPT_SUFFIX, Ledger, LedgerBill, LedgerPayment
-from .models import LegacyRecord, Payment, Receipt, RentEntry, tenancy_covers_month
+from .models import LegacyRecord, Payment, Receipt, RentEntry, bill_due, tenancy_covers_month
 from .services import receipt_problem, receipt_snapshot
 
 # Imported payments' idempotency keys are derived from their source ids, so they're stable.
@@ -204,6 +204,9 @@ class _Importer:
                     "wasn't imported from this source; remove one of them first"
                 )
                 return
+            # The tenancy's due day and the property's timing as they are now, like
+            # fill_bill_due_dates: the Sheet keeps no history of either.
+            payment_timing, due_date = bill_due(tenancy, bill.billing_month)
             entry = RentEntry.objects.create(
                 tenancy=tenancy,
                 billing_month=bill.billing_month,
@@ -212,6 +215,8 @@ class _Importer:
                 electricity_rate=bill.electricity_rate,
                 water_amount=bill.water_amount,
                 notes=bill.notes,
+                payment_timing=payment_timing,
+                due_date=due_date,
                 created_by=self.imported_by,
             )
             self.record(source_id, Kind.BILL, entry, fingerprint)
