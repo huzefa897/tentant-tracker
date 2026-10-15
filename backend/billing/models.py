@@ -5,7 +5,7 @@ from datetime import date
 
 from django.conf import settings
 from django.db import models
-from django.db.models import DecimalField, F, Q, Sum, Value
+from django.db.models import DecimalField, F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce, Round
 
 from properties.models import PaymentTiming, Property, Tenancy
@@ -36,34 +36,58 @@ def bill_due(tenancy: Tenancy, billing_month: date) -> tuple[str, date]:
 MONEY = DecimalField(max_digits=12, decimal_places=2)
 
 
+# The one definition of a bill's amounts in SQL, shared by bill lists, their filters and the
+# dashboard; billing/calculations.py is the same rule in Python. Payments are summed in a
+# subquery per bill, never joined, so adding up many bills never counts a bill once per payment.
+
+
+def effective_paid_sql():
+    """The bill's payments that weren't reversed (reversals are corrections, kept as history)."""
+    paid = (
+        Payment.objects.filter(entry=OuterRef("pk"), reversal__isnull=True)
+        .order_by()
+        .values("entry")
+        .annotate(total=Sum("amount"))
+        .values("total")
+    )
+    return Coalesce(Subquery(paid, output_field=MONEY), Value(0), output_field=MONEY)
+
+
+def total_due_sql():
+    """Electricity rounded to paise, then added. PostgreSQL rounds halves away from zero, which
+    is half up for these non-negative amounts."""
+    return models.ExpressionWrapper(
+        F("rent_amount")
+        + Round(F("electricity_units") * F("electricity_rate"), 2)
+        + F("water_amount"),
+        output_field=MONEY,
+    )
+
+
+def outstanding_sql():
+    """What's left to pay. Callers keep to active bills: a void bill owes nothing."""
+    return models.ExpressionWrapper(total_due_sql() - effective_paid_sql(), output_field=MONEY)
+
+
 class RentEntryQuerySet(models.QuerySet):
     def active(self):
         """Bills that count: a void bill is kept as history but owes nothing."""
         return self.filter(status=RentEntry.Status.ACTIVE)
 
     def with_amounts(self):
-        """Annotates each bill's effective payments sum (`paid_total`) and total due
-        (`due_total`) in the query itself, so a list of bills needs no query per bill and can be
-        filtered by status.
-
-        due_total follows billing/calculations.py: electricity rounded to paise, then added.
-        PostgreSQL rounds halves away from zero, which is half up for these non-negative
-        amounts. The serializer still calculates the shown figures with calculations.py.
-        """
+        """Annotates each bill's effective payments sum (`paid_total`), total due (`due_total`)
+        and what's left (`outstanding_total`; meaningful for active bills) in the query itself,
+        so a list of bills needs no query per bill and can be filtered by them. The serializer
+        still calculates the shown figures with calculations.py."""
         return self.annotate(
-            # Reversed payments don't count: they're corrections, kept only as history.
-            paid_total=Coalesce(
-                Sum("payments__amount", filter=Q(payments__reversal__isnull=True)),
-                Value(0),
-                output_field=MONEY,
-            ),
-            due_total=models.ExpressionWrapper(
-                F("rent_amount")
-                + Round(F("electricity_units") * F("electricity_rate"), 2)
-                + F("water_amount"),
-                output_field=MONEY,
-            ),
+            paid_total=effective_paid_sql(),
+            due_total=total_due_sql(),
+            outstanding_total=outstanding_sql(),
         )
+
+    def owing(self):
+        """Active bills with money still to pay. Needs with_amounts()."""
+        return self.active().filter(outstanding_total__gt=0)
 
     def with_payment_status(self, status: str):
         """Active bills in one payment status (calculations.PaymentStatus): a void bill has
