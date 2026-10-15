@@ -11,6 +11,10 @@ export type PaymentTiming = 'prepaid' | 'postpaid'
 // overdue. From the backend, which compares the due date with today at the property.
 export type DueStatus = 'settled' | 'overdue' | 'due_today' | 'upcoming'
 
+// A filter on a list of bills: one payment status, or outstanding (unpaid or partially paid:
+// money still to pay).
+export type EntryStatusFilter = PaymentStatus | 'outstanding'
+
 // A new bill as the form submits it. The electricity rate is the tenant's current rate, used
 // for the preview only: the backend copies the rate from the tenancy when it saves the bill.
 export interface RentEntryInput {
@@ -107,6 +111,6 @@ export interface RentEntryFilters {
   billStatus?: BillStatus | 'all'
   year?: string // YYYY
   billingMonth?: string // YYYY-MM
-  paymentStatus?: PaymentStatus
+  paymentStatus?: EntryStatusFilter
   page?: number
 }

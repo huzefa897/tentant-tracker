@@ -1,6 +1,7 @@
 import type { Payment } from '@/types/payment'
 import type {
   DueStatus,
+  EntryStatusFilter,
   PaymentStatus,
   PaymentTiming,
   RentEntry,
@@ -63,6 +64,10 @@ const DUE_STATUS_LABELS: Record<DueStatus, string> = {
 
 export function formatDueStatus(status: DueStatus): string {
   return DUE_STATUS_LABELS[status]
+}
+
+export function formatEntryStatusFilter(filter: EntryStatusFilter): string {
+  return filter === 'outstanding' ? 'Outstanding' : formatPaymentStatus(filter)
 }
 
 export function formatPaymentTiming(timing: PaymentTiming): string {

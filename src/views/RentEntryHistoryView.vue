@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ChevronLeft, ChevronRight, History, Plus, User } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -17,8 +17,8 @@ import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useRentEntryStore } from '@/stores/rentEntry'
-import type { PaymentStatus } from '@/types/rentEntry'
-import { formatPaymentStatus, sumEntryAmounts } from '@/utils/rentCalculations'
+import type { EntryStatusFilter } from '@/types/rentEntry'
+import { formatEntryStatusFilter, sumEntryAmounts } from '@/utils/rentCalculations'
 
 // The URL is the source of truth, never the dashboard's selected tenant, so a saved link
 // always shows the tenant it names.
@@ -27,7 +27,14 @@ const props = defineProps<{
 }>()
 
 const rentEntryStore = useRentEntryStore()
+const route = useRoute()
 const router = useRouter()
+
+// ?status=outstanding opens the tenant's bills with money still to pay (the dashboard's View
+// bills); anything else starts unfiltered.
+function initialStatus(): EntryStatusFilter | 'all' {
+  return route.query.status === 'outstanding' ? 'outstanding' : 'all'
+}
 
 const {
   tenant,
@@ -40,7 +47,7 @@ const {
 const PAGE_SIZE = 12
 
 const selectedYear = ref('all')
-const selectedStatus = ref<PaymentStatus | 'all'>('all')
+const selectedStatus = ref<EntryStatusFilter | 'all'>(initialStatus())
 const showVoid = ref(false)
 const page = ref(1)
 
@@ -82,7 +89,7 @@ watch(
     resetReceiptDownload()
     historyShown.value = false
     selectedYear.value = 'all'
-    selectedStatus.value = 'all'
+    selectedStatus.value = initialStatus()
     showVoid.value = false
     page.value = 1
     load()
@@ -137,7 +144,7 @@ const noMatchesMessage = computed(() => {
   const status =
     selectedStatus.value === 'all'
       ? ''
-      : `${formatPaymentStatus(selectedStatus.value).toLowerCase()} `
+      : `${formatEntryStatusFilter(selectedStatus.value).toLowerCase()} `
   const year = selectedYear.value === 'all' ? '' : ` in ${selectedYear.value}`
   return `No ${status}entries${year}.`
 })

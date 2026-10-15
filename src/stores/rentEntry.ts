@@ -11,8 +11,8 @@ import type { PaymentReceipt } from '@/types/receipt'
 import type {
   CorrectedEntry,
   EntryCorrectionInput,
+  EntryStatusFilter,
   NewRentEntrySubmission,
-  PaymentStatus,
   RentEntry,
 } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
@@ -203,7 +203,7 @@ export interface EntryHistory {
   // Void bills listed beside the active ones.
   includeVoid: boolean
   year: string | null
-  paymentStatus: PaymentStatus | null
+  paymentStatus: EntryStatusFilter | null
   page: number
   entries: RentEntry[]
   count: number
@@ -329,7 +329,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
     options: {
       includeVoid?: boolean
       year?: string | null
-      paymentStatus?: PaymentStatus | null
+      paymentStatus?: EntryStatusFilter | null
       page?: number
     },
   ) {

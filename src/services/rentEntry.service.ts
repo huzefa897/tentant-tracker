@@ -300,7 +300,8 @@ export const rentEntryService = {
     if (filters.billStatus && filters.billStatus !== 'active') params.status = filters.billStatus
     if (filters.year) params.year = filters.year
     if (filters.billingMonth) params.billing_month = filters.billingMonth
-    if (filters.paymentStatus) params.payment_status = filters.paymentStatus
+    if (filters.paymentStatus === 'outstanding') params.balance = 'outstanding'
+    else if (filters.paymentStatus) params.payment_status = filters.paymentStatus
     if (page > 1) params.page = page
 
     const data = await request(() => api.get(entriesUrl(propertyId, tenancyId), { params }))

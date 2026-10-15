@@ -121,7 +121,10 @@ export function pageOf(
           entry.billStatus === (filters.billStatus ?? 'active')) &&
         (!filters.year || entry.billingMonth.startsWith(`${filters.year}-`)) &&
         (!filters.billingMonth || entry.billingMonth === filters.billingMonth) &&
-        (!filters.paymentStatus || entry.status === filters.paymentStatus),
+        (!filters.paymentStatus ||
+          (filters.paymentStatus === 'outstanding'
+            ? entry.billStatus === 'active' && entry.outstanding > 0
+            : entry.status === filters.paymentStatus)),
     )
     // Newest month first, then newest created (a correction's replacement before the original).
     .sort(
