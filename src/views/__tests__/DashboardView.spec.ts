@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import router from '@/router'
 import { accessService } from '@/services/access.service'
 import { ApiError } from '@/services/apiError'
+import { dashboardService } from '@/services/dashboard.service'
 import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
@@ -23,6 +24,7 @@ import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import DashboardView from '@/views/DashboardView.vue'
 import { SEARCH_DEBOUNCE_MS } from '@/components/tenant/TenantSelector.vue'
 import { resetTenantService } from '@/test/mocks/tenantService'
+import { fakeDashboard, makeSummary } from '@/test/mocks/dashboardService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
@@ -63,11 +65,11 @@ afterEach(() => {
 })
 
 describe('DashboardView', () => {
-  it('loads tenants but shows the empty state until one is selected', async () => {
+  it('loads tenants but opens on pending payments until one is selected', async () => {
     await mountView()
 
     expect(useTenantStore().results).toHaveLength(3)
-    expect(view!.text()).toContain('Select a tenant')
+    expect(view!.get('h1').text()).toBe('Pending payments')
     expect(view!.find('#tenant-name').exists()).toBe(false)
   })
 
@@ -81,7 +83,7 @@ describe('DashboardView', () => {
 
     expect(useTenantStore().selectedTenantId).toBe('tenant-001')
     expect(view!.get('#tenant-name').text()).toBe('Shaik Zahid Ali')
-    expect(view!.text()).not.toContain('Select a tenant')
+    expect(view!.find('[data-testid="pending-payments"]').exists()).toBe(false)
   })
 
   it('opens a new entry for the selected tenant', async () => {
@@ -463,7 +465,148 @@ describe('DashboardView', () => {
 
       expect(useTenantStore().selectedTenant).toBeNull()
       expect(view!.find('#tenant-name').exists()).toBe(false)
-      expect(view!.text()).toContain('Select a tenant')
+      expect(view!.find('[data-testid="pending-payments"]').exists()).toBe(true)
+    })
+
+    it('loads the new property’s pending payments', async () => {
+      vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty, annex]))
+      await mountView(async () => {
+        await useAuthStore().init()
+        await useAccessStore().load()
+        useAccessStore().selectProperty(testProperty.id)
+      })
+
+      useAccessStore().selectProperty(annex.id)
+      await flushPromises()
+
+      expect(dashboardService.getSummary).toHaveBeenLastCalledWith(annex.id)
+    })
+  })
+
+  describe('pending payments', () => {
+    function pendingNames() {
+      return view!
+        .findAll('[data-testid="pending-row"] th')
+        .map((cell) => cell.text().split(',')[0]!.trim())
+    }
+
+    it('shows the property’s totals and who owes, from the backend', async () => {
+      await mountView()
+
+      expect(view!.get('[data-testid="summary-outstanding"]').text()).toBe('₹39,500')
+      expect(view!.get('[data-testid="summary-overdue"]').text()).toContain('₹5,750')
+      expect(view!.get('[data-testid="summary-due-soon"]').text()).toContain('₹18,000')
+      expect(pendingNames()).toEqual(['Shaik Zahid Ali', 'Mohammed Yusuf'])
+      expect(view!.get('[data-testid="updated-at"]').text()).toBe('Updated just now')
+    })
+
+    it('opens a tenant’s unpaid bills', async () => {
+      await mountView()
+
+      const viewBills = view!.findAll('[data-testid="pending-row"] button')[0]!
+      await viewBills.trigger('click')
+
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
+      expect(router.currentRoute.value.query.status).toBe('outstanding')
+    })
+
+    it('filters the list by when money is due, leaving the totals alone', async () => {
+      await mountView()
+
+      await view!.get('[data-testid="due-filter-overdue"]').trigger('click')
+      await flushPromises()
+
+      expect(dashboardService.getPendingTenancies).toHaveBeenLastCalledWith(expect.any(String), {
+        due: 'overdue',
+        page: 1,
+      })
+      expect(dashboardService.getSummary).toHaveBeenCalledTimes(1)
+      expect(pendingNames()).toEqual(['Shaik Zahid Ali'])
+      expect(view!.get('[data-testid="due-filter-overdue"]').attributes('aria-pressed')).toBe(
+        'true',
+      )
+
+      await view!.get('[data-testid="due-filter-due_today"]').trigger('click')
+      await flushPromises()
+
+      expect(view!.get('[data-testid="pending-empty"]').text()).toBe('Nothing is due today.')
+    })
+
+    it('lists occupied flats with no bill for the month, and creates one', async () => {
+      await mountView()
+
+      const row = view!.get('[data-testid="missing-row"]')
+      expect(row.text()).toContain('Ali Hussain')
+      expect(view!.text()).toContain('September 2026')
+
+      await row.get('button').trigger('click')
+
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-new'))
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-003')
+      expect(router.currentRoute.value.query.month).toBe('2026-09')
+    })
+
+    it('steps back a month for missing bills', async () => {
+      await mountView()
+
+      await view!.get('button[aria-label="Previous month"]').trigger('click')
+      await flushPromises()
+
+      expect(dashboardService.getMissingBills).toHaveBeenLastCalledWith(
+        expect.any(String),
+        '2026-08',
+      )
+      expect(view!.text()).toContain('August 2026')
+    })
+
+    it('keeps what it shows, with its time, when a refresh fails, and stays signed in', async () => {
+      await mountView()
+      vi.mocked(dashboardService.getSummary).mockRejectedValueOnce(
+        new ApiError('network', 'offline'),
+      )
+
+      await view!.get('[data-testid="refresh"]').trigger('click')
+      await flushPromises()
+
+      expect(view!.get('[data-testid="refresh-error"]').text()).toMatch(
+        /^Couldn’t refresh\. Showing data from \d{1,2}:\d{2} [ap]m\.$/,
+      )
+      expect(view!.get('[data-testid="summary-outstanding"]').text()).toBe('₹39,500')
+      expect(router.currentRoute.value.name).toBe('dashboard')
+    })
+
+    it('shows newer figures after a refresh', async () => {
+      await mountView()
+      fakeDashboard.summary = makeSummary({ outstanding: 21500 })
+
+      await view!.get('[data-testid="refresh"]').trigger('click')
+      await flushPromises()
+
+      expect(view!.get('[data-testid="summary-outstanding"]').text()).toBe('₹21,500')
+    })
+
+    it('shows an error with Try again, never zeros, when the first load fails', async () => {
+      vi.mocked(dashboardService.getSummary).mockRejectedValue(new ApiError('unavailable', 'down'))
+      await mountView()
+
+      expect(view!.get('[data-testid="dashboard-error"]').text()).toContain(
+        'Pending payments are unavailable right now.',
+      )
+      expect(view!.find('[data-testid="summary-outstanding"]').exists()).toBe(false)
+      expect(view!.text()).not.toContain('₹0')
+    })
+
+    it('goes back to pending payments from a tenant, refreshing them', async () => {
+      await mountView()
+      useTenantStore().selectTenant('tenant-001')
+      await flushPromises()
+
+      await view!.get('[data-testid="back-to-pending"]').trigger('click')
+      await flushPromises()
+
+      expect(view!.find('[data-testid="pending-payments"]').exists()).toBe(true)
+      expect(dashboardService.getSummary).toHaveBeenCalledTimes(2)
     })
   })
 })
