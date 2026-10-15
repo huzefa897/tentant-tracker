@@ -9,6 +9,9 @@ import {
   isValidDateValue,
   isValidIsoTimestamp,
   isValidMonthValue,
+  formatClockTime,
+  formatTimeAgo,
+  nextMonthValue,
   previousMonthValue,
   toDateValue,
   toMonthValue,
@@ -137,6 +140,46 @@ describe('formatTimestamp', () => {
   it('returns invalid input unchanged', () => {
     expect(formatTimestamp('nope')).toBe('nope')
     expect(formatTimestamp('2026-02-30T10:00:00+05:30')).toBe('2026-02-30T10:00:00+05:30')
+  })
+})
+
+describe('nextMonthValue', () => {
+  it.each([
+    ['2026-09', '2026-10'],
+    ['2026-12', '2027-01'],
+    ['bad', 'bad'],
+  ])('%s -> %s', (value, next) => {
+    expect(nextMonthValue(value)).toBe(next)
+  })
+})
+
+describe('formatClockTime', () => {
+  it('shows the hour and minute, am or pm', () => {
+    expect(formatClockTime(new Date(2026, 9, 15, 18, 30).getTime())).toBe('6:30 pm')
+    expect(formatClockTime(new Date(2026, 9, 15, 9, 5).getTime())).toBe('9:05 am')
+  })
+})
+
+describe('formatTimeAgo', () => {
+  const at = new Date(2026, 9, 15, 18, 30).getTime()
+
+  it.each([
+    [0, 'just now'],
+    [44_000, 'just now'],
+    [60_000, '1 minute ago'],
+    [30 * 60_000, '30 minutes ago'],
+    [60 * 60_000, '1 hour ago'],
+    [5 * 60 * 60_000, '5 hours ago'],
+  ])('%i ms later is %s', (later, label) => {
+    expect(formatTimeAgo(at, at + later)).toBe(label)
+  })
+
+  it('gives the date and time after a day', () => {
+    expect(formatTimeAgo(at, at + 25 * 60 * 60_000)).toMatch(/^on 15 Oct 2026, 6:30\s?pm$/i)
+  })
+
+  it('never says a time in the future', () => {
+    expect(formatTimeAgo(at, at - 5000)).toBe('just now')
   })
 })
 

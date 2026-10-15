@@ -109,6 +109,33 @@ export function previousMonthValue(value: string): string {
   return toMonthValue(new Date(Number(match[1]), Number(match[2]) - 2, 1))
 }
 
+// "2025-12" -> "2026-01". Invalid input is returned unchanged.
+export function nextMonthValue(value: string): string {
+  const match = MONTH_VALUE.exec(value)
+  if (!match) return value
+
+  return toMonthValue(new Date(Number(match[1]), Number(match[2]), 1))
+}
+
+// A moment (milliseconds) -> "6:30 pm", in the viewer's time zone.
+export function formatClockTime(at: number): string {
+  return new Date(at)
+    .toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })
+    .toLowerCase()
+}
+
+// How long ago a moment was, for "Updated …": "just now", "1 minute ago", "3 hours ago", and
+// after a day the date and time.
+export function formatTimeAgo(at: number, now: number): string {
+  const seconds = Math.max(0, Math.round((now - at) / 1000))
+  if (seconds < 45) return 'just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`
+  return `on ${formatTimestamp(new Date(at).toISOString())}`
+}
+
 // "2026-10-04" -> "04/10/2026" (day first, as on Indian receipts).
 export function formatDateValueNumeric(value: string): string {
   if (!isValidDateValue(value)) return value
