@@ -4,6 +4,11 @@ from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 
 from accounts.views import me
+from billing.dashboard_views import (
+    DashboardSummaryView,
+    MissingBillsView,
+    PendingTenanciesView,
+)
 from billing.views import (
     EntryCorrectionViewSet,
     EntryVoidViewSet,
@@ -36,6 +41,21 @@ urlpatterns = [
     path("api/v1/health/", health_check, name="health"),
     path("api/v1/ready/", readiness_check, name="ready"),
     path("api/v1/me/", me, name="me"),
+    path(
+        "api/v1/properties/<uuid:property_id>/dashboard/summary/",
+        DashboardSummaryView.as_view(),
+        name="dashboard-summary",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/dashboard/pending-tenancies/",
+        PendingTenanciesView.as_view(),
+        name="dashboard-pending-tenancies",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/dashboard/missing-bills/",
+        MissingBillsView.as_view(),
+        name="dashboard-missing-bills",
+    ),
     path(
         "api/v1/properties/<uuid:property_id>/tenancies/",
         tenancy_list,
