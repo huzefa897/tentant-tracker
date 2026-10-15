@@ -14,6 +14,13 @@ from django.utils import timezone
 from accounts.phone import normalize_phone_number, validate_phone_number
 
 
+class PaymentTiming(models.TextChoices):
+    """When a month's rent is due: during the billing month, or during the next one."""
+
+    PREPAID = "prepaid", "Prepaid — due during the billing month"
+    POSTPAID = "postpaid", "Postpaid — due during the following month"
+
+
 class Property(models.Model):
     """A building. Receipts will snapshot these details when issued."""
 
@@ -27,6 +34,16 @@ class Property(models.Model):
     contact_number = models.CharField(
         max_length=20,
         blank=True,
+    )
+    # Copied onto each bill with its due date when the bill is created, so changing it only
+    # affects new bills. A database default too, so the release before this one can still add
+    # properties after a rollback.
+    payment_timing = models.CharField(
+        "rent payment timing",
+        max_length=8,
+        choices=PaymentTiming.choices,
+        default=PaymentTiming.POSTPAID,
+        db_default=PaymentTiming.POSTPAID,
     )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -172,9 +189,15 @@ class Tenancy(models.Model):
         validators=[MinValueValidator(Decimal("0.01"))],
         help_text="Current monthly rent (₹).",
     )
+    # Can change at any time (e.g. a tenant moves from the 15th to the 1st): each bill keeps
+    # the due date worked out when it was created, so a change only affects new bills.
     rent_due_day = models.PositiveSmallIntegerField(
-        validators=[MinValueValidator(1), MaxValueValidator(28)],
-        help_text="Day of the month rent is due (1–28).",
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(31)],
+        help_text=(
+            "Day of the month rent is due (1–31; in shorter months, their last day). "
+            "Leave empty for the start date's day. A change applies to new bills only."
+        ),
     )
     electricity_rate = models.DecimalField(
         max_digits=8,
@@ -210,9 +233,9 @@ class Tenancy(models.Model):
                 violation_error_message="Rent must be more than zero.",
             ),
             models.CheckConstraint(
-                condition=Q(rent_due_day__gte=1, rent_due_day__lte=28),
-                name="tenancy_rent_due_day_1_to_28",
-                violation_error_message="The rent due day must be between 1 and 28.",
+                condition=Q(rent_due_day__gte=1, rent_due_day__lte=31),
+                name="tenancy_rent_due_day_1_to_31",
+                violation_error_message="The rent due day must be between 1 and 31.",
             ),
             models.CheckConstraint(
                 condition=Q(electricity_rate__gte=0),
@@ -259,7 +282,13 @@ class Tenancy(models.Model):
         self.name = " ".join((self.name or "").split())
         self.flat_number = normalize_flat_number(self.flat_number)
         self.mobile_number = normalize_phone_number(self.mobile_number)
+        self._default_rent_due_day()
         super().clean_fields(exclude=exclude)
+
+    def _default_rent_due_day(self):
+        """Rent falls due on the day the tenancy started, unless another day is given."""
+        if self.rent_due_day is None and self.start_date is not None:
+            self.rent_due_day = self.start_date.day
 
     def get_constraints(self):
         # clean() reports overlaps with the clashing tenancy's details, so model validation
@@ -283,6 +312,7 @@ class Tenancy(models.Model):
         # would show them to the new property's members and hide them from the old one's. The
         # row is locked first, like create_rent_entry does, so a bill can't be added between
         # this check and the save.
+        self._default_rent_due_day()
         with transaction.atomic():
             if self.moves_property_with_bills(lock=True):
                 raise TenancyHasBillsError({"property": TENANCY_PROPERTY_LOCKED_MESSAGE})

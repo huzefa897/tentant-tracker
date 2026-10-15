@@ -60,7 +60,7 @@ class TenancyModelTests(TestCase):
     def test_rejects_invalid_amounts_and_due_days(self):
         self.assertIn("rent_amount", self.errors(rent_amount=Decimal("0")))
         self.assertIn("rent_due_day", self.errors(rent_due_day=0))
-        self.assertIn("rent_due_day", self.errors(rent_due_day=29))
+        self.assertIn("rent_due_day", self.errors(rent_due_day=32))
         self.assertIn("electricity_rate", self.errors(electricity_rate=Decimal("-0.01")))
         self.assertIn("deposit_amount", self.errors(deposit_amount=Decimal("-1")))
         self.assertIn("rent_amount", self.errors(rent_amount=Decimal("1.005")))
@@ -78,7 +78,7 @@ class TenancyModelTests(TestCase):
     def test_database_constraints_protect_stored_data(self):
         cases = (
             {"rent_amount": Decimal("0")},
-            {"rent_due_day": 29},
+            {"rent_due_day": 32},
             {"electricity_rate": Decimal("-1")},
             {"deposit_amount": Decimal("-1")},
             {"end_date": date(2025, 12, 31)},
@@ -192,7 +192,7 @@ class TenancyAdminTests(TestCase):
     def test_invalid_amounts_and_dates_block_the_record(self):
         for overrides in (
             {"rent_amount": "0"},
-            {"rent_due_day": "31"},
+            {"rent_due_day": "32"},
             {"electricity_rate": "-1"},
             {"deposit_amount": "-5"},
             {"start_date": "2026-05-02", "end_date": "2026-05-01"},

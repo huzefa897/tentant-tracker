@@ -53,8 +53,10 @@ class PropertyAdmin(GrantedByMixin, admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("name", "address")
     readonly_fields = ("id", "created_at", "updated_at")
+    radio_fields = {"payment_timing": admin.VERTICAL}
     fieldsets = (
         (None, {"fields": ("name", "address", "contact_number", "is_active")}),
+        ("Rent", {"fields": ("payment_timing",)}),
         ("Technical", {"classes": ("collapse",), "fields": ("id", "created_at", "updated_at")}),
     )
     inlines = (PersonAccessInline,)
