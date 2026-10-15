@@ -153,6 +153,31 @@ describe('RentEntryDetailsView', () => {
     expect(view!.text()).toContain('Unpaid')
   })
 
+  it('shows when the bill is due, and Overdue once that has passed with money owed', async () => {
+    fakeEntries.entries = [
+      makeEntry({
+        ...entry,
+        paymentTiming: 'postpaid',
+        dueDate: '2026-10-11',
+        dueStatus: 'overdue',
+      }),
+    ]
+    await openDetails('tenant-001', 'sep')
+
+    expect(view!.get('[data-testid="due-date"]').text()).toBe('Due 11 Oct 2026 · Postpaid')
+    expect(view!.get('[data-testid="due-status-badge"]').text()).toBe('Overdue')
+  })
+
+  it('shows no due date for a bill from before due dates', async () => {
+    fakeEntries.entries = [
+      makeEntry({ ...entry, paymentTiming: null, dueDate: null, dueStatus: null }),
+    ]
+    await openDetails('tenant-001', 'sep')
+
+    expect(view!.find('[data-testid="due-date"]').exists()).toBe(false)
+    expect(view!.find('[data-testid="due-status-badge"]').exists()).toBe(false)
+  })
+
   it('shows Fully paid for a paid bill', async () => {
     fakeEntries.entries = [
       makeEntry({ ...entry, totalPaid: 14712.5, outstanding: 0, status: 'paid' }),

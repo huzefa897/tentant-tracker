@@ -1,5 +1,11 @@
 import type { Payment } from '@/types/payment'
-import type { PaymentStatus, RentEntry, RentEntryInput } from '@/types/rentEntry'
+import type {
+  DueStatus,
+  PaymentStatus,
+  PaymentTiming,
+  RentEntry,
+  RentEntryInput,
+} from '@/types/rentEntry'
 import { fromPaise, toPaise } from '@/utils/money'
 
 type Charges = Pick<
@@ -46,6 +52,21 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
 
 export function formatPaymentStatus(status: PaymentStatus): string {
   return PAYMENT_STATUS_LABELS[status]
+}
+
+const DUE_STATUS_LABELS: Record<DueStatus, string> = {
+  overdue: 'Overdue',
+  due_today: 'Due today',
+  upcoming: 'Upcoming',
+  settled: 'Settled',
+}
+
+export function formatDueStatus(status: DueStatus): string {
+  return DUE_STATUS_LABELS[status]
+}
+
+export function formatPaymentTiming(timing: PaymentTiming): string {
+  return timing === 'prepaid' ? 'Prepaid' : 'Postpaid'
 }
 
 // Total paid for a bill is always the sum of its payment records, added as paise.

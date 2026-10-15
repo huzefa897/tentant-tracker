@@ -31,6 +31,7 @@ const rows = computed(() =>
     totalPaid: entry.totalPaid,
     outstanding: entry.outstanding,
     status: entry.status,
+    dueStatus: entry.dueStatus,
     billStatus: entry.billStatus,
     isVoid: entry.billStatus === 'void',
   })),
