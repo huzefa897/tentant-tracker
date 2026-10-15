@@ -6,6 +6,7 @@
 
 - Status (upcoming/current/ended) is derived from the dates on the India business date (`business_date()`), never stored; end dates are inclusive.
 - Validation lives on the model (admin uses it) with database check constraints behind it. Overlapping tenancies of one flat are refused by `clean()` (naming the clash) and, against simultaneous saves, by a PostgreSQL exclusion constraint (`btree_gist`; model validation skips it via `get_constraints` so the message isn't repeated).
+- **Due day** (`rent_due_day`, 1–31): left empty in admin, it's the start date's day (a tenant who started on the 15th pays on the 15th). It can change at any time, e.g. to the 1st; each bill saves the due date worked out when it was created, so a change only affects new bills ([rent-entries.md](rent-entries.md#due-dates)).
 - A tenancy with bills can't change property (bills are scoped through it): `Tenancy.clean()` and `save()` (under the same row lock as bill creation) refuse it, and admin shows the property read-only.
 - The tenancy API is read-only and nested under the property (`/api/v1/properties/{id}/tenancies/`), found through `properties_for_user` first.
 
