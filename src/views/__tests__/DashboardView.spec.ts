@@ -24,7 +24,7 @@ import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import DashboardView from '@/views/DashboardView.vue'
 import { SEARCH_DEBOUNCE_MS } from '@/components/tenant/TenantSelector.vue'
 import { resetTenantService } from '@/test/mocks/tenantService'
-import { fakeDashboard, makeSummary } from '@/test/mocks/dashboardService'
+import { fakeDashboard, makeSummary, makeUnbilledPeriod } from '@/test/mocks/dashboardService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
@@ -65,11 +65,11 @@ afterEach(() => {
 })
 
 describe('DashboardView', () => {
-  it('loads tenants but opens on pending payments until one is selected', async () => {
+  it('loads tenants but opens on rent due until one is selected', async () => {
     await mountView()
 
     expect(useTenantStore().results).toHaveLength(3)
-    expect(view!.get('h1').text()).toBe('Pending payments')
+    expect(view!.get('h1').text()).toBe('Rent due')
     expect(view!.find('#tenant-name').exists()).toBe(false)
   })
 
@@ -468,7 +468,7 @@ describe('DashboardView', () => {
       expect(view!.find('[data-testid="pending-payments"]').exists()).toBe(true)
     })
 
-    it('loads the new property’s pending payments', async () => {
+    it('loads the new property’s rent due', async () => {
       vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty, annex]))
       await mountView(async () => {
         await useAuthStore().init()
@@ -483,81 +483,130 @@ describe('DashboardView', () => {
     })
   })
 
-  describe('pending payments', () => {
-    function pendingNames() {
+  describe('rent due', () => {
+    function shownMonths() {
       return view!
-        .findAll('[data-testid="pending-row"] th')
-        .map((cell) => cell.text().split(',')[0]!.trim())
+        .findAll('[data-testid="period-row"]')
+        .map((row) => `${row.get('th span').text()} ${row.findAll('td')[0]!.text()}`)
     }
 
-    it('shows the property’s totals and who owes, from the backend', async () => {
+    function rowButton(label: string, index = 0) {
+      return view!
+        .findAll('[data-testid="period-row"] button')
+        .filter((button) => button.attributes('aria-label')?.startsWith(label))[index]!
+    }
+
+    it('shows the summary and the months due, bill or no bill, from the backend', async () => {
       await mountView()
 
-      expect(view!.get('[data-testid="summary-outstanding"]').text()).toBe('₹39,500')
-      expect(view!.get('[data-testid="summary-overdue"]').text()).toContain('₹5,750')
-      expect(view!.get('[data-testid="summary-due-soon"]').text()).toContain('₹18,000')
-      expect(pendingNames()).toEqual(['Shaik Zahid Ali', 'Mohammed Yusuf'])
+      expect(view!.get('[data-testid="summary-known-outstanding"]').text()).toBe('₹5,750')
+      expect(view!.get('[data-testid="summary-overdue"]').text()).toContain('2 months')
+      expect(view!.get('[data-testid="summary-awaiting-bill"]').text()).toContain('2 months')
+      expect(shownMonths()).toEqual([
+        'Mohammed Yusuf August 2026',
+        'Shaik Zahid Ali September 2026',
+      ])
+      expect(view!.get('[data-testid="awaiting-calculation"]').text()).toBe('Awaiting calculation')
       expect(view!.get('[data-testid="updated-at"]').text()).toBe('Updated just now')
     })
 
-    it('opens a tenant’s unpaid bills', async () => {
+    it('prepares a missing bill on its month', async () => {
       await mountView()
 
-      const viewBills = view!.findAll('[data-testid="pending-row"] button')[0]!
-      await viewBills.trigger('click')
-
-      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
-      expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
-      expect(router.currentRoute.value.query.status).toBe('outstanding')
-    })
-
-    it('filters the list by when money is due, leaving the totals alone', async () => {
-      await mountView()
-
-      await view!.get('[data-testid="due-filter-overdue"]').trigger('click')
-      await flushPromises()
-
-      expect(dashboardService.getPendingTenancies).toHaveBeenLastCalledWith(expect.any(String), {
-        due: 'overdue',
-        page: 1,
-      })
-      expect(dashboardService.getSummary).toHaveBeenCalledTimes(1)
-      expect(pendingNames()).toEqual(['Shaik Zahid Ali'])
-      expect(view!.get('[data-testid="due-filter-overdue"]').attributes('aria-pressed')).toBe(
-        'true',
-      )
-
-      await view!.get('[data-testid="due-filter-due_today"]').trigger('click')
-      await flushPromises()
-
-      expect(view!.get('[data-testid="pending-empty"]').text()).toBe('Nothing is due today.')
-    })
-
-    it('lists occupied flats with no bill for the month, and creates one', async () => {
-      await mountView()
-
-      const row = view!.get('[data-testid="missing-row"]')
-      expect(row.text()).toContain('Ali Hussain')
-      expect(view!.text()).toContain('September 2026')
-
-      await row.get('button').trigger('click')
+      await rowButton('Prepare bill').trigger('click')
 
       await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-new'))
-      expect(router.currentRoute.value.params.tenantId).toBe('tenant-003')
-      expect(router.currentRoute.value.query.month).toBe('2026-09')
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
+      expect(router.currentRoute.value.query.month).toBe('2026-08')
     })
 
-    it('steps back a month for missing bills', async () => {
+    it('opens a prepared bill, or opens it to record a payment', async () => {
       await mountView()
 
-      await view!.get('button[aria-label="Previous month"]').trigger('click')
+      await rowButton('Record payment').trigger('click')
+
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
+      expect(router.currentRoute.value.params).toMatchObject({
+        tenantId: 'tenant-001',
+        entryId: 'entry-001',
+      })
+      expect(router.currentRoute.value.query).toEqual({ from: 'dashboard', pay: '1' })
+    })
+
+    it('filters the list, leaving the summary alone', async () => {
+      await mountView()
+
+      await view!.get('[data-testid="timing-filter-upcoming"]').trigger('click')
       await flushPromises()
 
-      expect(dashboardService.getMissingBills).toHaveBeenLastCalledWith(
+      expect(dashboardService.getRentalPeriods).toHaveBeenLastCalledWith(
         expect.any(String),
-        '2026-08',
+        { timing: 'upcoming', preparation: 'all', month: null },
+        1,
       )
-      expect(view!.text()).toContain('August 2026')
+      expect(dashboardService.getSummary).toHaveBeenCalledTimes(1)
+      expect(shownMonths()).toEqual(['Mohammed Yusuf September 2026'])
+
+      await view!.get('[data-testid="filter-preparation"]').setValue('prepared')
+      await flushPromises()
+
+      expect(view!.get('[data-testid="periods-empty"]').text()).toBe(
+        'No months match these filters.',
+      )
+
+      await view!
+        .findAll('button')
+        .find((b) => b.text() === 'Clear filters')!
+        .trigger('click')
+      await flushPromises()
+
+      expect(shownMonths()).toEqual(['Mohammed Yusuf September 2026'])
+    })
+
+    it('says plainly when nothing is due', async () => {
+      fakeDashboard.periods = []
+      await mountView()
+
+      expect(view!.get('[data-testid="periods-empty"]').text()).toBe('No rent is due or overdue.')
+    })
+
+    it('marks a month not owed after asking why, then refreshes', async () => {
+      fakeDashboard.periods = [makeUnbilledPeriod({ actions: ['prepare_bill', 'mark_not_owed'] })]
+      await mountView()
+
+      await rowButton('Mark not owed').trigger('click')
+      await flushPromises()
+      await body.get('#not-owed-reason').setValue('Settled in the old sheet')
+      await body.get('[role="dialog"] form').trigger('submit')
+      await flushPromises()
+
+      expect(dashboardService.markNotOwed).toHaveBeenCalledWith(
+        testProperty.id,
+        'period-002',
+        'Settled in the old sheet',
+      )
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(dashboardService.getSummary).toHaveBeenCalledTimes(2)
+      expect(view!.find('[data-testid="periods-empty"]').exists()).toBe(true)
+    })
+
+    it('keeps the dialog open with the reason when marking fails', async () => {
+      fakeDashboard.periods = [makeUnbilledPeriod({ actions: ['prepare_bill', 'mark_not_owed'] })]
+      vi.mocked(dashboardService.markNotOwed).mockRejectedValueOnce(
+        new ApiError('conflict', 'x', 'period_has_bill'),
+      )
+      await mountView()
+
+      await rowButton('Mark not owed').trigger('click')
+      await flushPromises()
+      await body.get('#not-owed-reason').setValue('Waived')
+      await body.get('[role="dialog"] form').trigger('submit')
+      await flushPromises()
+
+      expect(body.get('[role="dialog"]').text()).toContain(
+        'This month has a bill. Void the bill first.',
+      )
+      expect((body.get('#not-owed-reason').element as HTMLTextAreaElement).value).toBe('Waived')
     })
 
     it('keeps what it shows, with its time, when a refresh fails, and stays signed in', async () => {
@@ -572,18 +621,18 @@ describe('DashboardView', () => {
       expect(view!.get('[data-testid="refresh-error"]').text()).toMatch(
         /^Couldn’t refresh\. Showing data from \d{1,2}:\d{2} [ap]m\.$/,
       )
-      expect(view!.get('[data-testid="summary-outstanding"]').text()).toBe('₹39,500')
+      expect(view!.get('[data-testid="summary-known-outstanding"]').text()).toBe('₹5,750')
       expect(router.currentRoute.value.name).toBe('dashboard')
     })
 
     it('shows newer figures after a refresh', async () => {
       await mountView()
-      fakeDashboard.summary = makeSummary({ outstanding: 21500 })
+      fakeDashboard.summary = makeSummary({ knownOutstanding: 21500 })
 
       await view!.get('[data-testid="refresh"]').trigger('click')
       await flushPromises()
 
-      expect(view!.get('[data-testid="summary-outstanding"]').text()).toBe('₹21,500')
+      expect(view!.get('[data-testid="summary-known-outstanding"]').text()).toBe('₹21,500')
     })
 
     it('shows an error with Try again, never zeros, when the first load fails', async () => {
@@ -591,13 +640,13 @@ describe('DashboardView', () => {
       await mountView()
 
       expect(view!.get('[data-testid="dashboard-error"]').text()).toContain(
-        'Pending payments are unavailable right now.',
+        'Rent due is unavailable right now.',
       )
-      expect(view!.find('[data-testid="summary-outstanding"]').exists()).toBe(false)
+      expect(view!.find('[data-testid="summary-known-outstanding"]').exists()).toBe(false)
       expect(view!.text()).not.toContain('₹0')
     })
 
-    it('goes back to pending payments from a tenant, refreshing them', async () => {
+    it('goes back to rent due from a tenant, refreshing it', async () => {
       await mountView()
       useTenantStore().selectTenant('tenant-001')
       await flushPromises()
