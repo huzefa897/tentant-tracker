@@ -6,6 +6,7 @@ from rest_framework.routers import SimpleRouter
 from accounts.views import me
 from billing.dashboard_views import (
     DashboardSummaryView,
+    OverdueBillsView,
     PeriodNotOwedView,
     RentalPeriodsView,
 )
@@ -41,6 +42,7 @@ urlpatterns = [
     path("api/v1/health/", health_check, name="health"),
     path("api/v1/ready/", readiness_check, name="ready"),
     path("api/v1/me/", me, name="me"),
+    path("api/v1/overdue-bills/", OverdueBillsView.as_view(), name="overdue-bills"),
     path(
         "api/v1/properties/<uuid:property_id>/dashboard/summary/",
         DashboardSummaryView.as_view(),
