@@ -1,22 +1,36 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
 import type {
+  BillPreparation,
   DashboardSummary,
-  DueFilter,
-  MissingBills,
-  MissingBillTenancy,
-  PendingTenancy,
-  PendingTenancyPage,
+  PeriodAction,
+  PeriodFilters,
+  PeriodTiming,
+  RentalPeriodPage,
+  RentalPeriodRow,
+  Settlement,
 } from '@/types/dashboard'
+import type { PaymentTiming } from '@/types/rentEntry'
 import type { TenantStatus } from '@/types/tenant'
 
 // The property dashboard's API (backend billing/dashboard_views.py). Money arrives as decimal
-// strings and becomes numbers here, for display only: the figures are the backend's.
+// strings and becomes numbers here, for display only: the figures are the backend's. An amount
+// that isn't known yet (a month without a bill) arrives as null and stays null.
 
 const MONEY = /^\d+\.\d{2}$/
 const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/
 const TENANCY_STATUSES: readonly TenantStatus[] = ['upcoming', 'current', 'ended']
+const PAYMENT_TIMINGS: readonly PaymentTiming[] = ['prepaid', 'postpaid']
+const TIMINGS: readonly PeriodTiming[] = ['overdue', 'due_today', 'upcoming']
+const PREPARATIONS: readonly BillPreparation[] = ['prepared', 'not_prepared']
+const SETTLEMENTS: readonly Settlement[] = ['unknown', 'unpaid', 'partially_paid', 'paid']
+const ACTIONS: readonly PeriodAction[] = [
+  'prepare_bill',
+  'mark_not_owed',
+  'view_bill',
+  'record_payment',
+]
 
 type Data = Record<string, unknown>
 
@@ -45,93 +59,98 @@ function money(data: Data, key: string): number {
   return Number(value)
 }
 
+function optionalMoney(data: Data, key: string): number | null {
+  return data[key] === null ? null : money(data, key)
+}
+
 function count(data: Data, key: string): number {
   const value = data[key]
   if (!Number.isInteger(value) || (value as number) < 0) invalid(key)
   return value as number
 }
 
-function optionalDate(data: Data, key: string): string | null {
-  const value = data[key]
-  if (value === null) return null
-  if (typeof value !== 'string' || !DATE.test(value)) invalid(key)
+function matching(data: Data, key: string, pattern: RegExp): string {
+  const value = text(data, key)
+  if (!pattern.test(value)) invalid(key)
   return value
 }
 
-function tenancyStatus(data: Data): TenantStatus {
-  const value = data.tenancyStatus
-  if (!TENANCY_STATUSES.includes(value as TenantStatus)) invalid('tenancyStatus')
-  return value as TenantStatus
+function oneOf<T extends string>(data: Data, key: string, choices: readonly T[]): T {
+  const value = data[key]
+  if (!choices.includes(value as T)) invalid(key)
+  return value as T
 }
 
 export function parseSummary(value: unknown): DashboardSummary {
   const data = record(value, 'summary')
-  const asOfDate = optionalDate(data, 'asOfDate')
-  if (asOfDate === null) invalid('asOfDate')
   if (data.currency !== 'INR') invalid('currency')
   return {
-    asOfDate,
+    asOfDate: matching(data, 'asOfDate', DATE),
     generatedAt: text(data, 'generatedAt'),
-    outstanding: money(data, 'outstandingAmount'),
-    overdue: money(data, 'overdueAmount'),
-    dueToday: money(data, 'dueTodayAmount'),
-    dueNext7Days: money(data, 'dueNext7DaysAmount'),
-    withoutDueDate: money(data, 'withoutDueDateAmount'),
-    pendingTenancyCount: count(data, 'pendingTenancyCount'),
+    overduePeriodCount: count(data, 'overduePeriodCount'),
     overdueTenancyCount: count(data, 'overdueTenancyCount'),
+    dueTodayPeriodCount: count(data, 'dueTodayPeriodCount'),
+    upcomingPeriodCount: count(data, 'upcomingPeriodCount'),
+    awaitingBillPeriodCount: count(data, 'awaitingBillPeriodCount'),
+    overdueAwaitingBillPeriodCount: count(data, 'overdueAwaitingBillPeriodCount'),
+    owingTenancyCount: count(data, 'owingTenancyCount'),
+    knownOutstanding: money(data, 'knownOutstandingAmount'),
+    knownOverdue: money(data, 'knownOverdueAmount'),
+    knownDueToday: money(data, 'knownDueTodayAmount'),
+    knownUpcoming: money(data, 'knownUpcomingAmount'),
   }
 }
 
-export function parsePendingTenancy(value: unknown): PendingTenancy {
-  const data = record(value, 'pending tenancy')
+export function parseRentalPeriod(value: unknown): RentalPeriodRow {
+  const data = record(value, 'rental period')
+  const preparation = oneOf(data, 'preparation', PREPARATIONS)
+  const prepared = preparation === 'prepared'
+  const billId = data.billId === null ? null : text(data, 'billId')
+  const totalDue = optionalMoney(data, 'totalDue')
+  const outstanding = optionalMoney(data, 'outstandingAmount')
+  const settlement = oneOf(data, 'settlement', SETTLEMENTS)
+  // A prepared month has its bill and amounts; one awaiting its bill has neither, and its
+  // settlement is unknown. Anything else is a contract break, not something to guess at.
+  if (prepared !== (billId !== null) || prepared !== (totalDue !== null)) invalid('preparation')
+  if (prepared !== (outstanding !== null)) invalid('outstandingAmount')
+  if (prepared === (settlement === 'unknown')) invalid('settlement')
+  if (!Array.isArray(data.actions)) invalid('actions')
+  for (const action of data.actions) {
+    if (!ACTIONS.includes(action as PeriodAction)) invalid('actions')
+  }
   return {
+    id: text(data, 'id'),
     tenantId: text(data, 'tenancyId'),
     name: text(data, 'name'),
     flatNumber: text(data, 'flatNumber'),
-    tenancyStatus: tenancyStatus(data),
-    outstanding: money(data, 'outstandingAmount'),
-    overdue: money(data, 'overdueAmount'),
-    dueToday: money(data, 'dueTodayAmount'),
-    dueNext7Days: money(data, 'dueNext7DaysAmount'),
-    withoutDueDate: money(data, 'withoutDueDateAmount'),
-    pendingBillCount: count(data, 'pendingBillCount'),
-    oldestDueDate: optionalDate(data, 'oldestDueDate'),
-    oldestOverdueDate: optionalDate(data, 'oldestOverdueDate'),
+    tenancyStatus: oneOf(data, 'tenancyStatus', TENANCY_STATUSES),
+    periodMonth: matching(data, 'periodMonth', MONTH),
+    paymentTiming: oneOf(data, 'paymentTiming', PAYMENT_TIMINGS),
+    dueDate: matching(data, 'dueDate', DATE),
+    timing: oneOf(data, 'timing', TIMINGS),
+    daysOverdue: count(data, 'daysOverdue'),
+    preparation,
+    billId,
+    settlement,
+    totalDue,
+    outstanding,
+    actions: data.actions as PeriodAction[],
   }
 }
 
-export function parsePendingPage(value: unknown, page: number): PendingTenancyPage {
+export function parsePeriodPage(value: unknown, page: number): RentalPeriodPage {
   const data = record(value, 'page')
   if (!Array.isArray(data.results)) invalid('results')
   for (const key of ['next', 'previous'] as const) {
     if (data[key] !== null && typeof data[key] !== 'string') invalid(key)
   }
   return {
-    tenancies: data.results.map(parsePendingTenancy),
+    periods: data.results.map(parseRentalPeriod),
     count: count(data, 'count'),
     page,
     hasNext: data.next !== null,
     hasPrevious: data.previous !== null,
   }
-}
-
-function parseMissingTenancy(value: unknown): MissingBillTenancy {
-  const data = record(value, 'missing bill')
-  return {
-    tenantId: text(data, 'tenancyId'),
-    name: text(data, 'name'),
-    flatNumber: text(data, 'flatNumber'),
-    tenancyStatus: tenancyStatus(data),
-    rentAmount: money(data, 'rentAmount'),
-  }
-}
-
-export function parseMissingBills(value: unknown): MissingBills {
-  const data = record(value, 'missing bills')
-  const billingMonth = text(data, 'billingMonth')
-  if (!MONTH.test(billingMonth)) invalid('billingMonth')
-  if (!Array.isArray(data.tenancies)) invalid('tenancies')
-  return { billingMonth, tenancies: data.tenancies.map(parseMissingTenancy) }
 }
 
 function dashboardUrl(propertyId: string, name: string) {
@@ -147,28 +166,34 @@ async function get(url: string, params: Record<string, string | number> = {}): P
 }
 
 export const dashboardService = {
-  // Property-wide totals as of today at the property.
+  // Counts of rental periods and the amounts known from prepared bills, as of today at the
+  // property.
   async getSummary(propertyId: string): Promise<DashboardSummary> {
     return parseSummary(await get(dashboardUrl(propertyId, 'summary')))
   },
 
-  // One page of tenancies that owe money, overdue first. A filter keeps the tenancies with
-  // money in that window; it never changes the summary.
-  async getPendingTenancies(
+  // One page of months still owed, oldest due first. The filters never change the summary.
+  async getRentalPeriods(
     propertyId: string,
-    options: { due?: DueFilter; page?: number } = {},
-  ): Promise<PendingTenancyPage> {
-    const page = options.page ?? 1
+    filters: PeriodFilters,
+    page = 1,
+  ): Promise<RentalPeriodPage> {
     const params: Record<string, string | number> = {}
-    if (options.due && options.due !== 'all') params.due_status = options.due
+    if (filters.timing !== 'due') params.timing = filters.timing
+    if (filters.preparation !== 'all') params.preparation = filters.preparation
+    if (filters.month) params.month = filters.month
     if (page > 1) params.page = page
-    return parsePendingPage(await get(dashboardUrl(propertyId, 'pending-tenancies'), params), page)
+    return parsePeriodPage(await get(dashboardUrl(propertyId, 'rental-periods'), params), page)
   },
 
-  // Tenancies occupying the month (YYYY-MM) with no bill for it; without a month, the backend
-  // picks the one whose bills should exist by now.
-  async getMissingBills(propertyId: string, billingMonth?: string | null): Promise<MissingBills> {
-    const params: Record<string, string> = billingMonth ? { billing_month: billingMonth } : {}
-    return parseMissingBills(await get(dashboardUrl(propertyId, 'missing-bills'), params))
+  // Marks a month's rent as not owed (owners only), with why. A retry with the same reason is
+  // accepted again; the backend refuses a month with a bill.
+  async markNotOwed(propertyId: string, periodId: string, reason: string): Promise<void> {
+    const url = `/properties/${encodeURIComponent(propertyId)}/rental-periods/${encodeURIComponent(periodId)}/not-owed/`
+    try {
+      await api.post(url, { reason })
+    } catch (error) {
+      throw toApiError(error)
+    }
   },
 }

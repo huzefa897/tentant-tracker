@@ -6,14 +6,15 @@ import { dashboardService } from '@/services/dashboard.service'
 import { useAccessStore } from '@/stores/access'
 import type {
   DashboardSummary,
-  DueFilter,
-  MissingBills,
-  PendingTenancyPage,
+  PeriodFilters,
+  PreparationFilter,
+  RentalPeriodPage,
+  TimingFilter,
 } from '@/types/dashboard'
 
 export type DashboardLoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 
-export const DASHBOARD_LOAD_ERROR_MESSAGE = 'Unable to load pending payments. Please try again.'
+export const DASHBOARD_LOAD_ERROR_MESSAGE = 'Unable to load rent due. Please try again.'
 
 export function dashboardErrorMessage(error: unknown): string {
   const kind = error instanceof ApiError ? error.kind : 'unknown'
@@ -22,7 +23,7 @@ export function dashboardErrorMessage(error: unknown): string {
     case 'network':
       return "Couldn't reach the server. Check your connection and try again."
     case 'unavailable':
-      return 'Pending payments are unavailable right now. Please try again shortly.'
+      return 'Rent due is unavailable right now. Please try again shortly.'
     case 'unauthorized':
       return "Your sign-in couldn't be verified. Log out and sign in again."
     case 'rate-limited':
@@ -32,17 +33,39 @@ export function dashboardErrorMessage(error: unknown): string {
   }
 }
 
-// The selected property's dashboard: its totals, the tenancies that owe money (one page, for
-// one due filter) and the tenancies with a missing bill for one month. A refresh loads all three
-// together and replaces them only when all three arrive, so the screen never mixes two moments;
-// a failed refresh keeps what was shown, with when it was loaded. Nothing here is ever a zero or
-// an empty list standing in for a failed load.
+export const NOT_OWED_ERROR_MESSAGE = "Couldn't mark the month as not owed. Please try again."
+
+function notOwedErrorMessage(error: unknown): string {
+  if (!(error instanceof ApiError)) return NOT_OWED_ERROR_MESSAGE
+  if (error.code === 'period_has_bill') return 'This month has a bill. Void the bill first.'
+  if (error.code === 'not_owed_conflict')
+    return 'This month was already marked not owed, with another reason.'
+  switch (error.kind) {
+    case 'forbidden':
+      return "Only the property's owners can mark a month not owed."
+    case 'invalid-request':
+      return error.fieldErrors.reason ?? NOT_OWED_ERROR_MESSAGE
+    case 'not-found':
+      return "This month couldn't be found. Refresh and try again."
+    case 'network':
+    case 'unavailable':
+    case 'unauthorized':
+    case 'rate-limited':
+      return dashboardErrorMessage(error)
+    default:
+      return NOT_OWED_ERROR_MESSAGE
+  }
+}
+
+// The selected property's dashboard: its summary and one page of the months still owed (for
+// the chosen filters). A refresh loads both together and replaces them only when both arrive,
+// so the screen never mixes two moments; a failed refresh keeps what was shown, with when it
+// was loaded. Nothing here is ever a zero or an empty list standing in for a failed load.
 export const useDashboardStore = defineStore('dashboard', () => {
   const accessStore = useAccessStore()
 
   const summary = ref<DashboardSummary | null>(null)
-  const pending = ref<PendingTenancyPage | null>(null)
-  const missing = ref<MissingBills | null>(null)
+  const periods = ref<RentalPeriodPage | null>(null)
 
   // The whole dashboard: 'loading' and 'error' only until it has loaded once.
   const status = ref<DashboardLoadStatus>('idle')
@@ -53,27 +76,25 @@ export const useDashboardStore = defineStore('dashboard', () => {
   // When everything shown was loaded (Date.now()), for "Updated 30 seconds ago".
   const loadedAt = ref<number | null>(null)
 
-  // The list's filter and page, reloaded on their own: the summary never changes with them.
-  const dueFilter = ref<DueFilter>('all')
+  // The list's filters and page, reloaded on their own: the summary never changes with them.
+  const filters = ref<PeriodFilters>({ timing: 'due', preparation: 'all', month: null })
   const page = ref(1)
-  const pendingStatus = ref<DashboardLoadStatus>('idle')
-  const pendingError = ref<string | null>(null)
+  const periodsStatus = ref<DashboardLoadStatus>('idle')
+  const periodsError = ref<string | null>(null)
 
-  // null: the month the backend picks (last month when postpaid, this month when prepaid).
-  const missingMonth = ref<string | null>(null)
-  const missingStatus = ref<DashboardLoadStatus>('idle')
-  const missingError = ref<string | null>(null)
+  // Marking a month not owed: the period being saved, and why the last attempt failed.
+  const markingId = ref<string | null>(null)
+  const markError = ref<string | null>(null)
 
   const loaded = computed(() => loadedAt.value !== null)
 
   // Each request gets a number per part; only the newest may change state. reset() bumps them
   // all, discarding responses for the old property.
   let refreshSeq = 0
-  let pendingSeq = 0
-  let missingSeq = 0
+  let periodsSeq = 0
   let inFlight: Promise<void> | null = null
 
-  // Everything, together. While one is running, another call waits for it rather than sending
+  // Both parts, together. While one is running, another call waits for it rather than sending
   // the requests again. Also the first load and Retry.
   function refresh(): Promise<void> {
     if (inFlight) return inFlight
@@ -81,8 +102,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     if (!propertyId) return Promise.resolve()
 
     const seq = ++refreshSeq
-    const pendingAt = ++pendingSeq
-    const missingAt = ++missingSeq
+    const periodsAt = ++periodsSeq
     refreshing.value = true
     if (!loaded.value) {
       status.value = 'loading'
@@ -91,26 +111,17 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
     const run = (async () => {
       try {
-        const [nextSummary, nextPending, nextMissing] = await Promise.all([
+        const [nextSummary, nextPeriods] = await Promise.all([
           dashboardService.getSummary(propertyId),
-          dashboardService.getPendingTenancies(propertyId, {
-            due: dueFilter.value,
-            page: page.value,
-          }),
-          dashboardService.getMissingBills(propertyId, missingMonth.value),
+          dashboardService.getRentalPeriods(propertyId, { ...filters.value }, page.value),
         ])
         if (seq !== refreshSeq) return
         summary.value = nextSummary
-        // A filter, page or month changed while this ran: its own reload wins for that part.
-        if (pendingAt === pendingSeq) {
-          pending.value = nextPending
-          pendingStatus.value = 'ready'
-          pendingError.value = null
-        }
-        if (missingAt === missingSeq) {
-          missing.value = nextMissing
-          missingStatus.value = 'ready'
-          missingError.value = null
+        // A filter or page changed while this ran: its own reload wins for the list.
+        if (periodsAt === periodsSeq) {
+          periods.value = nextPeriods
+          periodsStatus.value = 'ready'
+          periodsError.value = null
         }
         loadedAt.value = Date.now()
         status.value = 'ready'
@@ -135,93 +146,106 @@ export const useDashboardStore = defineStore('dashboard', () => {
     return run
   }
 
-  async function loadPending() {
+  async function loadPeriods() {
     const propertyId = accessStore.selectedPropertyId
     if (!propertyId) return
 
-    const seq = ++pendingSeq
-    pendingStatus.value = 'loading'
-    pendingError.value = null
+    const seq = ++periodsSeq
+    periodsStatus.value = 'loading'
+    periodsError.value = null
     try {
-      const result = await dashboardService.getPendingTenancies(propertyId, {
-        due: dueFilter.value,
-        page: page.value,
-      })
-      if (seq !== pendingSeq) return
-      pending.value = result
-      pendingStatus.value = 'ready'
+      const result = await dashboardService.getRentalPeriods(
+        propertyId,
+        { ...filters.value },
+        page.value,
+      )
+      if (seq !== periodsSeq) return
+      periods.value = result
+      periodsStatus.value = 'ready'
     } catch (err) {
-      if (seq !== pendingSeq) return
-      pendingStatus.value = 'error'
-      pendingError.value = dashboardErrorMessage(err)
+      if (seq !== periodsSeq) return
+      periodsStatus.value = 'error'
+      periodsError.value = dashboardErrorMessage(err)
     }
   }
 
-  function setDueFilter(next: DueFilter) {
-    if (next === dueFilter.value) return
-    dueFilter.value = next
+  function setFilters(next: Partial<PeriodFilters>) {
+    const merged = { ...filters.value, ...next }
+    const current = filters.value
+    if (
+      merged.timing === current.timing &&
+      merged.preparation === current.preparation &&
+      merged.month === current.month
+    )
+      return
+    filters.value = merged
     page.value = 1
-    void loadPending()
+    void loadPeriods()
+  }
+
+  function setTiming(timing: TimingFilter) {
+    setFilters({ timing })
+  }
+
+  function setPreparation(preparation: PreparationFilter) {
+    setFilters({ preparation })
+  }
+
+  function setMonth(month: string | null) {
+    setFilters({ month })
   }
 
   function goToPage(next: number) {
     page.value = next
-    void loadPending()
+    void loadPeriods()
   }
 
   // Also the list's Retry.
-  function retryPending() {
-    void loadPending()
+  function retryPeriods() {
+    void loadPeriods()
   }
 
-  async function loadMissing() {
+  // Saved by the backend first; the dashboard then refreshes, so the month leaves the list and
+  // the counts together. Resolves true once it's saved.
+  async function markNotOwed(periodId: string, reason: string): Promise<boolean> {
     const propertyId = accessStore.selectedPropertyId
-    if (!propertyId) return
+    if (!propertyId || markingId.value) return false
 
-    const seq = ++missingSeq
-    missingStatus.value = 'loading'
-    missingError.value = null
+    markingId.value = periodId
+    markError.value = null
     try {
-      const result = await dashboardService.getMissingBills(propertyId, missingMonth.value)
-      if (seq !== missingSeq) return
-      missing.value = result
-      missingStatus.value = 'ready'
+      await dashboardService.markNotOwed(propertyId, periodId, reason)
     } catch (err) {
-      if (seq !== missingSeq) return
-      missingStatus.value = 'error'
-      missingError.value = dashboardErrorMessage(err)
+      markError.value = notOwedErrorMessage(err)
+      return false
+    } finally {
+      markingId.value = null
     }
+    await refresh()
+    return true
   }
 
-  function setMissingMonth(month: string) {
-    missingMonth.value = month
-    void loadMissing()
-  }
-
-  function retryMissing() {
-    void loadMissing()
+  function clearMarkError() {
+    markError.value = null
   }
 
   function reset() {
     refreshSeq++
-    pendingSeq++
-    missingSeq++
+    periodsSeq++
     inFlight = null
     summary.value = null
-    pending.value = null
-    missing.value = null
+    periods.value = null
     status.value = 'idle'
     error.value = null
     refreshing.value = false
     refreshError.value = null
     loadedAt.value = null
-    dueFilter.value = 'all'
+    filters.value = { timing: 'due', preparation: 'all', month: null }
     page.value = 1
-    pendingStatus.value = 'idle'
-    pendingError.value = null
-    missingMonth.value = null
-    missingStatus.value = 'idle'
-    missingError.value = null
+    periodsStatus.value = 'idle'
+    periodsError.value = null
+    markingId.value = null
+    markError.value = null
   }
 
   // Another property (or logout): nothing of the previous one's may show, even for a moment.
@@ -235,27 +259,28 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   return {
     summary,
-    pending,
-    missing,
+    periods,
     status,
     error,
     refreshing,
     refreshError,
     loadedAt,
     loaded,
-    dueFilter,
+    filters,
     page,
-    pendingStatus,
-    pendingError,
-    missingMonth,
-    missingStatus,
-    missingError,
+    periodsStatus,
+    periodsError,
+    markingId,
+    markError,
     refresh,
-    setDueFilter,
+    setFilters,
+    setTiming,
+    setPreparation,
+    setMonth,
     goToPage,
-    retryPending,
-    setMissingMonth,
-    retryMissing,
+    retryPeriods,
+    markNotOwed,
+    clearMarkError,
     reset,
   }
 })

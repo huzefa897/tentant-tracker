@@ -1,57 +1,68 @@
 import type { TenantStatus } from '@/types/tenant'
+import type { PaymentTiming } from '@/types/rentEntry'
 
-// Property-wide totals from recorded bills (services/dashboard.service.ts). Overdue, due today,
-// due in the next 7 days and without a due date are parts of outstanding, never extra amounts.
+// The property's rental periods (services/dashboard.service.ts): counts of months, counted
+// apart from tenants, and the amounts known from prepared bills. A month awaiting its bill is
+// counted, never summed: its amount isn't known yet.
 export interface DashboardSummary {
   asOfDate: string // YYYY-MM-DD, today at the property
   generatedAt: string // ISO timestamp
-  outstanding: number
-  overdue: number
-  dueToday: number
-  dueNext7Days: number
-  // Bills from before due dates: owed, but they can't be called late or on time.
-  withoutDueDate: number
-  pendingTenancyCount: number
+  overduePeriodCount: number
   overdueTenancyCount: number
+  dueTodayPeriodCount: number
+  upcomingPeriodCount: number
+  awaitingBillPeriodCount: number
+  overdueAwaitingBillPeriodCount: number
+  owingTenancyCount: number
+  knownOutstanding: number
+  knownOverdue: number
+  knownDueToday: number
+  knownUpcoming: number
 }
 
-// Which pending tenancies to list: those with money in this window, or all of them.
-export type DueFilter = 'all' | 'overdue' | 'due_today' | 'due_next_7_days'
+// Which months the list shows, by when they're due: due (overdue or due today, the default),
+// one of those, the next 7 days, or every month still owed.
+export type TimingFilter = 'due' | 'overdue' | 'due_today' | 'upcoming' | 'all'
+export type PreparationFilter = 'all' | 'prepared' | 'not_prepared'
 
-// One tenancy that owes money (an ended one too).
-export interface PendingTenancy {
+export type PeriodTiming = 'overdue' | 'due_today' | 'upcoming'
+export type BillPreparation = 'prepared' | 'not_prepared'
+// unknown: no bill yet, so no amount to settle.
+export type Settlement = 'unknown' | 'unpaid' | 'partially_paid' | 'paid'
+// Only those the viewer's role allows (mark_not_owed is the owners').
+export type PeriodAction = 'prepare_bill' | 'mark_not_owed' | 'view_bill' | 'record_payment'
+
+// One tenancy's month of rent that's still owed, its bill prepared or not.
+export interface RentalPeriodRow {
+  id: string
   tenantId: string // the tenancy id
   name: string
   flatNumber: string
   tenancyStatus: TenantStatus
-  outstanding: number
-  overdue: number
-  dueToday: number
-  dueNext7Days: number
-  withoutDueDate: number
-  pendingBillCount: number
-  oldestDueDate: string | null // YYYY-MM-DD
-  oldestOverdueDate: string | null
+  periodMonth: string // YYYY-MM
+  paymentTiming: PaymentTiming
+  dueDate: string // YYYY-MM-DD
+  timing: PeriodTiming
+  daysOverdue: number
+  preparation: BillPreparation
+  billId: string | null
+  settlement: Settlement
+  // null until the bill is prepared: never a zero standing in for an unknown amount.
+  totalDue: number | null
+  outstanding: number | null
+  actions: PeriodAction[]
 }
 
-export interface PendingTenancyPage {
-  tenancies: PendingTenancy[]
+export interface RentalPeriodPage {
+  periods: RentalPeriodRow[]
   count: number // across all pages
   page: number
   hasNext: boolean
   hasPrevious: boolean
 }
 
-// A tenancy occupying the month with no active bill for it. Nothing is estimated for it.
-export interface MissingBillTenancy {
-  tenantId: string
-  name: string
-  flatNumber: string
-  tenancyStatus: TenantStatus
-  rentAmount: number
-}
-
-export interface MissingBills {
-  billingMonth: string // YYYY-MM
-  tenancies: MissingBillTenancy[]
+export interface PeriodFilters {
+  timing: TimingFilter
+  preparation: PreparationFilter
+  month: string | null // YYYY-MM, or every month
 }

@@ -2,46 +2,75 @@ import { vi } from 'vitest'
 
 import type {
   DashboardSummary,
-  DueFilter,
-  MissingBills,
-  PendingTenancy,
-  PendingTenancyPage,
+  PeriodFilters,
+  RentalPeriodPage,
+  RentalPeriodRow,
 } from '@/types/dashboard'
 
 // A fake dashboardService, mocked for every test in src/test/setup.ts (the dashboard is where
 // sign-in lands, so no test may reach the API through it). It filters and pages
-// fakeDashboard.pending like the API; the summary and missing bills are what tests set.
-// Fictional people; the ids are the tenant fake's (tenant-001…).
+// fakeDashboard.periods like the API; the summary is what tests set. markNotOwed removes the
+// month, as the backend's list would. Fictional people; the ids are the tenant fake's
+// (tenant-001…).
 
-export function makePendingTenancy(overrides: Partial<PendingTenancy> = {}): PendingTenancy {
+// Shaik Zahid Ali's September, prepared and part paid, overdue 4 days on 15 October.
+export function makePeriod(overrides: Partial<RentalPeriodRow> = {}): RentalPeriodRow {
   return {
+    id: 'period-001',
     tenantId: 'tenant-001',
     name: 'Shaik Zahid Ali',
     flatNumber: '202',
     tenancyStatus: 'current',
-    outstanding: 21500,
-    overdue: 5750,
-    dueToday: 0,
-    dueNext7Days: 0,
-    withoutDueDate: 0,
-    pendingBillCount: 2,
-    oldestDueDate: '2026-10-11',
-    oldestOverdueDate: '2026-10-11',
+    periodMonth: '2026-09',
+    paymentTiming: 'postpaid',
+    dueDate: '2026-10-11',
+    timing: 'overdue',
+    daysOverdue: 4,
+    preparation: 'prepared',
+    billId: 'entry-001',
+    settlement: 'partially_paid',
+    totalDue: 15750,
+    outstanding: 5750,
+    actions: ['view_bill', 'record_payment'],
     ...overrides,
   }
+}
+
+// A month whose bill isn't prepared: due, with no amount.
+export function makeUnbilledPeriod(overrides: Partial<RentalPeriodRow> = {}): RentalPeriodRow {
+  return makePeriod({
+    id: 'period-002',
+    tenantId: 'tenant-002',
+    name: 'Mohammed Yusuf',
+    flatNumber: '301',
+    periodMonth: '2026-08',
+    dueDate: '2026-09-20',
+    daysOverdue: 25,
+    preparation: 'not_prepared',
+    billId: null,
+    settlement: 'unknown',
+    totalDue: null,
+    outstanding: null,
+    actions: ['prepare_bill'],
+    ...overrides,
+  })
 }
 
 export function makeSummary(overrides: Partial<DashboardSummary> = {}): DashboardSummary {
   return {
     asOfDate: '2026-10-15',
     generatedAt: '2026-10-15T06:30:00Z',
-    outstanding: 39500,
-    overdue: 5750,
-    dueToday: 0,
-    dueNext7Days: 18000,
-    withoutDueDate: 0,
-    pendingTenancyCount: 2,
-    overdueTenancyCount: 1,
+    overduePeriodCount: 2,
+    overdueTenancyCount: 2,
+    dueTodayPeriodCount: 0,
+    upcomingPeriodCount: 1,
+    awaitingBillPeriodCount: 2,
+    overdueAwaitingBillPeriodCount: 1,
+    owingTenancyCount: 2,
+    knownOutstanding: 5750,
+    knownOverdue: 5750,
+    knownDueToday: 0,
+    knownUpcoming: 0,
     ...overrides,
   }
 }
@@ -49,54 +78,45 @@ export function makeSummary(overrides: Partial<DashboardSummary> = {}): Dashboar
 function defaults() {
   return {
     summary: makeSummary(),
-    pending: [
-      makePendingTenancy(),
-      makePendingTenancy({
-        tenantId: 'tenant-002',
-        name: 'Mohammed Yusuf',
-        flatNumber: '301',
-        outstanding: 18000,
-        overdue: 0,
-        dueNext7Days: 18000,
-        pendingBillCount: 1,
-        oldestDueDate: '2026-10-20',
-        oldestOverdueDate: null,
+    // Oldest due first, as the API orders them.
+    periods: [
+      makeUnbilledPeriod(),
+      makePeriod(),
+      makeUnbilledPeriod({
+        id: 'period-003',
+        periodMonth: '2026-09',
+        dueDate: '2026-10-20',
+        timing: 'upcoming',
+        daysOverdue: 0,
       }),
     ],
-    missing: {
-      billingMonth: '2026-09',
-      tenancies: [
-        {
-          tenantId: 'tenant-003',
-          name: 'Ali Hussain',
-          flatNumber: '102',
-          tenancyStatus: 'current',
-          rentAmount: 14000,
-        },
-      ],
-    } as MissingBills,
     pageSize: 20,
   }
 }
 
 export const fakeDashboard = defaults()
 
-const IN_WINDOW: Record<Exclude<DueFilter, 'all'>, keyof PendingTenancy> = {
-  overdue: 'overdue',
-  due_today: 'dueToday',
-  due_next_7_days: 'dueNext7Days',
+const DUE: Record<PeriodFilters['timing'], RentalPeriodRow['timing'][]> = {
+  due: ['overdue', 'due_today'],
+  overdue: ['overdue'],
+  due_today: ['due_today'],
+  upcoming: ['upcoming'],
+  all: ['overdue', 'due_today', 'upcoming'],
 }
 
-export function pendingPage(options: { due?: DueFilter; page?: number } = {}): PendingTenancyPage {
-  const due = options.due ?? 'all'
-  const page = options.page ?? 1
-  const matches =
-    due === 'all'
-      ? fakeDashboard.pending
-      : fakeDashboard.pending.filter((t) => (t[IN_WINDOW[due]] as number) > 0)
+export function periodPage(
+  filters: PeriodFilters = { timing: 'due', preparation: 'all', month: null },
+  page = 1,
+): RentalPeriodPage {
+  const matches = fakeDashboard.periods.filter(
+    (period) =>
+      DUE[filters.timing].includes(period.timing) &&
+      (filters.preparation === 'all' || period.preparation === filters.preparation) &&
+      (!filters.month || period.periodMonth === filters.month),
+  )
   const start = (page - 1) * fakeDashboard.pageSize
   return {
-    tenancies: matches.slice(start, start + fakeDashboard.pageSize),
+    periods: matches.slice(start, start + fakeDashboard.pageSize),
     count: matches.length,
     page,
     hasNext: start + fakeDashboard.pageSize < matches.length,
@@ -106,24 +126,23 @@ export function pendingPage(options: { due?: DueFilter; page?: number } = {}): P
 
 export const dashboardService = {
   getSummary: vi.fn(),
-  getPendingTenancies: vi.fn(),
-  getMissingBills: vi.fn(),
+  getRentalPeriods: vi.fn(),
+  markNotOwed: vi.fn(),
 }
 
 export function resetDashboardService() {
   Object.assign(fakeDashboard, defaults())
   dashboardService.getSummary.mockReset().mockImplementation(async () => fakeDashboard.summary)
-  dashboardService.getPendingTenancies
+  dashboardService.getRentalPeriods
     .mockReset()
-    .mockImplementation(async (_propertyId: string, options?: { due?: DueFilter; page?: number }) =>
-      pendingPage(options),
+    .mockImplementation(async (_propertyId: string, filters?: PeriodFilters, page?: number) =>
+      periodPage(filters, page),
     )
-  dashboardService.getMissingBills
+  dashboardService.markNotOwed
     .mockReset()
-    .mockImplementation(async (_propertyId: string, month?: string | null) => ({
-      ...fakeDashboard.missing,
-      billingMonth: month ?? fakeDashboard.missing.billingMonth,
-    }))
+    .mockImplementation(async (_propertyId: string, periodId: string) => {
+      fakeDashboard.periods = fakeDashboard.periods.filter((period) => period.id !== periodId)
+    })
 }
 
 resetDashboardService()

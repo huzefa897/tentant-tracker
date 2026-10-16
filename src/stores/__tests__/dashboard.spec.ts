@@ -9,7 +9,7 @@ import { useAuthStore } from '@/stores/auth'
 import { DASHBOARD_LOAD_ERROR_MESSAGE, useDashboardStore } from '@/stores/dashboard'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
-import { fakeDashboard, makeSummary, pendingPage } from '@/test/mocks/dashboardService'
+import { fakeDashboard, makeSummary, periodPage } from '@/test/mocks/dashboardService'
 import type { DashboardSummary } from '@/types/dashboard'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
@@ -40,21 +40,23 @@ beforeEach(async () => {
   await signIn()
 })
 
+const months = (store: ReturnType<typeof useDashboardStore>) =>
+  store.periods?.periods.map((period) => `${period.name} ${period.periodMonth}`)
+
 describe('dashboard store', () => {
-  it('loads the totals, the first page of who owes and the missing bills together', async () => {
+  it('loads the summary and the first page of months due together', async () => {
     const store = useDashboardStore()
 
     await store.refresh()
 
     expect(store.status).toBe('ready')
-    expect(store.summary?.outstanding).toBe(39500)
-    expect(store.pending?.tenancies.map((t) => t.tenantId)).toEqual(['tenant-001', 'tenant-002'])
-    expect(store.missing?.billingMonth).toBe('2026-09')
+    expect(store.summary?.knownOutstanding).toBe(5750)
+    expect(months(store)).toEqual(['Mohammed Yusuf 2026-08', 'Shaik Zahid Ali 2026-09'])
     expect(store.loadedAt).not.toBeNull()
   })
 
   it('is an error, never zeros, when the first load fails', async () => {
-    vi.mocked(dashboardService.getPendingTenancies).mockRejectedValueOnce(
+    vi.mocked(dashboardService.getRentalPeriods).mockRejectedValueOnce(
       new ApiError('unknown', 'boom'),
     )
     const store = useDashboardStore()
@@ -71,15 +73,15 @@ describe('dashboard store', () => {
     const store = useDashboardStore()
     await store.refresh()
     const loadedAt = store.loadedAt
-    fakeDashboard.summary = makeSummary({ outstanding: 1 })
-    vi.mocked(dashboardService.getMissingBills).mockRejectedValueOnce(
+    fakeDashboard.summary = makeSummary({ knownOutstanding: 1 })
+    vi.mocked(dashboardService.getRentalPeriods).mockRejectedValueOnce(
       new ApiError('network', 'offline'),
     )
 
     await store.refresh()
 
     // Not even the summary that did arrive: the screen never mixes two moments.
-    expect(store.summary?.outstanding).toBe(39500)
+    expect(store.summary?.knownOutstanding).toBe(5750)
     expect(store.loadedAt).toBe(loadedAt)
     expect(store.status).toBe('ready')
     expect(store.refreshError).toBe(
@@ -90,7 +92,7 @@ describe('dashboard store', () => {
     await store.refresh()
 
     expect(store.refreshError).toBeNull()
-    expect(store.summary?.outstanding).toBe(1)
+    expect(store.summary?.knownOutstanding).toBe(1)
   })
 
   it('never sends a second refresh while one is running', async () => {
@@ -113,58 +115,103 @@ describe('dashboard store', () => {
     await store.refresh()
     store.goToPage(2)
 
-    store.setDueFilter('overdue')
-    await vi.waitFor(() => expect(store.pendingStatus).toBe('ready'))
+    store.setPreparation('not_prepared')
+    await vi.waitFor(() => expect(store.periodsStatus).toBe('ready'))
+    store.setTiming('all')
+    await vi.waitFor(() => expect(store.periodsStatus).toBe('ready'))
 
     expect(store.page).toBe(1)
-    expect(dashboardService.getPendingTenancies).toHaveBeenLastCalledWith(testProperty.id, {
-      due: 'overdue',
-      page: 1,
-    })
-    expect(store.pending?.tenancies.map((t) => t.tenantId)).toEqual(['tenant-001'])
+    expect(dashboardService.getRentalPeriods).toHaveBeenLastCalledWith(
+      testProperty.id,
+      { timing: 'all', preparation: 'not_prepared', month: null },
+      1,
+    )
+    expect(months(store)).toEqual(['Mohammed Yusuf 2026-08', 'Mohammed Yusuf 2026-09'])
     expect(dashboardService.getSummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears two filters in one reload, and ignores a change to the same filters', async () => {
+    const store = useDashboardStore()
+    await store.refresh()
+    store.setFilters({ preparation: 'prepared', month: '2026-09' })
+    await vi.waitFor(() => expect(store.periodsStatus).toBe('ready'))
+    vi.mocked(dashboardService.getRentalPeriods).mockClear()
+
+    store.setFilters({ preparation: 'all', month: null })
+    store.setMonth(null)
+    await vi.waitFor(() => expect(store.periodsStatus).toBe('ready'))
+
+    expect(dashboardService.getRentalPeriods).toHaveBeenCalledTimes(1)
   })
 
   it('shows only the newest filter’s rows when responses arrive out of order', async () => {
     const store = useDashboardStore()
     await store.refresh()
-    const slow = deferred<ReturnType<typeof pendingPage>>()
-    vi.mocked(dashboardService.getPendingTenancies).mockReturnValueOnce(slow.promise)
+    const slow = deferred<ReturnType<typeof periodPage>>()
+    vi.mocked(dashboardService.getRentalPeriods).mockReturnValueOnce(slow.promise)
 
-    store.setDueFilter('overdue')
-    store.setDueFilter('due_next_7_days')
-    await vi.waitFor(() => expect(store.pendingStatus).toBe('ready'))
-    slow.resolve(pendingPage({ due: 'overdue' }))
+    store.setTiming('overdue')
+    store.setTiming('upcoming')
+    await vi.waitFor(() => expect(store.periodsStatus).toBe('ready'))
+    slow.resolve(periodPage({ timing: 'overdue', preparation: 'all', month: null }))
     await Promise.resolve()
 
-    expect(store.pending?.tenancies.map((t) => t.tenantId)).toEqual(['tenant-002'])
+    expect(months(store)).toEqual(['Mohammed Yusuf 2026-09'])
   })
 
-  it('reports a failed list reload apart, keeping the totals', async () => {
+  it('reports a failed list reload apart, keeping the summary', async () => {
     const store = useDashboardStore()
     await store.refresh()
-    vi.mocked(dashboardService.getPendingTenancies).mockRejectedValueOnce(
+    vi.mocked(dashboardService.getRentalPeriods).mockRejectedValueOnce(
       new ApiError('unavailable', 'down'),
     )
 
-    store.setDueFilter('overdue')
-    await vi.waitFor(() => expect(store.pendingStatus).toBe('error'))
+    store.setTiming('overdue')
+    await vi.waitFor(() => expect(store.periodsStatus).toBe('error'))
 
-    expect(store.pendingError).toBe(
-      'Pending payments are unavailable right now. Please try again shortly.',
-    )
-    expect(store.summary?.outstanding).toBe(39500)
+    expect(store.periodsError).toBe('Rent due is unavailable right now. Please try again shortly.')
+    expect(store.summary?.knownOutstanding).toBe(5750)
   })
 
-  it('loads another month’s missing bills on its own', async () => {
+  it('marks a month not owed, then refreshes so it leaves the list', async () => {
     const store = useDashboardStore()
     await store.refresh()
 
-    store.setMissingMonth('2026-08')
-    await vi.waitFor(() => expect(store.missingStatus).toBe('ready'))
+    const saved = await store.markNotOwed('period-002', 'Settled in the old sheet')
 
-    expect(store.missing?.billingMonth).toBe('2026-08')
-    expect(dashboardService.getSummary).toHaveBeenCalledTimes(1)
+    expect(saved).toBe(true)
+    expect(dashboardService.markNotOwed).toHaveBeenCalledWith(
+      testProperty.id,
+      'period-002',
+      'Settled in the old sheet',
+    )
+    expect(months(store)).toEqual(['Shaik Zahid Ali 2026-09'])
+    expect(store.markingId).toBeNull()
+  })
+
+  it.each([
+    [
+      new ApiError('conflict', 'x', 'period_has_bill'),
+      'This month has a bill. Void the bill first.',
+    ],
+    [new ApiError('forbidden', 'x'), "Only the property's owners can mark a month not owed."],
+    [
+      new ApiError('invalid-request', 'x', null, { reason: "Say why this month isn't owed." }),
+      "Say why this month isn't owed.",
+    ],
+    [
+      new ApiError('network', 'x'),
+      "Couldn't reach the server. Check your connection and try again.",
+    ],
+  ])('says why a month couldn’t be marked not owed', async (error, message) => {
+    vi.mocked(dashboardService.markNotOwed).mockRejectedValueOnce(error)
+    const store = useDashboardStore()
+    await store.refresh()
+
+    expect(await store.markNotOwed('period-002', 'Waived')).toBe(false)
+
+    expect(store.markError).toBe(message)
+    expect(months(store)).toContain('Mohammed Yusuf 2026-08')
   })
 
   it('forgets everything when the property changes, discarding a refresh in flight', async () => {
@@ -184,5 +231,6 @@ describe('dashboard store', () => {
     expect(store.summary).toBeNull()
     expect(store.status).toBe('idle')
     expect(store.refreshing).toBe(false)
+    expect(store.filters).toEqual({ timing: 'due', preparation: 'all', month: null })
   })
 })
