@@ -17,6 +17,7 @@ from .models import (
     Payment,
     PaymentReversal,
     Receipt,
+    RentalPeriod,
     RentEntry,
     receipt_reference,
     tenancy_covers_month,
@@ -92,6 +93,18 @@ class BillCorrectionNotAllowedError(Exception):
     """The actor's role can't void or correct bills for this property."""
 
 
+class PeriodNotFoundError(Exception):
+    """No such rental period, or the actor can't access its property."""
+
+
+class PeriodHasBillError(Exception):
+    """The month has an active bill: void it first, then mark the month not owed."""
+
+
+class NotOwedConflictError(Exception):
+    """The month was already marked not owed, with another reason."""
+
+
 class VoidConflictError(Exception):
     """The bill was already voided, with another reason."""
 
@@ -154,6 +167,13 @@ class CorrectedEntry:
     original: RentEntry
     replacement: RentEntry
     # False when the key's correction was already made: a retry, nothing changed now.
+    created: bool
+
+
+@dataclass(frozen=True)
+class MarkedNotOwed:
+    period: RentalPeriod
+    # False when the month was already marked not owed for the same reason: a retry.
     created: bool
 
 
@@ -872,3 +892,53 @@ def correct_rent_entry(
                 fingerprint=fingerprint,
             )
         raise
+
+
+def mark_period_not_owed(*, period_id, actor, reason: str) -> MarkedNotOwed:
+    """Marks a month's rent as not owed (waived, or settled outside the app), with who, when
+    and why: it stops counting as due or overdue and can't have a bill. Owners only (the same
+    capability as voiding a bill); no access is PeriodNotFoundError.
+
+    A month with an active bill is PeriodHasBillError: void the bill first. A retry with the
+    same reason returns the mark; another reason is NotOwedConflictError. The tenancy is locked
+    first, as bill creation does, so a bill can't be created for the month meanwhile.
+    """
+    reason = _clean_reason(reason)
+    with transaction.atomic():
+        found = (
+            RentalPeriod.objects.filter(pk=period_id)
+            .values_list("tenancy_id", "tenancy__property_id")
+            .first()
+        )
+        if found is None:
+            raise PeriodNotFoundError()
+        tenancy_id, property_id = found
+        role = (
+            properties_for_user(actor)
+            .filter(pk=property_id)
+            .values_list("role", flat=True)
+            .first()
+        )
+        if role is None:
+            raise PeriodNotFoundError()
+        if not role_can(role, Capability.CORRECT_BILLS):
+            raise BillCorrectionNotAllowedError()
+
+        Tenancy.objects.select_for_update(no_key=True).get(pk=tenancy_id)
+        period = RentalPeriod.objects.select_for_update().get(pk=period_id)
+        if period.not_owed_at is not None:
+            if period.not_owed_reason != reason:
+                raise NotOwedConflictError()
+            return MarkedNotOwed(period=period, created=False)
+        if (
+            RentEntry.objects.active()
+            .filter(tenancy_id=tenancy_id, billing_month=period.period_month)
+            .exists()
+        ):
+            raise PeriodHasBillError()
+
+        period.not_owed_at = timezone.now()
+        period.not_owed_by = actor
+        period.not_owed_reason = reason
+        period.save(update_fields=["not_owed_at", "not_owed_by", "not_owed_reason"])
+        return MarkedNotOwed(period=period, created=True)

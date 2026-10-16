@@ -6,8 +6,8 @@ from rest_framework.routers import SimpleRouter
 from accounts.views import me
 from billing.dashboard_views import (
     DashboardSummaryView,
-    MissingBillsView,
-    PendingTenanciesView,
+    PeriodNotOwedView,
+    RentalPeriodsView,
 )
 from billing.views import (
     EntryCorrectionViewSet,
@@ -47,14 +47,14 @@ urlpatterns = [
         name="dashboard-summary",
     ),
     path(
-        "api/v1/properties/<uuid:property_id>/dashboard/pending-tenancies/",
-        PendingTenanciesView.as_view(),
-        name="dashboard-pending-tenancies",
+        "api/v1/properties/<uuid:property_id>/dashboard/rental-periods/",
+        RentalPeriodsView.as_view(),
+        name="dashboard-rental-periods",
     ),
     path(
-        "api/v1/properties/<uuid:property_id>/dashboard/missing-bills/",
-        MissingBillsView.as_view(),
-        name="dashboard-missing-bills",
+        "api/v1/properties/<uuid:property_id>/rental-periods/<uuid:period_id>/not-owed/",
+        PeriodNotOwedView.as_view(),
+        name="rental-period-not-owed",
     ),
     path(
         "api/v1/properties/<uuid:property_id>/tenancies/",

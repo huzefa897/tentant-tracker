@@ -5,8 +5,8 @@ from datetime import date
 
 from django.conf import settings
 from django.db import models
-from django.db.models import DecimalField, F, OuterRef, Q, Subquery, Sum, Value
-from django.db.models.functions import Coalesce, Round
+from django.db.models import DateField, DecimalField, Exists, F, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce, Round, TruncMonth
 
 from properties.models import PaymentTiming, Property, Tenancy
 
@@ -232,6 +232,44 @@ class RentEntry(models.Model):
         return f"{self.tenancy} — {self.billing_month:%B %Y}"
 
 
+class RentalPeriodQuerySet(models.QuerySet):
+    def with_bill(self):
+        """Annotates each period's active bill, if it's prepared: `has_bill`, `bill_id`, and its
+        `bill_total`, `bill_paid` and `outstanding` (the one SQL definition, so reversed
+        payments don't count), all null without a bill. Never a zero for a missing bill."""
+        bill = RentEntry.objects.active().filter(
+            tenancy=OuterRef("tenancy"), billing_month=OuterRef("period_month")
+        )
+        amounts = bill.with_amounts()
+        return self.annotate(
+            has_bill=Exists(bill),
+            bill_id=Subquery(bill.values("pk")[:1]),
+            bill_total=Subquery(amounts.values("due_total")[:1], output_field=MONEY),
+            bill_paid=Subquery(amounts.values("paid_total")[:1], output_field=MONEY),
+            outstanding=Subquery(amounts.values("outstanding_total")[:1], output_field=MONEY),
+        )
+
+    def counted(self):
+        """The periods that are owed, with their bill (with_bill): not marked not owed, and
+        either prepared, or tracked (on or after the property's rent tracking start) and within
+        the tenancy's dates. A prepared month always counts, so no bill's balance can drop out
+        of the totals."""
+        tracked = (
+            Q(period_month__gte=F("tenancy__property__rent_tracking_start"))
+            & Q(period_month__gte=TruncMonth("tenancy__start_date", output_field=DateField()))
+            & (Q(tenancy__end_date__isnull=True) | Q(tenancy__end_date__gte=F("period_month")))
+        )
+        return (
+            self.with_bill()
+            .filter(not_owed_at__isnull=True)
+            .filter(Q(has_bill=True) | tracked)
+        )
+
+    def owing(self):
+        """Counted periods with money still to pay, or an amount not yet known (no bill)."""
+        return self.counted().filter(Q(has_bill=False) | Q(outstanding__gt=0))
+
+
 class RentalPeriod(models.Model):
     """One month of one tenancy's rent: when it's due, whether or not its bill is prepared.
 
@@ -269,6 +307,8 @@ class RentalPeriod(models.Model):
         related_name="+",
     )
     not_owed_reason = models.CharField(max_length=500, blank=True)
+
+    objects = RentalPeriodQuerySet.as_manager()
 
     class Meta:
         ordering = ("-period_month", "tenancy_id")
