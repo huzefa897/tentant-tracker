@@ -91,7 +91,8 @@ class RentalPeriodsView(DashboardView):
     not, oldest due first. ?timing=due (the default: overdue or due today)|overdue|due_today|
     upcoming (the next 7 days)|all, ?preparation=all|prepared|not_prepared and
     ?month=YYYY-MM. Filters change the list, never the summary. Each row's actions are the
-    ones the viewer's role allows."""
+    ones the viewer's role allows: prepare_bill and mark_not_owed (owners) without a bill,
+    view_bill and record_payment with one."""
 
     def get(self, request, property_id):
         prop = self.ensured_property()
@@ -118,19 +119,22 @@ class RentalPeriodsView(DashboardView):
         paginator = RentalPeriodsPagination()
         page = paginator.paginate_queryset(rows, request, view=self)
         can_bill = role_can(prop.role, Capability.RECORD_PAYMENTS)
+        can_correct = role_can(prop.role, Capability.CORRECT_BILLS)
         return paginator.get_paginated_response(
-            [self.row(row, today, can_bill) for row in page]
+            [self.row(row, today, can_bill, can_correct) for row in page]
         )
 
     @staticmethod
-    def row(row, today, can_bill: bool):
+    def row(row, today, can_bill: bool, can_correct: bool):
         dates = Tenancy(start_date=row["tenancy__start_date"], end_date=row["tenancy__end_date"])
         timing = dashboard.timing_of(row["due_date"], today)
         prepared = row["has_bill"]
         if prepared:
             actions = ["view_bill"] + (["record_payment"] if can_bill else [])
         else:
-            actions = ["prepare_bill"] if can_bill else []
+            actions = (["prepare_bill"] if can_bill else []) + (
+                ["mark_not_owed"] if can_correct else []
+            )
         return {
             "id": str(row["id"]),
             "tenancyId": str(row["tenancy_id"]),
