@@ -1,8 +1,18 @@
 # Property dashboard
 
-The dashboard answers, for the selected property: which months' rent is due or overdue, whether each one's bill is prepared, and how much is known to be outstanding. A month is due on the tenancy's schedule whether or not its bill exists ([rent-entries.md](rent-entries.md#rental-periods-and-due-dates)).
+The dashboard has two lists:
 
-## What counts
+- **Overdue bills** (the default): which tenants have bills past their due date with money still to pay, across every property the user has, grouped by tenant, so the owners know whom to remind. Only bills: a month without a bill is never treated as paid or owed here.
+- **Rent due**, for the selected property: which months' rent is due or overdue, whether each one's bill is prepared, and how much is known to be outstanding. A month is due on the tenancy's schedule whether or not its bill exists ([rent-entries.md](rent-entries.md#rental-periods-and-due-dates)). This is where a month without a bill shows up.
+
+## Overdue bills
+
+- **What counts:** active bills whose due date is before today (in India, `business_date()`) with an outstanding balance above zero. A bill is due when its rental period is (`RentEntryQuerySet.with_due`), so one prepared late keeps its month's due date. Paid, void and not-yet-due bills (including due today) are left out. Amounts are the one SQL definition (below): payments that weren't reversed, so a reversal makes a bill overdue again and a payment that settles it takes it off the list, the same figures as the bill page.
+- **API:** `GET /api/v1/overdue-bills/` across the user's properties (`properties_for_user`), `billing/overdue.py`. `asOfDate`, `generatedAt`, `currency`, `tenantCount`, `billCount`, `totalOutstandingAmount` (of the filtered list) and `tenants`: `tenancyId`, `name`, `flatNumber`, `tenancyStatus`, `propertyId`, `propertyName`, `overdueBillCount`, `outstandingAmount`, `oldestDueDate` and `bills` (`id`, `billingMonth`, `dueDate`, `daysOverdue`, `totalAmount`, `paidAmount`, `outstandingAmount`), oldest due first. Tenants with the oldest overdue bill come first (then name, flat, property). `?property=<id>` (one of the user's; anything else is 400 `property`, never a hint another exists), `?month=YYYY-MM` (billing month), `?search=` (tenant name or flat, case-insensitive; "Flat 102" finds 102; at most 100 characters). Not paged: one group per tenancy that owes. Its query count doesn't grow with bills (tested).
+- **App:** `DashboardView` opens on it (`?view=rent-due` is the other list). `dashboardService.getOverdueBills` validates the response (a tenant's bills match its count, each is overdue with money left), `stores/overdue.ts` holds it with its filters; it spans properties, so it resets on sign-out but not when the selected property changes. **Search tenant or flat** (sent once typing pauses, or on Enter), **Property** (only with more than one) and **Month** (the last two years), with **Clear filters**. The totals line (₹ outstanding · tenants · overdue bills), then a card per tenant (`OverdueTenantList`): name, property (with several) and flat, the total outstanding and how many bills, then each month with its due date, days overdue, total, paid and balance (a table from `sm` up, tappable rows on phones). **View bill** opens the bill (`?from=dashboard`); the tenant's name opens their bills. A bill in another property selects that property first, since the bill pages work within the selected one.
+- **States:** refreshed whenever it's shown and from **Refresh**, with **Updated 2 minutes ago**. A failed first load is an error with Try again, never "No overdue bills"; a failed refresh keeps the list and says **Couldn’t refresh**. A filter change replaces the list with skeleton rows and, if it fails, an error with Try again in its place: the old filters' list is never shown as the new one's. **No overdue bills.** when there are none; **No overdue bills match your filters.** with Clear filters when the filters leave nothing.
+
+## Rent due: what counts
 
 - **Rows are rental periods**, one per tenancy and month, never bills: a month without a bill is still due or overdue. Months count once the property tracks rent (`Property.rent_tracking_start`) and within the tenancy's dates; a month with a bill always counts. Months marked **not owed** never do.
 - **Amounts come only from prepared bills.** Active bills, with the payments that weren't reversed; void bills count for nothing. A month awaiting its bill has no amount: it's `null` in the API, never `"0.00"`, and it's left out of every sum (the summary counts how many). Nothing is estimated, not even the rent.
@@ -12,7 +22,7 @@ The dashboard answers, for the selected property: which months' rent is due or o
 - **Periods are created by the reads themselves** (`periods.ensure_property_periods`, at the start of every dashboard request), so a day of downtime or no visits never hides a month. No scheduled job.
 - Everything is counted and summed in the database across the whole property before paging (`billing/dashboard.py`); the list's filters never change the summary.
 
-## API
+## Rent due: API
 
 Reads are for anyone with access to the property (`properties_for_user`; another property 404s). Money is a decimal string.
 
@@ -21,9 +31,9 @@ Reads are for anyone with access to the property (`properties_for_user`; another
 - `POST /api/v1/properties/{id}/rental-periods/{periodId}/not-owed/` `{"reason"}`: marks a month not owed (waived, or settled outside the app). Owners only (403 for a manager), 201 with the period and who, when and why; a retry with the same reason is 200, another reason 409 `not_owed_conflict`; a month with an active bill is 409 `period_has_bill` (void the bill first). It can't have a bill afterwards.
 - **A tenancy's unpaid bills:** the bills list takes `?balance=outstanding` (active bills with money still to pay), with the rest of its filters and paging ([rent-entries.md](rent-entries.md)).
 
-## App
+## Rent due: app
 
-After signing in and choosing a property, the dashboard (`DashboardView`) opens on **Rent due**. Choosing a tenant in the toolbar search shows their details as before, with **Rent due** to go back. The property is the one chosen in the app's property switch: the dashboard is always one property's.
+After signing in and choosing a property, the dashboard (`DashboardView`) opens on **Overdue bills**; **Rent due** is the second toggle (`?view=rent-due`). Choosing a tenant in the toolbar search shows their details as before, with a button back to the list. Rent due is the selected property's, the one chosen in the app's property switch.
 
 - **Data:** `services/dashboard.service.ts` validates each response (money as two-decimal strings or, for a month without a bill, `null`; a prepared month must have its bill and amounts and one without a bill must have neither; dates, months, counts, statuses and actions) and maps it to `types/dashboard.ts`. `stores/dashboard.ts` holds the summary and one page of months for the chosen filters (`timing`, `preparation`, `month`). It resets as soon as the property changes.
 - **Refreshing:** whenever Rent due is shown (opening it, coming back from a bill, payment, reversal or correction, another property) and from **Refresh**. A refresh loads the summary and the list together and replaces them only when both arrive; a refresh while one is running waits for it. **Updated 2 minutes ago** moves on by itself.
@@ -32,4 +42,3 @@ After signing in and choosing a property, the dashboard (`DashboardView`) opens 
 - **The list** (`PeriodFilterBar`, `RentalPeriodTable`): toggle buttons for when it's due (**Due now**, the default: overdue or due today; Overdue; Due today; Next 7 days; All owed), and native selects for **Bill** (All, Prepared, Not prepared) and **Month** (the last 12), with **Clear filters**. One row per month: tenant and flat (an ended tenancy says so), month, due date, **Overdue 25 days** / **Due today** / **Due in 3 days**, Prepared or Not prepared, and the outstanding amount or **Awaiting calculation**. A table from `lg` up, cards below. Pages of 20.
 - **Actions**, only those the row's `actions` allow: **Prepare bill** opens the new-bill form on that month (`?month=YYYY-MM`; the bill is due on the month's date, however late it's made); **View bill** opens the bill (`?from=dashboard`), and **Record payment** opens it with Record Payment already open (`?pay=1`), where payments are recorded against that bill as usual. **Not owed** (owners) asks why (`NotOwedForm`, in a dialog that stays open while saving and keeps the reason on failure), then refreshes, so the month leaves the list and the counts together.
 - **Tests:** the dashboard is where sign-in lands, so `src/test/setup.ts` mocks `dashboard.service` with `src/test/mocks/dashboardService.ts` for every test ([testing.md](testing.md)).
-
