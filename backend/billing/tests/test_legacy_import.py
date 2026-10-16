@@ -12,7 +12,7 @@ from django.test import TestCase
 
 from billing.legacy_import import import_ledger
 from billing.legacy_ledger import LedgerError, parse_ledger, parse_mapping
-from billing.models import LegacyRecord, Payment, Receipt, RentEntry
+from billing.models import LegacyRecord, Payment, Receipt, RentalPeriod, RentEntry
 from billing.services import record_payment, reverse_payment, void_rent_entry
 
 from .factories import make_property, make_tenancy, make_user
@@ -186,8 +186,8 @@ class ImportLedgerTests(TestCase):
         self.assertEqual(september.rent_amount, Decimal("16000.00"))
         self.assertEqual(september.payments.get().paid_date, date(2026, 9, 20))
         # The property's timing (postpaid) and the tenancy's due day (11th) as they are now.
-        self.assertEqual(september.payment_timing, "postpaid")
-        self.assertEqual(september.due_date, date(2026, 10, 11))
+        period = RentalPeriod.objects.get(tenancy=september.tenancy, period_month=date(2026, 9, 1))
+        self.assertEqual((period.payment_timing, period.due_date), ("postpaid", date(2026, 10, 11)))
 
     def test_keeps_receipt_references_and_snapshots_them_as_issued(self):
         self.run_import()

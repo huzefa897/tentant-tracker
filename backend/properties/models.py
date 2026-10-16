@@ -35,9 +35,9 @@ class Property(models.Model):
         max_length=20,
         blank=True,
     )
-    # Copied onto each bill with its due date when the bill is created, so changing it only
-    # affects new bills. A database default too, so the release before this one can still add
-    # properties after a rollback.
+    # Copied onto each rental period with its due date when the period is created
+    # (billing/periods.py), so changing it never moves a month already due. A database default
+    # too, so the release before this one can still add properties after a rollback.
     payment_timing = models.CharField(
         "rent payment timing",
         max_length=8,
@@ -45,12 +45,30 @@ class Property(models.Model):
         default=PaymentTiming.POSTPAID,
         db_default=PaymentTiming.POSTPAID,
     )
+    # The first month whose rent the app expects from the tenancy schedule, bill or no bill.
+    # Empty: only months that have bills are owed, so months settled before the app (in the
+    # Sheet) never show up as arrears. Set it once the earlier months are reconciled.
+    rent_tracking_start = models.DateField(
+        null=True,
+        blank=True,
+        help_text=(
+            "The first month (its 1st day) whose rent is due from the tenancy schedule, even "
+            "before its bill is prepared. Leave empty to count only months that have bills."
+        ),
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name_plural = "properties"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(rent_tracking_start__day=1),
+                name="property_rent_tracking_start_first_day",
+                violation_error_message="Rent tracking starts on the 1st of a month.",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -189,14 +207,14 @@ class Tenancy(models.Model):
         validators=[MinValueValidator(Decimal("0.01"))],
         help_text="Current monthly rent (₹).",
     )
-    # Can change at any time (e.g. a tenant moves from the 15th to the 1st): each bill keeps
-    # the due date worked out when it was created, so a change only affects new bills.
+    # Can change at any time (e.g. a tenant moves from the 15th to the 1st): each rental period
+    # keeps the due date worked out when it was created, so a change only affects later months.
     rent_due_day = models.PositiveSmallIntegerField(
         blank=True,
         validators=[MinValueValidator(1), MaxValueValidator(31)],
         help_text=(
             "Day of the month rent is due (1–31; in shorter months, their last day). "
-            "Leave empty for the start date's day. A change applies to new bills only."
+            "Leave empty for the start date's day. A change applies to months not yet due."
         ),
     )
     electricity_rate = models.DecimalField(
