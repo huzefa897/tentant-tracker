@@ -7,6 +7,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from billing.models import Payment, RentEntry
+from billing.periods import period_for_bill
 from properties.models import PropertyMembership
 
 from .factories import make_property, make_tenancy, make_user
@@ -23,7 +24,8 @@ def payments_url(prop, tenancy, entry_id):
 
 
 def make_entry(tenancy, user, month=date(2026, 9, 1)):
-    # ₹15,000 + 75 × ₹6 + ₹300 = ₹15,750.
+    # ₹15,000 + 75 × ₹6 + ₹300 = ₹15,750. With its month's rental period, as every bill has.
+    period_for_bill(tenancy, month)
     return RentEntry.objects.create(
         tenancy=tenancy,
         billing_month=month,

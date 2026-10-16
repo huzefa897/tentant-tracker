@@ -30,6 +30,7 @@ from .services import (
     EntryNotFoundError,
     EntryVoidError,
     NothingToCorrectError,
+    PeriodNotOwedError,
     IdempotencyConflictError,
     PaymentExceedsOutstandingError,
     PaymentNotAllowedError,
@@ -216,6 +217,7 @@ def entry_with_details(entry_id) -> RentEntry:
     """A bill as the API shows it, after a change: its amounts, voider and replacement."""
     return (
         RentEntry.objects.with_amounts()
+        .with_due()
         .select_related("voided_by", "replaced_by")
         .get(pk=entry_id)
     )
@@ -255,6 +257,7 @@ class RentEntryViewSet(
         return (
             RentEntry.objects.filter(tenancy=self.get_tenancy())
             .with_amounts()
+            .with_due()
             .select_related("voided_by", "replaced_by")
             .order_by("-billing_month", "-created_at")
         )
@@ -321,6 +324,10 @@ class RentEntryViewSet(
         except BillingMonthOutsideTenancyError:
             raise exceptions.ValidationError(
                 {"billingMonth": ["This month is outside the tenancy's occupancy period."]}
+            ) from None
+        except PeriodNotOwedError:
+            raise exceptions.ValidationError(
+                {"billingMonth": ["This month is marked as not owed, so it can't have a bill."]}
             ) from None
         except IdempotencyConflictError:
             raise IdempotencyConflict() from None

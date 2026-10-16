@@ -5,12 +5,10 @@ from datetime import date
 
 from django.conf import settings
 from django.db import models
-from django.db.models import DecimalField, F, Q, Sum, Value
+from django.db.models import DecimalField, F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce, Round
 
 from properties.models import PaymentTiming, Property, Tenancy
-
-from .calculations import due_date_for
 
 
 def month_end(billing_month: date) -> date:
@@ -23,14 +21,6 @@ def tenancy_covers_month(tenancy: Tenancy, billing_month: date) -> bool:
     return tenancy.start_date <= month_end(billing_month) and (
         tenancy.end_date is None or tenancy.end_date >= billing_month
     )
-
-
-def bill_due(tenancy: Tenancy, billing_month: date) -> tuple[str, date]:
-    """The payment timing and due date a new bill for this month gets: the property's timing
-    and the tenancy's due day as they are now. Saved on the bill, never worked out again, so
-    changing either later doesn't move an existing bill's due date."""
-    timing = tenancy.property.payment_timing
-    return timing, due_date_for(billing_month, tenancy.rent_due_day, timing)
 
 
 MONEY = DecimalField(max_digits=12, decimal_places=2)
@@ -63,6 +53,18 @@ class RentEntryQuerySet(models.QuerySet):
                 + F("water_amount"),
                 output_field=MONEY,
             ),
+        )
+
+    def with_due(self):
+        """Annotates each bill's rental period's due date and payment timing (`period_due_date`,
+        `period_payment_timing`): a bill is due when its month is, so it has no due date of its
+        own. The serializer reads them, and queries a bill without them for its period."""
+        period = RentalPeriod.objects.filter(
+            tenancy=OuterRef("tenancy"), period_month=OuterRef("billing_month")
+        )
+        return self.annotate(
+            period_due_date=Subquery(period.values("due_date")[:1]),
+            period_payment_timing=Subquery(period.values("payment_timing")[:1]),
         )
 
     def with_payment_status(self, status: str):
@@ -109,13 +111,6 @@ class RentEntry(models.Model):
     water_amount = models.DecimalField(max_digits=10, decimal_places=2)
     # A bounded column (varchar), so the database enforces the 500-character limit too.
     notes = models.CharField(max_length=500, blank=True)
-    # When it's due (bill_due), saved when the bill is created from the property's timing and the
-    # tenancy's due day at the time. Empty only on bills from before due dates, until
-    # `fill_bill_due_dates` gives them one.
-    payment_timing = models.CharField(
-        max_length=8, choices=PaymentTiming.choices, null=True, blank=True
-    )
-    due_date = models.DateField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -203,18 +198,6 @@ class RentEntry(models.Model):
                 condition=Q(billing_month__day=1),
                 name="rent_entry_billing_month_first_day",
             ),
-            # Both or neither, and never due before the month it bills. The isnull checks are
-            # needed: a comparison with NULL isn't false, and a CHECK only refuses false.
-            models.CheckConstraint(
-                condition=Q(payment_timing__isnull=True, due_date__isnull=True)
-                | Q(
-                    payment_timing__isnull=False,
-                    due_date__isnull=False,
-                    payment_timing__in=PaymentTiming.values,
-                    due_date__gte=F("billing_month"),
-                ),
-                name="rent_entry_due_date_with_timing",
-            ),
             models.UniqueConstraint(
                 fields=["creation_key"],
                 name="unique_rent_entry_creation_key",
@@ -223,6 +206,85 @@ class RentEntry(models.Model):
 
     def __str__(self):
         return f"{self.tenancy} — {self.billing_month:%B %Y}"
+
+
+class RentalPeriod(models.Model):
+    """One month of one tenancy's rent: when it's due, whether or not its bill is prepared.
+
+    Created from the tenancy's schedule (billing/periods.py ensure_periods) once the property
+    tracks rent (Property.rent_tracking_start), and for every month that has a bill. Its
+    payment timing, due day and due date are copied from the property and tenancy when it's
+    created and never worked out again, so changing either later only affects months created
+    after; a bill prepared late is still due on its month's date.
+
+    A bill belongs to the period with its tenancy and month (the same key, unique on both
+    sides), so the period has no bill column and the bill no due date of its own. Whether the
+    bill is prepared, its balance and whether the month is late are derived, never stored.
+
+    A month that isn't owed (rent waived, or settled before the app) is marked with who, when
+    and why (not_owed_*), never deleted.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenancy = models.ForeignKey(
+        Tenancy,
+        on_delete=models.PROTECT,
+        related_name="rental_periods",
+    )
+    period_month = models.DateField(help_text="The first day of the month.")
+    payment_timing = models.CharField(max_length=8, choices=PaymentTiming.choices)
+    due_day = models.PositiveSmallIntegerField()
+    due_date = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    not_owed_at = models.DateTimeField(null=True, blank=True)
+    not_owed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    not_owed_reason = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ("-period_month", "tenancy_id")
+        constraints = [
+            # One per tenancy and month, so creating them twice (or at once) can't duplicate.
+            models.UniqueConstraint(
+                fields=["tenancy", "period_month"],
+                name="unique_tenancy_rental_period",
+            ),
+            models.CheckConstraint(
+                condition=Q(period_month__day=1),
+                name="rental_period_month_first_day",
+            ),
+            models.CheckConstraint(
+                condition=Q(payment_timing__in=PaymentTiming.values),
+                name="rental_period_payment_timing_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(due_day__gte=1, due_day__lte=31),
+                name="rental_period_due_day_1_to_31",
+            ),
+            # Never due before the month it's for.
+            models.CheckConstraint(
+                condition=Q(due_date__gte=F("period_month")),
+                name="rental_period_due_on_or_after_month",
+            ),
+            # Owed, or not owed with who said so, when and why. The isnull checks are needed:
+            # a comparison with NULL isn't false, and a CHECK only refuses false.
+            models.CheckConstraint(
+                condition=Q(not_owed_at__isnull=True, not_owed_by__isnull=True, not_owed_reason="")
+                | (
+                    Q(not_owed_at__isnull=False, not_owed_by__isnull=False)
+                    & ~Q(not_owed_reason="")
+                ),
+                name="rental_period_not_owed_details",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.tenancy} — {self.period_month:%B %Y}"
 
 
 class PaymentQuerySet(models.QuerySet):

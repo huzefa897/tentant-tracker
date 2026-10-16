@@ -7,7 +7,7 @@ from rest_framework import serializers
 from properties.models import business_date
 
 from .calculations import due_status, entry_amounts
-from .models import Payment, PaymentReversal, Receipt, RentEntry
+from .models import Payment, PaymentReversal, Receipt, RentalPeriod, RentEntry
 
 MONTH_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -369,6 +369,19 @@ class RentEntryCreateSerializer(serializers.Serializer):
         return super().to_internal_value(data)
 
 
+def _period_due(entry: RentEntry):
+    """The payment timing and due date of the bill's rental period (with_due(), else a query).
+    Every bill has a period; (None, None) only if one were missing."""
+    if hasattr(entry, "period_due_date"):
+        return entry.period_payment_timing, entry.period_due_date
+    period = (
+        RentalPeriod.objects.filter(tenancy_id=entry.tenancy_id, period_month=entry.billing_month)
+        .values_list("payment_timing", "due_date")
+        .first()
+    )
+    return period or (None, None)
+
+
 class RentEntrySerializer(serializers.ModelSerializer):
     """A saved bill. Money is a decimal string ("15750.00"); totals come from
     billing/calculations.py, so the app displays them rather than recalculating.
@@ -379,9 +392,10 @@ class RentEntrySerializer(serializers.ModelSerializer):
     replacedByEntryId link a correction's two bills (else null). Lists load the voider and
     replacement in the same query (select_related("voided_by", "replaced_by")).
 
-    paymentTiming ("prepaid" | "postpaid") and dueDate are saved with the bill. dueStatus
-    ("settled", "overdue", "due_today", "upcoming") compares them with today at the property;
-    all three are null on a bill from before due dates, and dueStatus is null on a void bill.
+    paymentTiming ("prepaid" | "postpaid") and dueDate are the bill's rental period's: a bill
+    is due when its month is, however late it was prepared. dueStatus ("settled", "overdue",
+    "due_today", "upcoming") compares them with today at the property; it's null on a void
+    bill. Querysets annotate them (RentEntry.objects.with_due()); without it, they're queried.
     """
 
     tenancyId = serializers.UUIDField(source="tenancy_id")
@@ -414,6 +428,7 @@ class RentEntrySerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         amounts = entry_amounts(instance)
+        payment_timing, due_date = _period_due(instance)
         return {
             "id": data["id"],
             "tenancyId": data["tenancyId"],
@@ -427,11 +442,11 @@ class RentEntrySerializer(serializers.ModelSerializer):
             "totalPaid": str(amounts.total_paid),
             "outstandingAmount": str(amounts.outstanding_amount),
             "paymentStatus": amounts.payment_status,
-            "paymentTiming": instance.payment_timing,
-            "dueDate": None if instance.due_date is None else instance.due_date.isoformat(),
+            "paymentTiming": payment_timing,
+            "dueDate": None if due_date is None else due_date.isoformat(),
             "dueStatus": None
             if instance.status == RentEntry.Status.VOID
-            else due_status(instance.due_date, amounts.outstanding_amount, business_date()),
+            else due_status(due_date, amounts.outstanding_amount, business_date()),
             "notes": data["notes"],
             "createdAt": data["createdAt"],
             "status": instance.status,
