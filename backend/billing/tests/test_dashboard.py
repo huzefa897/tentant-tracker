@@ -288,6 +288,17 @@ class RentalPeriodsTests(DashboardTestCase):
         self.assertEqual((row["preparation"], row["settlement"]), ("prepared", "unpaid"))
         self.assertEqual(RentalPeriod.objects.filter(tenancy=self.yusuf).count(), 2)
 
+    def test_owners_can_also_mark_a_month_without_a_bill_not_owed(self):
+        PropertyMembership.objects.filter(user=self.user).update(role="owner")
+        self.bill(self.zahid, SEPTEMBER)
+
+        actions = {
+            row["periodMonth"] + row["name"]: row["actions"] for row in self.periods()["results"]
+        }
+
+        self.assertEqual(actions["2026-08Mohammed Yusuf"], ["prepare_bill", "mark_not_owed"])
+        self.assertEqual(actions["2026-09Shaik Zahid Ali"], ["view_bill", "record_payment"])
+
     def test_paid_months_leave_the_list(self):
         self.bill(self.zahid, AUGUST, "15750.00")
 
