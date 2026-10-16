@@ -48,6 +48,8 @@ const props = defineProps<{
   from?: 'dashboard' | 'history'
   // Opened as the replacement just made by correcting a bill.
   corrected?: boolean
+  // Opened to record a payment: the dialog opens once the bill has loaded, if it takes one.
+  pay?: boolean
 }>()
 
 const rentEntryStore = useRentEntryStore()
@@ -106,6 +108,18 @@ function openPaymentDialog() {
   offerReplacement.value = false
   paymentDialogOpen.value = true
 }
+
+// Once per visit, so closing the dialog doesn't bring it back.
+let payOffered = false
+watch(
+  entry,
+  (loaded) => {
+    if (!props.pay || payOffered || !loaded) return
+    payOffered = true
+    if (loaded.billStatus !== 'void' && loaded.status !== 'paid') openPaymentDialog()
+  },
+  { immediate: true },
+)
 
 // The dialog stays open while a save is in flight, so its result (and any error) is seen.
 function setPaymentDialogOpen(open: boolean) {
