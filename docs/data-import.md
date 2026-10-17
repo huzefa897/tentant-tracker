@@ -79,6 +79,8 @@ In production admin, create each tenancy (flat, dates, rent, rate, deposit) so i
 
 Tabs are matched only through this file, never by name. A tenant with two flats has two tabs, each mapped to its own tenancy.
 
+Rent is owed from each tenancy's first month, bill or no bill, so a month the Sheet doesn't have would show as overdue. On the property in admin, set the **rent tracking start** (the cut-off) to the first month the app should count without a bill, usually the month after the Sheet's last; earlier months then count only if they're imported. `preview_rent_tracking` (in [rent-entries.md](rent-entries.md#rental-periods-and-due-dates)) lists what would show as due with or without one.
+
 ### 5. Back up, then try it
 
 Copy the two files to the server, outside the repository, into a folder the container can read (`chmod 755` folder, `chmod 644` files; delete them after the import). Take a backup first (`scripts/backup-db.sh`). Then a dry run, which checks and reconciles everything and saves nothing:

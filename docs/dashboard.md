@@ -14,7 +14,7 @@ The dashboard has two lists:
 
 ## Rent due: what counts
 
-- **Rows are rental periods**, one per tenancy and month, never bills: a month without a bill is still due or overdue. Months count once the property tracks rent (`Property.rent_tracking_start`) and within the tenancy's dates; a month with a bill always counts. Months marked **not owed** never do.
+- **Rows are rental periods**, one per tenancy and month, never bills: a month without a bill is still due or overdue. Months count within the tenancy's dates, from its first month (or the property's tracking cut-off, `Property.rent_tracking_start`, when it has a later one: [rent-entries.md](rent-entries.md#rental-periods-and-due-dates)); a month with a bill always counts. Months marked **not owed** never do.
 - **Amounts come only from prepared bills.** Active bills, with the payments that weren't reversed; void bills count for nothing. A month awaiting its bill has no amount: it's `null` in the API, never `"0.00"`, and it's left out of every sum (the summary counts how many). Nothing is estimated, not even the rent.
 - **One definition** of a bill's amounts in SQL (`billing/models.py`: `effective_paid_sql`, `total_due_sql`, `outstanding_sql`), used by bill lists, their filters (`RentEntry.objects.with_amounts()`, `.owing()`) and the dashboard (`RentalPeriod.objects.with_bill()`, `.counted()`, `.owing()`). Payments are summed in a subquery per bill, never joined, so nothing is counted once per payment.
 - **Timing**, on today in India (`business_date()`, once per request) against the period's saved due date: **overdue** (due date before today, with the days overdue), **due today**, **upcoming** (tomorrow to a week from today). No grace period.

@@ -45,15 +45,16 @@ class Property(models.Model):
         default=PaymentTiming.POSTPAID,
         db_default=PaymentTiming.POSTPAID,
     )
-    # The first month whose rent the app expects from the tenancy schedule, bill or no bill.
-    # Empty: only months that have bills are owed, so months settled before the app (in the
-    # Sheet) never show up as arrears. Set it once the earlier months are reconciled.
+    # Rent is owed from the tenancy schedule, bill or no bill, from each tenancy's first month.
+    # A cut-off is for a property whose earlier months were settled before the app (in the
+    # Sheet): months before it count only if they have bills, so they never show up as arrears.
     rent_tracking_start = models.DateField(
         null=True,
         blank=True,
         help_text=(
-            "The first month (its 1st day) whose rent is due from the tenancy schedule, even "
-            "before its bill is prepared. Leave empty to count only months that have bills."
+            "Leave empty to count rent from each tenancy's first month. To ignore months "
+            "settled before the app, the first month (its 1st day) to count without a bill; "
+            "earlier months count only if they have bills."
         ),
     )
     is_active = models.BooleanField(default=True)
