@@ -21,7 +21,9 @@ const summaryDto = {
   asOfDate: '2026-10-15',
   generatedAt: '2026-10-15T06:30:00Z',
   currency: 'INR',
+  owedPeriodCount: 3,
   overduePeriodCount: 2,
+  oldestOverdueDays: 25,
   overdueTenancyCount: 2,
   dueTodayPeriodCount: 0,
   upcomingPeriodCount: 1,
@@ -76,7 +78,9 @@ describe('parseSummary', () => {
     expect(parseSummary(summaryDto)).toEqual({
       asOfDate: '2026-10-15',
       generatedAt: '2026-10-15T06:30:00Z',
+      owedPeriodCount: 3,
       overduePeriodCount: 2,
+      oldestOverdueDays: 25,
       overdueTenancyCount: 2,
       dueTodayPeriodCount: 0,
       upcomingPeriodCount: 1,
@@ -98,8 +102,19 @@ describe('parseSummary', () => {
     ['a bad date', { asOfDate: '15/10/2026' }],
     ['a negative count', { overduePeriodCount: -1 }],
     ['a fractional count', { awaitingBillPeriodCount: 1.5 }],
+    ['a missing owed count', { owedPeriodCount: undefined }],
+    ['no oldest overdue days with months overdue', { oldestOverdueDays: null }],
+    ['oldest overdue days with nothing overdue', { overduePeriodCount: 0 }],
+    ['zero oldest overdue days', { oldestOverdueDays: 0 }],
   ])('rejects %s', (_, change) => {
     expect(() => parseSummary({ ...summaryDto, ...change })).toThrow(ApiError)
+  })
+
+  it('takes no oldest overdue days when nothing is overdue', () => {
+    expect(
+      parseSummary({ ...summaryDto, overduePeriodCount: 0, oldestOverdueDays: null })
+        .oldestOverdueDays,
+    ).toBeNull()
   })
 })
 

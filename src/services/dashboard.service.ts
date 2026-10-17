@@ -88,10 +88,19 @@ function oneOf<T extends string>(data: Data, key: string, choices: readonly T[])
 export function parseSummary(value: unknown): DashboardSummary {
   const data = record(value, 'summary')
   if (data.currency !== 'INR') invalid('currency')
+  const overduePeriodCount = count(data, 'overduePeriodCount')
+  // Days past due exactly when something is overdue, and at least a day.
+  const oldestOverdueDays =
+    data.oldestOverdueDays === null ? null : count(data, 'oldestOverdueDays')
+  if ((oldestOverdueDays === null) !== (overduePeriodCount === 0) || oldestOverdueDays === 0) {
+    invalid('oldestOverdueDays')
+  }
   return {
     asOfDate: matching(data, 'asOfDate', DATE),
     generatedAt: text(data, 'generatedAt'),
-    overduePeriodCount: count(data, 'overduePeriodCount'),
+    owedPeriodCount: count(data, 'owedPeriodCount'),
+    overduePeriodCount,
+    oldestOverdueDays,
     overdueTenancyCount: count(data, 'overdueTenancyCount'),
     dueTodayPeriodCount: count(data, 'dueTodayPeriodCount'),
     upcomingPeriodCount: count(data, 'upcomingPeriodCount'),

@@ -108,7 +108,9 @@ class SummaryTests(DashboardTestCase):
         self.assertEqual(
             counts,
             {
+                "owedPeriodCount": 3,
                 "overduePeriodCount": 2,
+                "oldestOverdueDays": 25,
                 "overdueTenancyCount": 2,
                 "dueTodayPeriodCount": 0,
                 "upcomingPeriodCount": 1,
@@ -148,6 +150,16 @@ class SummaryTests(DashboardTestCase):
 
         self.assertEqual(body["dueTodayPeriodCount"], 1)
         self.assertEqual(body["knownDueTodayAmount"], "15750.00")
+
+    def test_without_an_overdue_month_there_are_no_oldest_overdue_days(self):
+        self.track_from(date(2026, 10, 1))
+
+        body = self.summary()
+
+        # October is due in November: owed, but not overdue.
+        self.assertEqual(body["owedPeriodCount"], 0)
+        self.assertEqual(body["overduePeriodCount"], 0)
+        self.assertIsNone(body["oldestOverdueDays"])
 
     def test_without_a_cut_off_every_month_from_the_tenancys_first_counts(self):
         self.track_from(None)
