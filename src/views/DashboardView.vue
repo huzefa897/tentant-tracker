@@ -184,6 +184,7 @@ const timingCounts = computed(() => {
     overdue: s.overduePeriodCount,
     due_today: s.dueTodayPeriodCount,
     upcoming: s.upcomingPeriodCount,
+    all: s.owedPeriodCount,
   }
 })
 
@@ -580,7 +581,7 @@ function openHistory() {
           />
 
           <section
-            class="mt-4 overflow-hidden rounded-xl border bg-card pt-3 sm:pt-4"
+            class="mt-4 overflow-hidden rounded-xl border bg-card pt-3 sm:pt-4 lg:pt-2"
             aria-labelledby="periods-heading"
           >
             <PeriodFilterBar
@@ -592,7 +593,7 @@ function openHistory() {
               @clear="dashboardStore.setFilters({ preparation: 'all', month: null })"
             >
               <template #heading>
-                <h2 id="periods-heading" class="text-lg font-semibold">Rental months</h2>
+                <h2 id="periods-heading" class="sr-only">Rental months</h2>
               </template>
             </PeriodFilterBar>
 

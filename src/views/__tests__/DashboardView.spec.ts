@@ -531,8 +531,8 @@ describe('DashboardView', () => {
       const counts = () =>
         view!.findAll('[data-testid="timing-count"]').map((count) => count.text())
 
-      // The summary: 2 overdue, none due today, 1 in the next 7 days.
-      expect(counts()).toEqual(['2', '2', '0', '1'])
+      // The summary: 2 overdue, none due today, 1 in the next 7 days, 3 owed in all.
+      expect(counts()).toEqual(['2', '2', '0', '1', '3'])
       expect(view!.get('caption').text()).toBe(
         'Rental months due now (overdue or due today), oldest due first',
       )
