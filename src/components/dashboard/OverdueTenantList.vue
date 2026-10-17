@@ -81,20 +81,21 @@ const groups = computed(() =>
           </div>
         </header>
 
-        <!-- Laptops: one row per month. Fixed column widths, so the columns line up from one
-             tenant's card to the next; only from lg up, where Total, Paid and Balance each have
-             room for a large amount (narrower, they'd overlap). It scrolls rather than overlaps
-             if a card is ever narrower than that. -->
-        <div class="hidden overflow-x-auto lg:block" data-testid="overdue-bill-table">
-          <table class="w-full table-fixed text-sm">
+        <!-- Wide screens: one row per month. Fixed column widths, so the columns line up from one
+             tenant's card to the next. At its 60rem minimum Total, Paid and Balance each keep
+             about 146px, room for the largest bill (₹9,99,99,99,999.99); a card narrower than
+             that scrolls the table rather than overlapping the amounts. From xl up the card is
+             wider than the minimum, so it doesn't scroll in practice. -->
+        <div class="hidden overflow-x-auto xl:block" data-testid="overdue-bill-table">
+          <table class="w-full min-w-[60rem] table-fixed text-sm">
             <caption class="sr-only">
               {{
                 `Overdue bills of ${group.tenant.name}`
               }}
             </caption>
             <colgroup>
-              <col class="w-[22%]" />
-              <col class="w-[22%]" />
+              <col class="w-40" />
+              <col class="w-40" />
               <col />
               <col />
               <col />
@@ -152,8 +153,8 @@ const groups = computed(() =>
           </table>
         </div>
 
-        <!-- Phones and tablets: each month is a button to its bill. -->
-        <ul class="divide-y lg:hidden" data-testid="overdue-bill-items">
+        <!-- Phones, tablets and small laptops: each month is a button to its bill. -->
+        <ul class="divide-y xl:hidden" data-testid="overdue-bill-items">
           <li v-for="row in group.bills" :key="row.bill.id" data-testid="overdue-bill-item">
             <button
               type="button"

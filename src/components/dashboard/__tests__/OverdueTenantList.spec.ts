@@ -27,17 +27,35 @@ function mountList(showProperty = false) {
 }
 
 describe('OverdueTenantList', () => {
-  it('keeps the table to laptops, where its amounts have room, and rows below that', () => {
+  it('keeps the table to wide screens, where its amounts have room, and rows below that', () => {
     const list = mountList()
     const table = list.get('[data-testid="overdue-bill-table"]')
     const items = list.get('[data-testid="overdue-bill-items"]')
 
-    // At sm and md the fixed columns leave too little for Total, Paid and Balance.
-    expect(table.classes()).toEqual(expect.arrayContaining(['hidden', 'lg:block']))
-    expect(table.classes()).toContain('overflow-x-auto')
-    expect(table.classes().some((name) => /^(sm|md):/.test(name))).toBe(false)
-    expect(items.classes()).toContain('lg:hidden')
-    expect(items.classes().some((name) => /^(sm|md):hidden$/.test(name))).toBe(false)
+    // Narrower than xl the fixed columns leave too little for Total, Paid and Balance.
+    expect(table.classes()).toEqual(expect.arrayContaining(['hidden', 'xl:block']))
+    expect(table.classes().some((name) => /^(sm|md|lg):/.test(name))).toBe(false)
+    expect(items.classes()).toContain('xl:hidden')
+    expect(items.classes().some((name) => /^(sm|md|lg):hidden$/.test(name))).toBe(false)
+  })
+
+  it('never squeezes the table below room for the largest bill, scrolling instead', () => {
+    const list = mountList()
+    const wrapper = list.get('[data-testid="overdue-bill-table"]')
+    const table = wrapper.get('table')
+
+    // The wrapper can only scroll if the table can be wider than it: a minimum width, with
+    // fixed widths for Month, Due and the button, leaves each amount column about 146px.
+    expect(wrapper.classes()).toContain('overflow-x-auto')
+    expect(table.classes()).toEqual(expect.arrayContaining(['w-full', 'min-w-[60rem]']))
+    expect(table.findAll('col').map((col) => col.classes())).toEqual([
+      ['w-40'],
+      ['w-40'],
+      [],
+      [],
+      [],
+      ['w-32'],
+    ])
   })
 
   it('shows each tenant with their count, total and every overdue month', () => {
