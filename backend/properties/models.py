@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models import Func, Q, Value
+from django.dispatch import Signal
 from django.utils import timezone
 
 from accounts.phone import normalize_phone_number, validate_phone_number
@@ -19,6 +20,29 @@ class PaymentTiming(models.TextChoices):
 
     PREPAID = "prepaid", "Prepaid — due during the billing month"
     POSTPAID = "postpaid", "Postpaid — due during the following month"
+
+
+# Sent before QuerySet.update() writes a setting rental periods' due dates come from (a tenancy's
+# due day, a property's payment timing), with the rows as they're still stored. update() and
+# bulk_update() (which runs through update()) skip pre_save, so without it billing couldn't
+# create the periods already due under the old setting first (billing/signals.py).
+schedule_will_change = Signal()
+
+
+class ScheduleQuerySet(models.QuerySet):
+    """Sends schedule_will_change before an update() that writes schedule_field."""
+
+    schedule_field: str
+
+    def update(self, **kwargs):
+        if self.schedule_field in kwargs:
+            stored = self.model._base_manager.filter(pk__in=self.values("pk"))
+            schedule_will_change.send(sender=self.model, stored=stored)
+        return super().update(**kwargs)
+
+
+class PropertyQuerySet(ScheduleQuerySet):
+    schedule_field = "payment_timing"
 
 
 class Property(models.Model):
@@ -60,6 +84,8 @@ class Property(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = PropertyQuerySet.as_manager()
 
     class Meta:
         verbose_name_plural = "properties"
@@ -150,8 +176,10 @@ class InclusiveDateRange(Func):
 TENANCY_OVERLAP_CONSTRAINT = "tenancy_no_overlapping_occupancy"
 
 
-class TenancyQuerySet(models.QuerySet):
+class TenancyQuerySet(ScheduleQuerySet):
     """Status comes from the dates (end date inclusive), never from a stored flag."""
+
+    schedule_field = "rent_due_day"
 
     def upcoming(self, today: date):
         return self.filter(start_date__gt=today)

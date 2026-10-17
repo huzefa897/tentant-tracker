@@ -8,7 +8,7 @@ from django.test import TestCase
 
 from billing.models import RentalPeriod
 from billing.periods import ensure_periods, ensure_property_periods, scheduled_months
-from properties.models import PaymentTiming
+from properties.models import PaymentTiming, Property, Tenancy
 
 from .factories import make_property, make_tenancy, make_user
 from .test_payments_api import make_entry
@@ -188,6 +188,37 @@ class FreezeBeforeChangeTests(TestCase):
             self.due_dates(),
             {date(2026, 8, 1): date(2026, 9, 15), date(2026, 9, 1): date(2026, 10, 15)},
         )
+
+    # QuerySet.update() and bulk_update() skip pre_save; they freeze through schedule_will_change.
+    already_due = {date(2026, 8, 1): date(2026, 9, 15), date(2026, 9, 1): date(2026, 10, 15)}
+
+    def test_a_due_day_update_keeps_the_months_already_due(self, _today):
+        Tenancy.objects.filter(pk=self.tenancy.pk).update(rent_due_day=1)
+
+        self.assertEqual(self.due_dates(), self.already_due)
+
+    def test_a_due_day_bulk_update_keeps_the_months_already_due(self, _today):
+        self.tenancy.rent_due_day = 1
+        Tenancy.objects.bulk_update([self.tenancy], ["rent_due_day"])
+
+        self.assertEqual(self.due_dates(), self.already_due)
+
+    def test_a_payment_timing_update_keeps_the_months_already_due(self, _today):
+        Property.objects.filter(pk=self.prop.pk).update(payment_timing=PaymentTiming.PREPAID)
+
+        self.assertEqual(self.due_dates(), self.already_due)
+
+    def test_a_payment_timing_bulk_update_keeps_the_months_already_due(self, _today):
+        self.prop.payment_timing = PaymentTiming.PREPAID
+        Property.objects.bulk_update([self.prop], ["payment_timing"])
+
+        self.assertEqual(self.due_dates(), self.already_due)
+
+    def test_other_updates_create_nothing(self, _today):
+        Tenancy.objects.filter(pk=self.tenancy.pk).update(name="Shaik Zahid")
+        Property.objects.filter(pk=self.prop.pk).update(name="Saleem Towers")
+
+        self.assertEqual(self.due_dates(), {})
 
     def test_other_changes_create_nothing(self, _today):
         self.tenancy.name = "Shaik Zahid"
