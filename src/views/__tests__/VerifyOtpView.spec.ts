@@ -37,6 +37,11 @@ async function typeCode(code: string) {
   await flushPromises()
 }
 
+// The page's text with each run of spaces as one, as it reads.
+function shownText() {
+  return view!.text().replace(/\s+/g, ' ')
+}
+
 function resendButton() {
   return view!.findAll('button').find((button) => button.text() === 'Resend code')
 }
@@ -87,6 +92,20 @@ describe('VerifyOtpView', () => {
     expect(view!.get('[role="alert"]').text()).toBe('Invalid verification code. Please try again.')
   })
 
+  it('clears a wrong code and its error, and verifies the next one by itself', async () => {
+    vi.mocked(authService.verifyOtp).mockRejectedValueOnce(new AuthError('invalid-code'))
+    await mountView()
+    await typeCode('111111')
+
+    await view!.get('[data-testid="clear-code"]').trigger('click')
+    await flushPromises()
+
+    expect(view!.find('[role="alert"]').exists()).toBe(false)
+    await typeCode('924636')
+    expect(authService.verifyOtp).toHaveBeenLastCalledWith({ code: '924636' })
+    expect(router.currentRoute.value.name).toBe('dashboard')
+  })
+
   it('asks for a new code when the code has expired', async () => {
     vi.mocked(authService.verifyOtp).mockRejectedValue(new AuthError('code-expired'))
     await mountView()
@@ -99,14 +118,15 @@ describe('VerifyOtpView', () => {
   it('counts down before allowing a resend', async () => {
     await mountView()
 
-    expect(view!.text()).toContain('Resend code in 01:00')
-    expect(resendButton()).toBeUndefined()
+    expect(shownText()).toContain("Didn't get a code? Resend code in 01:00")
+    expect(resendButton()!.attributes('disabled')).toBeDefined()
 
     await vi.advanceTimersByTimeAsync(59_000)
-    expect(view!.text()).toContain('Resend code in 00:01')
+    expect(shownText()).toContain('Resend code in 00:01')
 
     await vi.advanceTimersByTimeAsync(1_000)
-    expect(resendButton()).toBeDefined()
+    expect(resendButton()!.attributes('disabled')).toBeUndefined()
+    expect(shownText()).not.toContain('Resend code in')
   })
 
   it('resends the code and restarts the countdown', async () => {
@@ -118,7 +138,7 @@ describe('VerifyOtpView', () => {
 
     expect(authService.sendOtp).toHaveBeenCalledWith({ phoneNumber }, expect.any(HTMLElement))
     expect(view!.text()).toContain('A new code has been sent.')
-    expect(view!.text()).toContain('Resend code in 01:00')
+    expect(shownText()).toContain('Resend code in 01:00')
   })
 
   it('shows that a new code is being sent while resending', async () => {
