@@ -1,6 +1,7 @@
 import uuid
 from datetime import date
 from decimal import Decimal
+from unittest import mock
 
 from django.db import connection
 from django.db.migrations.exceptions import IrreversibleError
@@ -8,6 +9,7 @@ from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
 from billing.models import Receipt, RentalPeriod, RentEntry
+from properties.models import Property
 from billing.services import (
     issue_payment_receipt,
     record_payment,
@@ -220,4 +222,29 @@ class RentalPeriodBackfillTests(TransactionTestCase):
                 (tenancy.pk, date(2027, 1, 1), "postpaid", 31, date(2027, 2, 28)),
                 (tenancy.pk, date(2027, 2, 1), "postpaid", 31, date(2027, 3, 31)),
             ],
+        )
+
+
+class RentTrackingCutOffBackfillTests(TransactionTestCase):
+    """properties.0006 makes an empty cut-off mean every tenancy's months are owed, so the
+    properties that exist when it runs get this month as their cut-off: months before it still
+    count only with a bill. One that already has a cut-off keeps it."""
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_existing_properties_are_cut_off_at_this_month(self):
+        make_property(name="Property A")
+        tracked = make_property(name="Property B")
+        Property.objects.filter(pk=tracked.pk).update(rent_tracking_start=date(2026, 3, 1))
+
+        MigrationExecutor(connection).migrate([("properties", "0005_due_dates")])
+        executor = MigrationExecutor(connection)
+        with mock.patch("django.utils.timezone.localdate", return_value=date(2026, 10, 17)):
+            executor.migrate(executor.loader.graph.leaf_nodes())
+
+        self.assertEqual(
+            dict(Property.objects.values_list("name", "rent_tracking_start")),
+            {"Property A": date(2026, 10, 1), "Property B": date(2026, 3, 1)},
         )

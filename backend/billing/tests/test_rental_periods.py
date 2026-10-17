@@ -59,9 +59,12 @@ class ScheduledMonthsTests(TestCase):
             self.scheduled(end_date=date(2026, 8, 5)), months((2026, 7), (2026, 8))
         )
 
-    def test_nothing_while_the_property_doesnt_track_rent(self):
+    def test_without_a_cut_off_starts_at_the_tenancys_first_month(self):
         self.prop.rent_tracking_start = None
-        self.assertEqual(self.scheduled(), [])
+        self.assertEqual(
+            self.scheduled(start_date=date(2026, 5, 14), rent_due_day=11),
+            months((2026, 5), (2026, 6), (2026, 7), (2026, 8), (2026, 9)),
+        )
 
 
 class EnsurePeriodsTests(TestCase):
@@ -120,6 +123,19 @@ class EnsurePeriodsTests(TestCase):
         self.assertEqual(len(self.periods(zahid)), 1)
         self.assertEqual(len(self.periods(yusuf)), 1)
         self.assertEqual(self.periods(elsewhere), [])
+
+    def test_without_a_cut_off_covers_every_tenancy_from_its_first_month(self):
+        self.prop.rent_tracking_start = None
+        self.prop.save()
+        ended = make_tenancy(
+            self.prop, start_date=date(2026, 6, 1), end_date=date(2026, 7, 31), rent_due_day=11
+        )
+
+        ensure_property_periods(self.prop, TODAY)
+
+        self.assertEqual(
+            [period[0] for period in self.periods(ended)], months((2026, 6), (2026, 7))
+        )
 
     def test_leaves_an_existing_period_as_it_is(self):
         tenancy = make_tenancy(self.prop, rent_due_day=11)
