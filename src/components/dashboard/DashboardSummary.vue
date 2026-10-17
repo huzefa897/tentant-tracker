@@ -31,7 +31,7 @@ const overdue = computed(() => {
     text: `${s.overduePeriodCount === 1 ? 'month' : 'months'} overdue`,
     note: [
       `Oldest ${days(s.oldestOverdueDays ?? 0)}`,
-      s.knownOverdue > 0 ? `${formatINR(s.knownOverdue)} billed` : null,
+      s.knownOverdue > 0 ? `${formatINR(s.knownOverdue)} outstanding` : null,
     ]
       .filter(Boolean)
       .join(' · '),

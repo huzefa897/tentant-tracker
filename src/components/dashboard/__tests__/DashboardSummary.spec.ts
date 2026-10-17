@@ -12,10 +12,11 @@ const text = (wrapper: ReturnType<typeof render>, id: string) =>
   wrapper.get(`[data-testid="summary-${id}"] dd`).text().replace(/\s+/g, ' ')
 
 describe('DashboardSummary', () => {
-  it('counts overdue months, with the oldest and their billed amount', () => {
+  it('counts overdue months, with the oldest and what’s left to pay on them', () => {
+    // The fake's overdue bill is ₹15,750 with ₹10,000 paid: the summary gives what's left.
     const wrapper = render()
 
-    expect(text(wrapper, 'overdue')).toBe('2 months overdue Oldest 25 days · ₹5,750 billed')
+    expect(text(wrapper, 'overdue')).toBe('2 months overdue Oldest 25 days · ₹5,750 outstanding')
     expect(
       text(render({ overduePeriodCount: 1, oldestOverdueDays: 1, knownOverdue: 0 }), 'overdue'),
     ).toBe('1 month overdue Oldest 1 day')
