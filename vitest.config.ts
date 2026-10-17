@@ -8,7 +8,8 @@ export default mergeConfig(
     test: {
       environment: 'jsdom',
       setupFiles: ['src/test/setup.ts'],
-      exclude: [...configDefaults.exclude, 'e2e/**'],
+      // Layout tests run in a real browser (vitest.layout.config.ts, npm run test:layout).
+      exclude: [...configDefaults.exclude, 'e2e/**', '**/*.layout.spec.ts'],
       root: fileURLToPath(new URL('./', import.meta.url)),
     },
   }),
