@@ -8,8 +8,9 @@ import { formatINR } from '@/utils/currency'
 import { formatDateValue, formatMonthValue } from '@/utils/date'
 
 // Months of rent still owed, in the backend's order (oldest due first): one row per tenancy and
-// month, its bill prepared or not. A month without a bill says "Bill not prepared" in place of
-// its amounts, never ₹0. Each row offers only the actions the backend says the viewer may take.
+// month, its bill prepared or not. On a laptop one Outstanding column holds what's left to pay
+// (and "of ₹15,750" once part is paid); a month without a bill says "Bill not prepared" there,
+// never ₹0. Each row offers only the actions the backend says the viewer may take.
 const props = withDefaults(
   defineProps<{
     periods: RentalPeriodRow[]
@@ -37,6 +38,7 @@ const rows = computed(() =>
       ended: period.tenancyStatus === 'ended',
       due: formatDateValue(period.dueDate),
       prepared: period.preparation === 'prepared',
+      partlyPaid: period.preparation === 'prepared' && period.outstanding !== period.totalDue,
       can: (action: RentalPeriodRow['actions'][number]) => period.actions.includes(action),
       // For buttons read out of context: "Prepare bill: September 2026 · Shaik Zahid Ali · Flat 202".
       subject: `${month} · ${period.name} · Flat ${period.flatNumber}`,
@@ -61,7 +63,6 @@ const rows = computed(() =>
             <th scope="col" class="px-3 py-2 font-medium">Flat</th>
             <th scope="col" class="px-3 py-2 font-medium">Month</th>
             <th scope="col" class="px-3 py-2 font-medium">Due date</th>
-            <th scope="col" class="px-3 py-2 text-right font-medium">Amount due</th>
             <th scope="col" class="px-3 py-2 text-right font-medium">Outstanding</th>
             <th scope="col" class="px-3 py-2 font-medium">Status</th>
             <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
@@ -78,21 +79,25 @@ const rows = computed(() =>
             <td class="px-3 py-2 whitespace-nowrap">{{ row.period.flatNumber }}</td>
             <td class="px-3 py-2 whitespace-nowrap">{{ row.month }}</td>
             <td class="px-3 py-2 whitespace-nowrap">{{ row.due }}</td>
-            <template v-if="row.prepared">
-              <td class="px-3 py-2 text-right whitespace-nowrap tabular-nums">
-                {{ formatINR(row.period.totalDue!) }}
-              </td>
-              <td class="px-3 py-2 text-right font-semibold whitespace-nowrap tabular-nums">
-                {{ formatINR(row.period.outstanding!) }}
-              </td>
-            </template>
             <td
-              v-else
-              colspan="2"
-              class="px-3 py-2 text-right whitespace-nowrap text-muted-foreground"
-              data-testid="awaiting-bill"
+              v-if="row.prepared"
+              class="px-3 py-2 text-right whitespace-nowrap tabular-nums"
+              data-testid="period-outstanding"
             >
-              Bill not prepared
+              <span class="font-semibold">{{ formatINR(row.period.outstanding!) }}</span
+              ><template v-if="row.partlyPaid"
+                >{{ ' '
+                }}<span class="block text-sm text-muted-foreground">{{
+                  `of ${formatINR(row.period.totalDue!)}`
+                }}</span></template
+              >
+            </td>
+            <td v-else class="px-3 py-2 text-right whitespace-nowrap">
+              <span
+                class="rounded-md bg-muted px-2 py-0.5 text-sm text-muted-foreground"
+                data-testid="awaiting-bill"
+                >Bill not prepared</span
+              >
             </td>
             <td class="px-3 py-2">
               <PeriodStatusBadge :period="row.period" :as-of-date="asOfDate" />

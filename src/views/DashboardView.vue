@@ -409,7 +409,7 @@ function openHistory() {
     <!-- The two lists, until a tenant is chosen above. -->
     <template v-else>
       <div
-        class="mb-6 flex gap-1 rounded-xl border bg-muted/40 p-1 sm:w-fit"
+        class="mb-4 flex gap-1 rounded-xl border bg-muted/40 p-1 sm:w-fit"
         role="group"
         aria-label="Show"
       >
@@ -428,10 +428,10 @@ function openHistory() {
 
       <!-- Overdue bills. -->
       <div v-if="tab === 'overdue'" data-testid="overdue-bills">
-        <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <header class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Overdue bills</h1>
-            <p class="mt-2 text-muted-foreground">
+            <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Overdue bills</h1>
+            <p class="mt-1 text-muted-foreground">
               Bills past their due date with money still to pay, oldest first.
             </p>
           </div>
@@ -531,18 +531,15 @@ function openHistory() {
 
       <!-- Rent due: every month due or overdue, bill or no bill. -->
       <div v-else data-testid="pending-payments">
-        <header class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
+        <header class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex flex-wrap items-baseline gap-x-3">
+            <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Rent due</h1>
             <p
               v-if="accessStore.selectedProperty"
-              class="mb-1 text-sm font-semibold text-primary"
+              class="text-sm font-semibold text-primary"
               data-testid="selected-property"
             >
               {{ accessStore.selectedProperty.name }}
-            </p>
-            <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Rent due</h1>
-            <p class="mt-2 text-muted-foreground">
-              Track which months are due and overdue, bill or no bill.
             </p>
           </div>
           <RefreshStatus

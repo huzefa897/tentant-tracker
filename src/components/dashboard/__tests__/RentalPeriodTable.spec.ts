@@ -25,7 +25,6 @@ describe('RentalPeriodTable', () => {
       'Overdue 25 days',
       'Prepare bill',
     ])
-    expect(wrapper.get('[data-testid="awaiting-bill"]').attributes('colspan')).toBe('2')
     expect(wrapper.text()).not.toContain('₹0')
   })
 
@@ -37,11 +36,16 @@ describe('RentalPeriodTable', () => {
       '202',
       'September 2026',
       '11 Oct 2026',
-      '₹15,750',
-      '₹5,750',
+      '₹5,750 of ₹15,750',
       'Overdue 4 days',
       'Record payment  View bill',
     ])
+  })
+
+  it('shows only what’s left when nothing is paid yet', () => {
+    const wrapper = render([makePeriod({ settlement: 'unpaid', outstanding: 15750 })])
+
+    expect(wrapper.get('[data-testid="period-outstanding"]').text()).toBe('₹15,750')
   })
 
   it('labels each column, names each row by its tenant, and captions the table', () => {
@@ -52,7 +56,6 @@ describe('RentalPeriodTable', () => {
       'Flat',
       'Month',
       'Due date',
-      'Amount due',
       'Outstanding',
       'Status',
       'Actions',
