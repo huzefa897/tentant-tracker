@@ -208,6 +208,11 @@ const periodsCaption = computed(() => {
     .join(', ')
 })
 
+// The summary's "Show them": every owed month whose bill isn't prepared, due or not yet.
+function showUnbilled() {
+  dashboardStore.setFilters({ timing: 'all', preparation: 'not_prepared', month: null })
+}
+
 function prepareBill(period: RentalPeriodRow) {
   router.push({
     name: 'rent-entry-new',
@@ -568,7 +573,11 @@ function openHistory() {
         </div>
 
         <template v-else>
-          <DashboardSummary v-if="dashboardStore.summary" :summary="dashboardStore.summary" />
+          <DashboardSummary
+            v-if="dashboardStore.summary"
+            :summary="dashboardStore.summary"
+            @show-unbilled="showUnbilled"
+          />
 
           <section
             class="mt-4 overflow-hidden rounded-xl border bg-card pt-3 sm:pt-4"

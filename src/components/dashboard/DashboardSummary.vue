@@ -1,130 +1,132 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CalendarDays, CircleAlert, Clock, Wallet } from '@lucide/vue'
 
+import { Button } from '@/components/ui/button'
 import type { DashboardSummary } from '@/types/dashboard'
 import { formatINR } from '@/utils/currency'
 import { formatMonthCount, formatTenantCount } from '@/utils/rentalPeriods'
 
-// The property's rent due as four small figures: rental months overdue, due today and due in the
-// next 7 days, each with the amount known from their prepared bills, then the total known
-// outstanding and how many tenants owe it.
-// Counts of months are never called tenants; a month awaiting its bill is counted, never added
-// to an amount, and the line below says so. Only late money takes colour.
+// The property's rent due as one strip of three: rental months overdue (and how long the oldest
+// has waited), months whose bill isn't prepared (with a shortcut to them), and the outstanding
+// amount known from prepared bills. When and how much each tab holds is on the tabs below.
+// Counts of months are never called tenants. A month awaiting its bill is counted, never added
+// to an amount: with no prepared bills the amount is "not known yet", never ₹0. Only overdue
+// months take colour.
 const props = defineProps<{
   summary: DashboardSummary
 }>()
 
-const excluded = computed(() => {
-  const awaiting = props.summary.awaitingBillPeriodCount
-  if (awaiting === 0) return 'From prepared bills. Every month that’s owed has its bill.'
-  const overdue = props.summary.overdueAwaitingBillPeriodCount
-  return `From prepared bills only. ${formatMonthCount(awaiting)} awaiting a bill${
-    overdue > 0 ? ` (${overdue} overdue)` : ''
-  } ${awaiting === 1 ? 'isn’t' : 'aren’t'} included: ${
-    awaiting === 1 ? 'its amount isn’t' : 'their amounts aren’t'
-  } calculated yet.`
-})
+const emit = defineEmits<{
+  // Show the months whose bill isn't prepared.
+  showUnbilled: []
+}>()
 
-type Tone = 'late' | 'soon' | 'quiet'
+const days = (count: number) => `${count} ${count === 1 ? 'day' : 'days'}`
 
-// Each tile is two lines: the label, then "3 months · ₹68,000". The amount shows only when
-// prepared bills give one: months that are all awaiting their bill have no amount, never ₹0
-// (the line below the tiles says what's left out).
-const tiles = computed(() => {
+const overdue = computed(() => {
   const s = props.summary
-  const months = (count: number, amount: number) => ({
-    count,
-    unit: count === 1 ? 'month' : 'months',
-    note: count > 0 && amount > 0 ? formatINR(amount) : null,
-  })
-  return [
-    {
-      id: 'overdue',
-      label: 'Overdue',
-      icon: CircleAlert,
-      tone: (s.overduePeriodCount > 0 ? 'late' : 'quiet') as Tone,
-      ...months(s.overduePeriodCount, s.knownOverdue),
-    },
-    {
-      id: 'due-today',
-      label: 'Due today',
-      icon: Clock,
-      tone: (s.dueTodayPeriodCount > 0 ? 'soon' : 'quiet') as Tone,
-      ...months(s.dueTodayPeriodCount, s.knownDueToday),
-    },
-    {
-      id: 'upcoming',
-      label: 'Next 7 days',
-      icon: CalendarDays,
-      tone: 'quiet' as Tone,
-      ...months(s.upcomingPeriodCount, s.knownUpcoming),
-    },
-  ]
+  if (s.overduePeriodCount === 0) return { value: null, text: 'Nothing overdue', note: null }
+  return {
+    value: s.overduePeriodCount,
+    text: `${s.overduePeriodCount === 1 ? 'month' : 'months'} overdue`,
+    note: [
+      `Oldest ${days(s.oldestOverdueDays ?? 0)}`,
+      s.knownOverdue > 0 ? `${formatINR(s.knownOverdue)} billed` : null,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  }
 })
 
-const ICON_TONES: Record<Tone, string> = {
-  late: 'text-destructive',
-  soon: 'text-warning',
-  quiet: '',
-}
-const VALUE_TONES: Record<Tone, string> = { ...ICON_TONES, quiet: 'text-foreground' }
+const unbilled = computed(() => {
+  const s = props.summary
+  if (s.awaitingBillPeriodCount === 0) {
+    return { value: null, text: 'Every bill prepared', note: null }
+  }
+  return {
+    value: s.awaitingBillPeriodCount,
+    text: s.awaitingBillPeriodCount === 1 ? 'bill not prepared' : 'bills not prepared',
+    note:
+      s.overdueAwaitingBillPeriodCount > 0
+        ? `${s.overdueAwaitingBillPeriodCount} of them overdue`
+        : null,
+  }
+})
+
+// The amount is only ever what prepared bills say; months awaiting a bill are named, not added.
+const outstanding = computed(() => {
+  const s = props.summary
+  const awaiting = s.awaitingBillPeriodCount
+  if (s.owedPeriodCount === 0) return { value: null, text: 'Nothing owed', note: null }
+  if (s.knownOutstanding === 0) {
+    return {
+      value: null,
+      text: 'No amount yet',
+      note: `${formatMonthCount(awaiting)} awaiting a bill`,
+    }
+  }
+  return {
+    value: formatINR(s.knownOutstanding),
+    text: 'outstanding',
+    note: [
+      formatTenantCount(s.owingTenancyCount),
+      awaiting > 0
+        ? `not counting ${formatMonthCount(awaiting)} awaiting a bill`
+        : 'from prepared bills',
+    ].join(' · '),
+  }
+})
+
+const segments = computed(() => [
+  { id: 'overdue', term: 'Overdue', ...overdue.value },
+  { id: 'unbilled', term: 'Bills', ...unbilled.value },
+  { id: 'total', term: 'Outstanding', ...outstanding.value },
+])
 </script>
 
 <template>
   <section aria-labelledby="summary-heading" data-testid="dashboard-summary">
     <h2 id="summary-heading" class="sr-only">Summary</h2>
-    <dl class="grid grid-cols-2 gap-2 lg:grid-cols-4">
+    <dl
+      class="grid divide-y overflow-hidden rounded-xl border bg-card lg:grid-cols-[1fr_1.25fr_1fr] lg:divide-x lg:divide-y-0"
+    >
       <div
-        v-for="tile in tiles"
-        :key="tile.id"
-        class="rounded-lg border bg-card px-3 py-2"
-        :data-testid="`summary-${tile.id}`"
+        v-for="segment in segments"
+        :key="segment.id"
+        class="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5"
+        :class="{ 'bg-destructive/5': segment.id === 'overdue' && segment.value !== null }"
+        :data-testid="`summary-${segment.id}`"
       >
-        <dt class="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <component
-            :is="tile.icon"
-            class="size-4 shrink-0"
-            :class="ICON_TONES[tile.tone]"
-            aria-hidden="true"
-          />
-          {{ tile.label }}
-        </dt>
-        <!-- The spaces are in the text, so "2 months · ₹5,750" reads as words whatever the markup. -->
-        <dd class="text-sm text-muted-foreground">
+        <dt class="sr-only">{{ segment.term }}</dt>
+        <!-- The spaces are in the text, so it reads as words whatever the markup. -->
+        <dd class="flex flex-wrap items-baseline gap-x-2">
           <span
-            class="text-xl leading-7 font-bold tracking-tight tabular-nums"
-            :class="VALUE_TONES[tile.tone]"
-            data-testid="summary-value"
-            >{{ tile.count }}</span
-          >{{ ` ${tile.unit}` }}<template v-if="tile.note">{{ ` · ${tile.note}` }}</template>
-        </dd>
-      </div>
-
-      <div class="rounded-lg border bg-card px-3 py-2" data-testid="summary-total">
-        <dt class="flex items-center gap-1.5 text-sm text-muted-foreground">
-          <Wallet class="size-4 shrink-0" aria-hidden="true" />
-          Total outstanding
-        </dt>
-        <dd class="text-sm text-muted-foreground">
-          <span
-            class="text-lg leading-7 font-bold tracking-tight text-foreground tabular-nums sm:text-xl"
-            data-testid="summary-known-outstanding"
-            >{{ formatINR(summary.knownOutstanding) }}</span
-          >{{ ' '
-          }}<span class="whitespace-nowrap max-sm:block"
-            ><span class="max-sm:hidden">· </span
-            ><span data-testid="summary-owing-tenants">{{
-              summary.owingTenancyCount > 0
-                ? formatTenantCount(summary.owingTenancyCount)
-                : 'nobody owes'
-            }}</span></span
+            class="font-semibold"
+            :class="{ 'text-destructive': segment.id === 'overdue' && segment.value !== null }"
+            ><template v-if="segment.value !== null"
+              ><span
+                class="text-lg font-bold tabular-nums"
+                :data-testid="
+                  segment.id === 'total' ? 'summary-known-outstanding' : 'summary-value'
+                "
+                >{{ segment.value }}</span
+              >{{ ' ' }}</template
+            >{{ segment.text }}</span
+          ><template v-if="segment.note"
+            >{{ ' '
+            }}<span class="text-sm text-muted-foreground">{{ segment.note }}</span></template
           >
         </dd>
+        <Button
+          v-if="segment.id === 'unbilled' && segment.value !== null"
+          variant="outline"
+          class="h-8 shrink-0"
+          data-testid="show-unbilled"
+          @click="emit('showUnbilled')"
+        >
+          Show them
+        </Button>
       </div>
     </dl>
-    <p class="mt-2 max-w-prose text-sm text-muted-foreground" data-testid="summary-excluded">
-      {{ excluded }}
-    </p>
   </section>
 </template>

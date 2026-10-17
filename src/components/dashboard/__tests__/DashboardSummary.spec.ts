@@ -8,72 +8,81 @@ function render(overrides = {}) {
   return mount(DashboardSummary, { props: { summary: makeSummary(overrides) } })
 }
 
+const text = (wrapper: ReturnType<typeof render>, id: string) =>
+  wrapper.get(`[data-testid="summary-${id}"] dd`).text().replace(/\s+/g, ' ')
+
 describe('DashboardSummary', () => {
-  it('shows the known amount, and that months awaiting a bill aren’t in it', () => {
+  it('counts overdue months, with the oldest and their billed amount', () => {
     const wrapper = render()
 
-    expect(wrapper.get('[data-testid="summary-known-outstanding"]').text()).toBe('₹5,750')
-    expect(wrapper.get('[data-testid="summary-total"] dd').text()).toBe('₹5,750 · 2 tenants')
-    expect(wrapper.get('[data-testid="summary-excluded"]').text()).toBe(
-      'From prepared bills only. 2 months awaiting a bill (1 overdue) aren’t included: their amounts aren’t calculated yet.',
-    )
+    expect(text(wrapper, 'overdue')).toBe('2 months overdue Oldest 25 days · ₹5,750 billed')
     expect(
-      render({ awaitingBillPeriodCount: 1, overdueAwaitingBillPeriodCount: 0 })
-        .get('[data-testid="summary-excluded"]')
-        .text(),
-    ).toBe(
-      'From prepared bills only. 1 month awaiting a bill isn’t included: its amount isn’t calculated yet.',
-    )
-    expect(
-      render({ awaitingBillPeriodCount: 0 }).get('[data-testid="summary-excluded"]').text(),
-    ).toBe('From prepared bills. Every month that’s owed has its bill.')
+      text(render({ overduePeriodCount: 1, oldestOverdueDays: 1, knownOverdue: 0 }), 'overdue'),
+    ).toBe('1 month overdue Oldest 1 day')
   })
 
-  it('counts rental months by when they’re due, each with its amount from bills', () => {
-    const wrapper = render({ dueTodayPeriodCount: 1, knownDueToday: 18500 })
+  it('says when nothing is overdue, without colour', () => {
+    const wrapper = render({ overduePeriodCount: 0, oldestOverdueDays: null, knownOverdue: 0 })
 
-    expect(wrapper.get('[data-testid="summary-overdue"]').text()).toBe('Overdue2 months · ₹5,750')
-    expect(wrapper.get('[data-testid="summary-due-today"]').text()).toBe(
-      'Due today1 month · ₹18,500',
+    expect(text(wrapper, 'overdue')).toBe('Nothing overdue')
+    expect(wrapper.get('[data-testid="summary-overdue"]').classes()).not.toContain(
+      'bg-destructive/5',
     )
-    // Its one month is awaiting its bill: no amount, never ₹0.
-    expect(wrapper.get('[data-testid="summary-upcoming"]').text()).toBe('Next 7 days1 month')
+    expect(render().get('[data-testid="summary-overdue"]').classes()).toContain('bg-destructive/5')
   })
 
-  it('shows no amount when nothing is due, and says when nobody owes', () => {
+  it('counts bills not prepared and offers to show them', async () => {
+    const wrapper = render()
+
+    expect(text(wrapper, 'unbilled')).toBe('2 bills not prepared 1 of them overdue')
+    await wrapper.get('[data-testid="show-unbilled"]').trigger('click')
+    expect(wrapper.emitted('showUnbilled')).toHaveLength(1)
+
+    const allPrepared = render({ awaitingBillPeriodCount: 0, overdueAwaitingBillPeriodCount: 0 })
+    expect(text(allPrepared, 'unbilled')).toBe('Every bill prepared')
+    expect(allPrepared.find('[data-testid="show-unbilled"]').exists()).toBe(false)
+  })
+
+  it('shows the amount from prepared bills, naming the months left out', () => {
+    expect(text(render(), 'total')).toBe(
+      '₹5,750 outstanding 2 tenants · not counting 2 months awaiting a bill',
+    )
+    expect(
+      text(render({ awaitingBillPeriodCount: 0, overdueAwaitingBillPeriodCount: 0 }), 'total'),
+    ).toBe('₹5,750 outstanding 2 tenants · from prepared bills')
+  })
+
+  it('never shows ₹0 when no bill is prepared', () => {
+    const wrapper = render({ knownOutstanding: 0, knownOverdue: 0 })
+
+    expect(text(wrapper, 'total')).toBe('No amount yet 2 months awaiting a bill')
+    expect(wrapper.text()).not.toContain('₹0')
+  })
+
+  it('says when nothing is owed', () => {
     const wrapper = render({
+      owedPeriodCount: 0,
       overduePeriodCount: 0,
-      overdueTenancyCount: 0,
+      oldestOverdueDays: null,
       upcomingPeriodCount: 0,
+      awaitingBillPeriodCount: 0,
+      overdueAwaitingBillPeriodCount: 0,
       owingTenancyCount: 0,
+      knownOutstanding: 0,
+      knownOverdue: 0,
     })
 
-    expect(wrapper.get('[data-testid="summary-overdue"]').text()).toBe('Overdue0 months')
-    expect(wrapper.get('[data-testid="summary-due-today"]').text()).toBe('Due today0 months')
-    expect(wrapper.get('[data-testid="summary-upcoming"]').text()).toBe('Next 7 days0 months')
-    expect(wrapper.get('[data-testid="summary-total"] dd').text()).toBe('₹5,750 · nobody owes')
+    expect(text(wrapper, 'total')).toBe('Nothing owed')
   })
 
-  it('colours only late money', () => {
-    const late = render({ dueTodayPeriodCount: 1, knownDueToday: 750 })
-    const onTime = render({ overduePeriodCount: 0, overdueTenancyCount: 0 })
-    const value = (wrapper: ReturnType<typeof render>, id: string) =>
-      wrapper.get(`[data-testid="summary-${id}"] [data-testid="summary-value"]`).classes()
-
-    expect(value(late, 'overdue')).toContain('text-destructive')
-    expect(value(late, 'due-today')).toContain('text-warning')
-    expect(value(late, 'upcoming')).not.toContain('text-destructive')
-    expect(value(onTime, 'overdue')).not.toContain('text-destructive')
-  })
-
-  it('is a list of terms and values under a heading, with its icons hidden', () => {
+  it('is a list of terms and values under a heading', () => {
     const wrapper = render()
 
     expect(wrapper.get('h2').text()).toBe('Summary')
-    expect(wrapper.findAll('dt')).toHaveLength(4)
-    expect(wrapper.findAll('dt > svg')).toHaveLength(4)
-    for (const icon of wrapper.findAll('dt > svg')) {
-      expect(icon.attributes('aria-hidden')).toBe('true')
-    }
+    expect(wrapper.findAll('dt').map((term) => term.text())).toEqual([
+      'Overdue',
+      'Bills',
+      'Outstanding',
+    ])
   })
 })

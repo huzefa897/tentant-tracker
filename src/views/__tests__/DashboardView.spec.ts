@@ -515,8 +515,8 @@ describe('DashboardView', () => {
 
       expect(view!.get('[data-testid="summary-known-outstanding"]').text()).toBe('₹5,750')
       expect(view!.get('[data-testid="summary-overdue"]').text()).toContain('2 months')
-      expect(view!.get('[data-testid="summary-excluded"]').text()).toContain(
-        '2 months awaiting a bill',
+      expect(view!.get('[data-testid="summary-total"]').text()).toContain(
+        'not counting 2 months awaiting a bill',
       )
       expect(shownMonths()).toEqual([
         'Mohammed Yusuf August 2026',
@@ -567,6 +567,23 @@ describe('DashboardView', () => {
         entryId: 'entry-001',
       })
       expect(router.currentRoute.value.query).toEqual({ from: 'dashboard', pay: '1' })
+    })
+
+    it('shows every month without a bill from the summary', async () => {
+      await mountView()
+
+      await view!.get('[data-testid="show-unbilled"]').trigger('click')
+      await flushPromises()
+
+      expect(dashboardService.getRentalPeriods).toHaveBeenLastCalledWith(
+        expect.any(String),
+        { timing: 'all', preparation: 'not_prepared', month: null },
+        1,
+      )
+      expect(view!.get('[data-testid="timing-filter-all"]').attributes('aria-pressed')).toBe('true')
+      expect(
+        (view!.get('[data-testid="filter-preparation"]').element as HTMLSelectElement).value,
+      ).toBe('not_prepared')
     })
 
     it('filters the list, leaving the summary alone', async () => {
