@@ -6,8 +6,9 @@ import type { DashboardSummary } from '@/types/dashboard'
 import { formatINR } from '@/utils/currency'
 import { formatMonthCount, formatTenantCount } from '@/utils/rentalPeriods'
 
-// The property's rent due as four figures: rental months overdue, due today and due in the next
-// 7 days, each with the amount known from their prepared bills, then the total known outstanding.
+// The property's rent due as four small figures: rental months overdue, due today and due in the
+// next 7 days, each with the amount known from their prepared bills, then the total known
+// outstanding and how many tenants owe it.
 // Counts of months are never called tenants; a month awaiting its bill is counted, never added
 // to an amount, and the line below says so. Only late money takes colour.
 const props = defineProps<{
@@ -27,12 +28,14 @@ const excluded = computed(() => {
 
 type Tone = 'late' | 'soon' | 'quiet'
 
+// Each tile is two lines: the label, then "3 months · ₹68,000" (the amount only when there are
+// some; the line below the tiles says it's from prepared bills).
 const tiles = computed(() => {
   const s = props.summary
-  const months = (count: number, amount: number, none: string, extra?: string) => ({
+  const months = (count: number, amount: number) => ({
     count,
     unit: count === 1 ? 'month' : 'months',
-    note: count > 0 ? [extra, `${formatINR(amount)} from bills`].filter(Boolean).join(' · ') : none,
+    note: count > 0 ? formatINR(amount) : null,
   })
   return [
     {
@@ -40,100 +43,79 @@ const tiles = computed(() => {
       label: 'Overdue',
       icon: CircleAlert,
       tone: (s.overduePeriodCount > 0 ? 'late' : 'quiet') as Tone,
-      ...months(
-        s.overduePeriodCount,
-        s.knownOverdue,
-        'Nothing late',
-        formatTenantCount(s.overdueTenancyCount),
-      ),
+      ...months(s.overduePeriodCount, s.knownOverdue),
     },
     {
       id: 'due-today',
       label: 'Due today',
       icon: Clock,
       tone: (s.dueTodayPeriodCount > 0 ? 'soon' : 'quiet') as Tone,
-      ...months(s.dueTodayPeriodCount, s.knownDueToday, 'Nothing due today'),
+      ...months(s.dueTodayPeriodCount, s.knownDueToday),
     },
     {
       id: 'upcoming',
-      label: 'Due in the next 7 days',
+      label: 'Next 7 days',
       icon: CalendarDays,
       tone: 'quiet' as Tone,
-      ...months(s.upcomingPeriodCount, s.knownUpcoming, 'Nothing due this week'),
+      ...months(s.upcomingPeriodCount, s.knownUpcoming),
     },
   ]
 })
 
 const ICON_TONES: Record<Tone, string> = {
-  late: 'bg-destructive/10 text-destructive',
-  soon: 'bg-warning/10 text-warning',
-  quiet: 'bg-muted text-muted-foreground',
-}
-const VALUE_TONES: Record<Tone, string> = {
   late: 'text-destructive',
   soon: 'text-warning',
   quiet: '',
 }
+const VALUE_TONES: Record<Tone, string> = { ...ICON_TONES, quiet: 'text-foreground' }
 </script>
 
 <template>
   <section aria-labelledby="summary-heading" data-testid="dashboard-summary">
     <h2 id="summary-heading" class="sr-only">Summary</h2>
-    <dl class="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+    <dl class="grid grid-cols-2 gap-2 lg:grid-cols-4">
       <div
         v-for="tile in tiles"
         :key="tile.id"
-        class="flex flex-col gap-0.5 rounded-xl border bg-card px-3 py-2.5 sm:px-4 sm:py-3"
+        class="rounded-lg border bg-card px-3 py-2"
         :data-testid="`summary-${tile.id}`"
       >
-        <dt class="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <span
-            class="flex size-6 shrink-0 items-center justify-center rounded-md"
+        <dt class="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <component
+            :is="tile.icon"
+            class="size-4 shrink-0"
             :class="ICON_TONES[tile.tone]"
             aria-hidden="true"
-          >
-            <component :is="tile.icon" class="size-3.5" />
-          </span>
+          />
           {{ tile.label }}
         </dt>
-        <dd>
+        <!-- The spaces are in the text, so "2 months · ₹5,750" reads as words whatever the markup. -->
+        <dd class="text-sm text-muted-foreground">
           <span
-            class="text-2xl font-bold tracking-tight tabular-nums"
+            class="text-xl leading-7 font-bold tracking-tight tabular-nums"
             :class="VALUE_TONES[tile.tone]"
             data-testid="summary-value"
             >{{ tile.count }}</span
-          >
-          <!-- The space is in the text, so "2 months" reads as two words whatever the markup. -->
-          <span class="text-sm text-muted-foreground">{{ ` ${tile.unit}` }}</span>
+          >{{ ` ${tile.unit}` }}<template v-if="tile.note">{{ ` · ${tile.note}` }}</template>
         </dd>
-        <dd class="text-sm text-muted-foreground">{{ tile.note }}</dd>
       </div>
 
-      <div
-        class="flex flex-col gap-0.5 rounded-xl border bg-card px-3 py-2.5 sm:px-4 sm:py-3"
-        data-testid="summary-total"
-      >
-        <dt class="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <span
-            class="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-            aria-hidden="true"
-          >
-            <Wallet class="size-3.5" />
-          </span>
+      <div class="rounded-lg border bg-card px-3 py-2" data-testid="summary-total">
+        <dt class="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Wallet class="size-4 shrink-0" aria-hidden="true" />
           Total outstanding
         </dt>
-        <dd
-          class="text-xl leading-8 font-bold tracking-tight tabular-nums sm:text-2xl"
-          data-testid="summary-known-outstanding"
-        >
-          {{ formatINR(summary.knownOutstanding) }}
-        </dd>
-        <dd class="text-sm text-muted-foreground" data-testid="summary-owing-tenants">
-          {{
+        <dd class="text-sm text-muted-foreground">
+          <span
+            class="text-lg leading-7 font-bold tracking-tight text-foreground tabular-nums sm:text-xl"
+            data-testid="summary-known-outstanding"
+            >{{ formatINR(summary.knownOutstanding) }}</span
+          >{{ ' · '
+          }}<span class="whitespace-nowrap" data-testid="summary-owing-tenants">{{
             summary.owingTenancyCount > 0
-              ? `${formatTenantCount(summary.owingTenancyCount)} owing`
-              : 'Nobody owes rent'
-          }}
+              ? formatTenantCount(summary.owingTenancyCount)
+              : 'nobody owes'
+          }}</span>
         </dd>
       </div>
     </dl>

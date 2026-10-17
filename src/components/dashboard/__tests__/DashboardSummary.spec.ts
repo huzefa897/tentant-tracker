@@ -13,7 +13,7 @@ describe('DashboardSummary', () => {
     const wrapper = render()
 
     expect(wrapper.get('[data-testid="summary-known-outstanding"]').text()).toBe('₹5,750')
-    expect(wrapper.get('[data-testid="summary-owing-tenants"]').text()).toBe('2 tenants owing')
+    expect(wrapper.get('[data-testid="summary-total"] dd').text()).toBe('₹5,750 · 2 tenants')
     expect(wrapper.get('[data-testid="summary-excluded"]').text()).toBe(
       'From prepared bills only. 2 months awaiting a bill (1 overdue) aren’t included: their amounts aren’t calculated yet.',
     )
@@ -32,18 +32,14 @@ describe('DashboardSummary', () => {
   it('counts rental months by when they’re due, each with its amount from bills', () => {
     const wrapper = render({ dueTodayPeriodCount: 1, knownDueToday: 18500 })
 
-    expect(wrapper.get('[data-testid="summary-overdue"]').text()).toBe(
-      'Overdue2 months2 tenants · ₹5,750 from bills',
-    )
+    expect(wrapper.get('[data-testid="summary-overdue"]').text()).toBe('Overdue2 months · ₹5,750')
     expect(wrapper.get('[data-testid="summary-due-today"]').text()).toBe(
-      'Due today1 month₹18,500 from bills',
+      'Due today1 month · ₹18,500',
     )
-    expect(wrapper.get('[data-testid="summary-upcoming"]').text()).toBe(
-      'Due in the next 7 days1 month₹0 from bills',
-    )
+    expect(wrapper.get('[data-testid="summary-upcoming"]').text()).toBe('Next 7 days1 month · ₹0')
   })
 
-  it('says so when nothing is due, and when nobody owes', () => {
+  it('shows no amount when nothing is due, and says when nobody owes', () => {
     const wrapper = render({
       overduePeriodCount: 0,
       overdueTenancyCount: 0,
@@ -51,14 +47,10 @@ describe('DashboardSummary', () => {
       owingTenancyCount: 0,
     })
 
-    expect(wrapper.get('[data-testid="summary-overdue"]').text()).toBe(
-      'Overdue0 monthsNothing late',
-    )
-    expect(wrapper.get('[data-testid="summary-due-today"]').text()).toContain('Nothing due today')
-    expect(wrapper.get('[data-testid="summary-upcoming"]').text()).toContain(
-      'Nothing due this week',
-    )
-    expect(wrapper.get('[data-testid="summary-owing-tenants"]').text()).toBe('Nobody owes rent')
+    expect(wrapper.get('[data-testid="summary-overdue"]').text()).toBe('Overdue0 months')
+    expect(wrapper.get('[data-testid="summary-due-today"]').text()).toBe('Due today0 months')
+    expect(wrapper.get('[data-testid="summary-upcoming"]').text()).toBe('Next 7 days0 months')
+    expect(wrapper.get('[data-testid="summary-total"] dd').text()).toBe('₹5,750 · nobody owes')
   })
 
   it('colours only late money', () => {
@@ -78,7 +70,8 @@ describe('DashboardSummary', () => {
 
     expect(wrapper.get('h2').text()).toBe('Summary')
     expect(wrapper.findAll('dt')).toHaveLength(4)
-    for (const icon of wrapper.findAll('dt > span')) {
+    expect(wrapper.findAll('dt > svg')).toHaveLength(4)
+    for (const icon of wrapper.findAll('dt > svg')) {
       expect(icon.attributes('aria-hidden')).toBe('true')
     }
   })
