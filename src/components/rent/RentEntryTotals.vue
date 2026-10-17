@@ -15,24 +15,24 @@ defineProps<{
     <h2 id="entry-totals-heading" class="mb-3 text-sm font-medium text-muted-foreground">
       Totals for this page
     </h2>
-    <!-- One strip of three figures, side by side even on a phone. -->
-    <dl class="grid grid-cols-3 divide-x rounded-xl border">
-      <div class="min-w-0 px-3 py-2.5 sm:px-4 sm:py-3">
-        <dt class="text-xs text-muted-foreground sm:text-sm">Total billed</dt>
-        <dd class="mt-0.5 font-semibold tabular-nums sm:text-lg">
-          {{ formatINR(totals.totalBilled) }}
-        </dd>
-      </div>
-      <div class="min-w-0 px-3 py-2.5 sm:px-4 sm:py-3">
-        <dt class="text-xs text-muted-foreground sm:text-sm">Total paid</dt>
-        <dd class="mt-0.5 font-semibold tabular-nums sm:text-lg">
-          {{ formatINR(totals.totalPaid) }}
-        </dd>
-      </div>
-      <div class="min-w-0 px-3 py-2.5 sm:px-4 sm:py-3">
-        <dt class="text-xs text-muted-foreground sm:text-sm">Outstanding</dt>
-        <dd class="mt-0.5 font-semibold tabular-nums sm:text-lg">
-          {{ formatINR(totals.outstanding) }}
+    <!-- Stacked rows on phones, each label beside its amount, so a large total (₹1,00,00,000 and
+         more on a page) has the width it needs; one strip of three from sm up. -->
+    <dl
+      class="grid divide-y rounded-xl border sm:grid-cols-3 sm:divide-x sm:divide-y-0"
+      data-testid="entry-totals"
+    >
+      <div
+        v-for="figure in [
+          { label: 'Total billed', amount: totals.totalBilled },
+          { label: 'Total paid', amount: totals.totalPaid },
+          { label: 'Outstanding', amount: totals.outstanding },
+        ]"
+        :key="figure.label"
+        class="flex min-w-0 items-baseline justify-between gap-3 px-3 py-2.5 sm:block sm:px-4 sm:py-3"
+      >
+        <dt class="text-sm text-muted-foreground">{{ figure.label }}</dt>
+        <dd class="font-semibold break-all tabular-nums sm:mt-0.5 sm:text-lg">
+          {{ formatINR(figure.amount) }}
         </dd>
       </div>
     </dl>
