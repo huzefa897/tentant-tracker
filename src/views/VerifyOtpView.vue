@@ -103,7 +103,12 @@ async function handleChangeNumber() {
       </p>
     </header>
 
-    <OtpForm :loading="authStore.loading" :error="authStore.error" @submit="handleVerify" />
+    <OtpForm
+      :loading="authStore.loading"
+      :error="authStore.error"
+      @submit="handleVerify"
+      @clear="authStore.clearError"
+    />
 
     <div class="mt-6 text-center text-sm text-muted-foreground" role="status">
       <p v-if="resent" class="mb-1">A new code has been sent.</p>

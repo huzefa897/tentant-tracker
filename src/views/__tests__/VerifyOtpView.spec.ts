@@ -87,6 +87,20 @@ describe('VerifyOtpView', () => {
     expect(view!.get('[role="alert"]').text()).toBe('Invalid verification code. Please try again.')
   })
 
+  it('clears a wrong code and its error, and verifies the next one by itself', async () => {
+    vi.mocked(authService.verifyOtp).mockRejectedValueOnce(new AuthError('invalid-code'))
+    await mountView()
+    await typeCode('111111')
+
+    await view!.get('[data-testid="clear-code"]').trigger('click')
+    await flushPromises()
+
+    expect(view!.find('[role="alert"]').exists()).toBe(false)
+    await typeCode('924636')
+    expect(authService.verifyOtp).toHaveBeenLastCalledWith({ code: '924636' })
+    expect(router.currentRoute.value.name).toBe('dashboard')
+  })
+
   it('asks for a new code when the code has expired', async () => {
     vi.mocked(authService.verifyOtp).mockRejectedValue(new AuthError('code-expired'))
     await mountView()
