@@ -284,6 +284,14 @@ describe('rentEntryService', () => {
     })
   })
 
+  it('asks for the bills with money still to pay as the outstanding balance', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue({ data: page([dto]) })
+
+    await rentEntryService.getEntries(PROPERTY_ID, TENANCY_ID, { paymentStatus: 'outstanding' })
+
+    expect(get).toHaveBeenCalledWith(ENTRIES_URL, { params: { balance: 'outstanding' } })
+  })
+
   it('lists bills with the bill status, year, month, payment status and page filters', async () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue({ data: page([dto]) })
 

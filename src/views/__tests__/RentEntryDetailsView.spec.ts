@@ -351,6 +351,20 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       await submitPayment(amount, notes)
     }
 
+    it('opens Record Payment by itself when opened to record one (?pay=1)', async () => {
+      await openDetails('tenant-001', 'sep', '?from=dashboard&pay=1')
+
+      expect(dialog().text()).toContain('Record Payment')
+
+      await dialog()
+        .findAll('button')
+        .find((b) => b.text() === 'Cancel')!
+        .trigger('click')
+      await flushPromises()
+
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+    })
+
     it('lists the bill’s payments from the API, each offering a receipt', async () => {
       await openDetails('tenant-001', 'sep')
 

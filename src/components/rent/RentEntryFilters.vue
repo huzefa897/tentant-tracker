@@ -4,8 +4,8 @@ import { CalendarDays, ChevronDown, CircleCheck, X } from '@lucide/vue'
 
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import { Button } from '@/components/ui/button'
-import type { PaymentStatus } from '@/types/rentEntry'
-import { formatPaymentStatus } from '@/utils/rentCalculations'
+import type { EntryStatusFilter } from '@/types/rentEntry'
+import { formatEntryStatusFilter } from '@/utils/rentCalculations'
 
 // The backend applies both filters before paging. showVoid lists void bills too: they're kept
 // as history, so they're hidden unless asked for, and the payment status never matches them.
@@ -17,10 +17,11 @@ const props = defineProps<{
 }>()
 
 const year = defineModel<string>('year', { required: true })
-const status = defineModel<PaymentStatus | 'all'>('status', { required: true })
+const status = defineModel<EntryStatusFilter | 'all'>('status', { required: true })
 const showVoid = defineModel<boolean>('showVoid', { required: true })
 
-const statuses: PaymentStatus[] = ['unpaid', 'partially_paid', 'paid']
+// Outstanding: unpaid or partially paid, what the dashboard's View bills opens.
+const statuses: EntryStatusFilter[] = ['outstanding', 'unpaid', 'partially_paid', 'paid']
 
 const active = computed(() => year.value !== 'all' || status.value !== 'all')
 
@@ -41,10 +42,10 @@ const filters = computed(() => [
     label: 'Status',
     icon: CircleCheck,
     selected: status.value,
-    shown: status.value === 'all' ? 'All' : formatPaymentStatus(status.value),
+    shown: status.value === 'all' ? 'All' : formatEntryStatusFilter(status.value),
     options: [
       { value: 'all', label: 'All' },
-      ...statuses.map((option) => ({ value: option, label: formatPaymentStatus(option) })),
+      ...statuses.map((option) => ({ value: option, label: formatEntryStatusFilter(option) })),
     ],
   },
 ])
@@ -52,7 +53,7 @@ const filters = computed(() => [
 function choose(id: string, event: Event) {
   const value = (event.target as HTMLSelectElement).value
   if (id === 'filter-year') year.value = value
-  else status.value = value as PaymentStatus | 'all'
+  else status.value = value as EntryStatusFilter | 'all'
 }
 
 function clear() {

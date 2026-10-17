@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onBeforeRouteLeave, useRouter, type RouteLocationRaw } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import { ArrowLeft, ChevronRight, CircleCheck, User } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -25,7 +25,7 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { EntrySaveError, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
-import { formatDateValue, formatMonthValue } from '@/utils/date'
+import { formatDateValue, formatMonthValue, isValidMonthValue } from '@/utils/date'
 import { formatPaymentTiming } from '@/utils/rentCalculations'
 
 // From the route (`props: true`), so the entry always belongs to the tenant in the URL.
@@ -34,7 +34,14 @@ const props = defineProps<{
 }>()
 
 const rentEntryStore = useRentEntryStore()
+const route = useRoute()
 const router = useRouter()
+
+// ?month=YYYY-MM starts the form on that month (the dashboard's Create bill for a missing one).
+const presetMonth = computed(() => {
+  const month = route.query.month
+  return typeof month === 'string' && isValidMonthValue(month) ? month : null
+})
 
 const {
   tenant,
@@ -321,6 +328,7 @@ function handleDialogOpenChange(open: boolean) {
         <RentEntryForm
           :key="tenant.id"
           :tenant="tenant"
+          :month="presetMonth"
           :save-error="saveError"
           :saving="saving"
           @save="handleSave"

@@ -31,6 +31,9 @@ import {
 const props = withDefaults(
   defineProps<{
     tenant: Tenant
+    // The month to start on (YYYY-MM), e.g. a missing bill's from the dashboard; this month
+    // otherwise.
+    month?: string | null
     // Shown above the actions, e.g. a duplicate-entry error from the store.
     saveError?: string | null
     // While the page saves: every field, Save and Cancel are disabled, so one click sends one
@@ -38,7 +41,7 @@ const props = withDefaults(
     // bill can't be discarded while it's being created.
     saving?: boolean
   }>(),
-  { saveError: null, saving: false },
+  { month: null, saveError: null, saving: false },
 )
 
 const emit = defineEmits<{
@@ -52,7 +55,7 @@ const PLACEHOLDER = '—'
 // Read once: the form is short-lived, and these are only defaults and the "future" limit.
 const now = new Date()
 const today = toDateValue(now)
-const initialMonth = toMonthValue(now)
+const initialMonth = props.month ?? toMonthValue(now)
 
 // The unfinished entry stays local; the store only receives it once Save succeeds.
 const billingMonth = ref(initialMonth)

@@ -163,6 +163,18 @@ describe('NewRentEntryView', () => {
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 
+  it('starts on the month in the URL, as from a missing bill', async () => {
+    app = await openPage('/tenants/tenant-001/entries/new?month=2026-08')
+
+    expect(app.get<HTMLInputElement>('#billingMonth').element.value).toBe('2026-08')
+  })
+
+  it('ignores a malformed month in the URL', async () => {
+    app = await openPage('/tenants/tenant-001/entries/new?month=2026-13')
+
+    expect(app.get<HTMLInputElement>('#billingMonth').element.value).not.toBe('2026-13')
+  })
+
   it('saves the bill through the API and confirms with the saved charges', async () => {
     await openEntryPage()
     await fill(validEntry)
