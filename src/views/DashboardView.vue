@@ -40,6 +40,7 @@ import type {
   TimingFilter,
 } from '@/types/dashboard'
 import { formatINR } from '@/utils/currency'
+import { formatMonthValue } from '@/utils/date'
 import { formatOverdueBillCount } from '@/utils/overdueBills'
 import { formatTenantCount, recentMonths } from '@/utils/rentalPeriods'
 
@@ -170,6 +171,42 @@ const nothingShown = computed(() =>
     ? NOTHING_OWED[dashboardStore.filters.timing]
     : 'No months match these filters.',
 )
+
+// Each timing's count across the property, for its tab; only while nothing else narrows the
+// list, since the summary never changes with the filters.
+const timingCounts = computed(() => {
+  const s = dashboardStore.summary
+  if (!s || dashboardStore.filters.preparation !== 'all' || dashboardStore.filters.month) {
+    return undefined
+  }
+  return {
+    due: s.overduePeriodCount + s.dueTodayPeriodCount,
+    overdue: s.overduePeriodCount,
+    due_today: s.dueTodayPeriodCount,
+    upcoming: s.upcomingPeriodCount,
+  }
+})
+
+// Read out before the list: "Rental months overdue, awaiting a bill, oldest due first".
+const TIMING_CAPTIONS: Record<TimingFilter, string> = {
+  due: 'due now (overdue or due today)',
+  overdue: 'overdue',
+  due_today: 'due today',
+  upcoming: 'due in the next 7 days',
+  all: 'still owed',
+}
+const periodsCaption = computed(() => {
+  const { timing, preparation, month } = dashboardStore.filters
+  return [
+    `Rental months ${TIMING_CAPTIONS[timing]}`,
+    preparation === 'prepared' ? 'with a prepared bill' : null,
+    preparation === 'not_prepared' ? 'awaiting a bill' : null,
+    month ? `for ${formatMonthValue(month)}` : null,
+    'oldest due first',
+  ]
+    .filter(Boolean)
+    .join(', ')
+})
 
 function prepareBill(period: RentalPeriodRow) {
   router.push({
@@ -502,7 +539,7 @@ function openHistory() {
             </p>
             <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Rent due</h1>
             <p class="mt-2 text-muted-foreground">
-              Which months are due or overdue, bill or no bill.
+              Track which months are due and overdue, bill or no bill.
             </p>
           </div>
           <RefreshStatus
@@ -536,27 +573,34 @@ function openHistory() {
         <template v-else>
           <DashboardSummary v-if="dashboardStore.summary" :summary="dashboardStore.summary" />
 
-          <section class="mt-10" aria-labelledby="periods-heading">
-            <h2 id="periods-heading" class="mb-4 text-xl font-semibold">Rental months</h2>
+          <section
+            class="mt-6 overflow-hidden rounded-2xl border bg-card pt-4 sm:pt-5"
+            aria-labelledby="periods-heading"
+          >
             <PeriodFilterBar
               v-model:timing="timing"
               v-model:preparation="preparation"
               v-model:month="month"
-              class="mb-4"
               :months="filterMonths"
+              :counts="timingCounts"
               @clear="dashboardStore.setFilters({ preparation: 'all', month: null })"
-            />
+            >
+              <template #heading>
+                <h2 id="periods-heading" class="text-xl font-semibold">Rental months</h2>
+              </template>
+            </PeriodFilterBar>
 
             <LoadingRegion
               v-if="dashboardStore.periodsStatus === 'loading'"
               label="Loading rental months…"
+              class="p-4 sm:p-5"
               data-testid="periods-loading"
             >
-              <SkeletonRows bordered :rows="Math.max(1, periods?.periods.length ?? 4)" />
+              <SkeletonRows :rows="Math.max(1, periods?.periods.length ?? 4)" />
             </LoadingRegion>
             <div
               v-else-if="dashboardStore.periodsStatus === 'error'"
-              class="rounded-xl border border-dashed px-4 py-6 text-center"
+              class="px-4 py-8 text-center"
               data-testid="periods-error"
             >
               <p class="text-destructive" role="alert">{{ dashboardStore.periodsError }}</p>
@@ -571,6 +615,7 @@ function openHistory() {
                 class="animate-rise-in"
                 :periods="periods.periods"
                 :as-of-date="dashboardStore.summary.asOfDate"
+                :caption="periodsCaption"
                 @prepare="prepareBill"
                 @view="openBill"
                 @record="openBill($event, true)"
@@ -578,7 +623,7 @@ function openHistory() {
               />
               <p
                 v-else
-                class="rounded-xl border border-dashed px-4 py-6 text-center text-muted-foreground"
+                class="px-4 py-10 text-center text-muted-foreground"
                 data-testid="periods-empty"
               >
                 {{ nothingShown }}
@@ -586,7 +631,7 @@ function openHistory() {
 
               <nav
                 v-if="periods.hasNext || periods.hasPrevious"
-                class="mt-4 flex items-center justify-between gap-3"
+                class="flex items-center justify-between gap-3 border-t px-4 py-3 sm:px-5"
                 aria-label="Pages"
               >
                 <Button

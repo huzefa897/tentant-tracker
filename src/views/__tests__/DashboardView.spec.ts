@@ -505,7 +505,7 @@ describe('DashboardView', () => {
     function shownMonths() {
       return view!
         .findAll('[data-testid="period-row"]')
-        .map((row) => `${row.get('th span').text()} ${row.findAll('td')[0]!.text()}`)
+        .map((row) => `${row.get('th').text()} ${row.findAll('td')[1]!.text()}`)
     }
 
     function rowButton(label: string, index = 0) {
@@ -519,13 +519,35 @@ describe('DashboardView', () => {
 
       expect(view!.get('[data-testid="summary-known-outstanding"]').text()).toBe('₹5,750')
       expect(view!.get('[data-testid="summary-overdue"]').text()).toContain('2 months')
-      expect(view!.get('[data-testid="summary-awaiting-bill"]').text()).toContain('2 months')
+      expect(view!.get('[data-testid="summary-excluded"]').text()).toContain(
+        '2 months awaiting a bill',
+      )
       expect(shownMonths()).toEqual([
         'Mohammed Yusuf August 2026',
         'Shaik Zahid Ali September 2026',
       ])
-      expect(view!.get('[data-testid="awaiting-calculation"]').text()).toBe('Awaiting calculation')
+      expect(view!.get('[data-testid="awaiting-bill"]').text()).toBe('Bill not prepared')
       expect(view!.get('[data-testid="updated-at"]').text()).toBe('Updated just now')
+    })
+
+    it('counts each timing’s months on its tab until another filter narrows the list', async () => {
+      await mountView()
+      const counts = () =>
+        view!.findAll('[data-testid="timing-count"]').map((count) => count.text())
+
+      // The summary: 2 overdue, none due today, 1 in the next 7 days.
+      expect(counts()).toEqual(['2', '2', '0', '1'])
+      expect(view!.get('caption').text()).toBe(
+        'Rental months due now (overdue or due today), oldest due first',
+      )
+
+      await view!.get('[data-testid="filter-preparation"]').setValue('not_prepared')
+      await flushPromises()
+
+      expect(counts()).toEqual([])
+      expect(view!.get('caption').text()).toBe(
+        'Rental months due now (overdue or due today), awaiting a bill, oldest due first',
+      )
     })
 
     it('prepares a missing bill on its month', async () => {
