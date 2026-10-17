@@ -27,6 +27,19 @@ function mountList(showProperty = false) {
 }
 
 describe('OverdueTenantList', () => {
+  it('keeps the table to laptops, where its amounts have room, and rows below that', () => {
+    const list = mountList()
+    const table = list.get('[data-testid="overdue-bill-table"]')
+    const items = list.get('[data-testid="overdue-bill-items"]')
+
+    // At sm and md the fixed columns leave too little for Total, Paid and Balance.
+    expect(table.classes()).toEqual(expect.arrayContaining(['hidden', 'lg:block']))
+    expect(table.classes()).toContain('overflow-x-auto')
+    expect(table.classes().some((name) => /^(sm|md):/.test(name))).toBe(false)
+    expect(items.classes()).toContain('lg:hidden')
+    expect(items.classes().some((name) => /^(sm|md):hidden$/.test(name))).toBe(false)
+  })
+
   it('shows each tenant with their count, total and every overdue month', () => {
     const list = mountList()
     const tenant = list.get('[data-testid="overdue-tenant"]')

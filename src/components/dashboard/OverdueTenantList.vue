@@ -81,71 +81,79 @@ const groups = computed(() =>
           </div>
         </header>
 
-        <!-- Tablets and up: one row per month. Fixed column widths, so the columns line up from
-             one tenant's card to the next. -->
-        <table class="hidden w-full table-fixed text-sm sm:table">
-          <caption class="sr-only">
-            {{
-              `Overdue bills of ${group.tenant.name}`
-            }}
-          </caption>
-          <colgroup>
-            <col class="w-[22%]" />
-            <col class="w-[22%]" />
-            <col />
-            <col />
-            <col />
-            <col class="w-32" />
-          </colgroup>
-          <thead class="text-left text-muted-foreground">
-            <tr>
-              <th scope="col" class="px-5 pt-3 pb-2 font-medium">Month</th>
-              <th scope="col" class="px-3 pt-3 pb-2 font-medium">Due</th>
-              <th scope="col" class="px-3 pt-3 pb-2 text-right font-medium">Total</th>
-              <th scope="col" class="px-3 pt-3 pb-2 text-right font-medium">Paid</th>
-              <th scope="col" class="px-3 pt-3 pb-2 text-right font-medium">Balance</th>
-              <th scope="col" class="px-5 pt-3 pb-2"><span class="sr-only">Bill</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="row in group.bills"
-              :key="row.bill.id"
-              class="border-t first:border-t-0"
-              data-testid="overdue-bill"
-            >
-              <th scope="row" class="px-5 py-2 text-left font-medium whitespace-nowrap">
-                {{ row.month }}
-              </th>
-              <td class="px-3 py-2 whitespace-nowrap">
-                {{ row.due }}
-                <span class="block text-xs font-semibold text-destructive">{{ row.overdue }}</span>
-              </td>
-              <td class="px-3 py-2 text-right whitespace-nowrap tabular-nums">
-                {{ formatINR(row.bill.totalAmount) }}
-              </td>
-              <td class="px-3 py-2 text-right whitespace-nowrap text-muted-foreground tabular-nums">
-                {{ formatINR(row.bill.paidAmount) }}
-              </td>
-              <td class="px-3 py-2 text-right font-semibold whitespace-nowrap tabular-nums">
-                {{ formatINR(row.bill.outstanding) }}
-              </td>
-              <td class="px-5 py-1 text-right">
-                <Button
-                  variant="ghost"
-                  class="h-10"
-                  :aria-label="`View bill: ${row.month} · ${group.tenant.name}`"
-                  @click="emit('viewBill', group.tenant, row.bill)"
+        <!-- Laptops: one row per month. Fixed column widths, so the columns line up from one
+             tenant's card to the next; only from lg up, where Total, Paid and Balance each have
+             room for a large amount (narrower, they'd overlap). It scrolls rather than overlaps
+             if a card is ever narrower than that. -->
+        <div class="hidden overflow-x-auto lg:block" data-testid="overdue-bill-table">
+          <table class="w-full table-fixed text-sm">
+            <caption class="sr-only">
+              {{
+                `Overdue bills of ${group.tenant.name}`
+              }}
+            </caption>
+            <colgroup>
+              <col class="w-[22%]" />
+              <col class="w-[22%]" />
+              <col />
+              <col />
+              <col />
+              <col class="w-32" />
+            </colgroup>
+            <thead class="text-left text-muted-foreground">
+              <tr>
+                <th scope="col" class="px-5 pt-3 pb-2 font-medium">Month</th>
+                <th scope="col" class="px-3 pt-3 pb-2 font-medium">Due</th>
+                <th scope="col" class="px-3 pt-3 pb-2 text-right font-medium">Total</th>
+                <th scope="col" class="px-3 pt-3 pb-2 text-right font-medium">Paid</th>
+                <th scope="col" class="px-3 pt-3 pb-2 text-right font-medium">Balance</th>
+                <th scope="col" class="px-5 pt-3 pb-2"><span class="sr-only">Bill</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="row in group.bills"
+                :key="row.bill.id"
+                class="border-t first:border-t-0"
+                data-testid="overdue-bill"
+              >
+                <th scope="row" class="px-5 py-2 text-left font-medium whitespace-nowrap">
+                  {{ row.month }}
+                </th>
+                <td class="px-3 py-2 whitespace-nowrap">
+                  {{ row.due }}
+                  <span class="block text-xs font-semibold text-destructive">{{
+                    row.overdue
+                  }}</span>
+                </td>
+                <td class="px-3 py-2 text-right whitespace-nowrap tabular-nums">
+                  {{ formatINR(row.bill.totalAmount) }}
+                </td>
+                <td
+                  class="px-3 py-2 text-right whitespace-nowrap text-muted-foreground tabular-nums"
                 >
-                  View bill
-                </Button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                  {{ formatINR(row.bill.paidAmount) }}
+                </td>
+                <td class="px-3 py-2 text-right font-semibold whitespace-nowrap tabular-nums">
+                  {{ formatINR(row.bill.outstanding) }}
+                </td>
+                <td class="px-5 py-1 text-right">
+                  <Button
+                    variant="ghost"
+                    class="h-10"
+                    :aria-label="`View bill: ${row.month} · ${group.tenant.name}`"
+                    @click="emit('viewBill', group.tenant, row.bill)"
+                  >
+                    View bill
+                  </Button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-        <!-- Phones: each month is a button to its bill. -->
-        <ul class="divide-y sm:hidden">
+        <!-- Phones and tablets: each month is a button to its bill. -->
+        <ul class="divide-y lg:hidden" data-testid="overdue-bill-items">
           <li v-for="row in group.bills" :key="row.bill.id" data-testid="overdue-bill-item">
             <button
               type="button"
