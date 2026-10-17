@@ -10,7 +10,7 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from billing.models import PaymentReversal, RentalPeriod, RentEntry
-from properties.models import PropertyMembership
+from properties.models import PropertyMembership, Tenancy
 
 from .factories import make_property, make_tenancy, make_user
 from .test_payments_api import entries_url, make_entry, make_payment
@@ -149,14 +149,32 @@ class SummaryTests(DashboardTestCase):
         self.assertEqual(body["dueTodayPeriodCount"], 1)
         self.assertEqual(body["knownDueTodayAmount"], "15750.00")
 
-    def test_without_a_tracking_start_only_billed_months_count(self):
+    def test_without_a_cut_off_every_month_from_the_tenancys_first_counts(self):
         self.track_from(None)
+        Tenancy.objects.filter(pk__in=(self.zahid.pk, self.yusuf.pk)).update(
+            start_date=date(2026, 7, 14)
+        )
         self.bill(self.zahid, SEPTEMBER, "10000.00")
 
         body = self.summary()
 
-        self.assertEqual(body["overduePeriodCount"], 1)
-        self.assertEqual(body["awaitingBillPeriodCount"], 0)
+        # Zahid July to September (due 11 Aug to 11 Oct); Yusuf July and August, with
+        # September due 20 October.
+        self.assertEqual(body["overduePeriodCount"], 5)
+        self.assertEqual(body["upcomingPeriodCount"], 1)
+        self.assertEqual(body["awaitingBillPeriodCount"], 5)
+        self.assertEqual(body["overdueAwaitingBillPeriodCount"], 4)
+        self.assertEqual(body["knownOutstandingAmount"], "5750.00")
+
+    def test_before_the_cut_off_only_billed_months_count(self):
+        self.track_from(SEPTEMBER)
+        self.bill(self.zahid, AUGUST, "10000.00")
+
+        body = self.summary()
+
+        # Zahid's billed August and September; Yusuf's September is due 20 October.
+        self.assertEqual(body["overduePeriodCount"], 2)
+        self.assertEqual(body["awaitingBillPeriodCount"], 2)
         self.assertEqual(body["knownOutstandingAmount"], "5750.00")
 
     def test_paid_and_void_bills_and_reversed_payments(self):

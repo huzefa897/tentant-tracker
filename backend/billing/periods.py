@@ -41,14 +41,13 @@ def new_period(tenancy: Tenancy, prop: Property, month: date) -> RentalPeriod:
 
 
 def scheduled_months(tenancy: Tenancy, prop: Property, today: date) -> list[date]:
-    """The months the schedule says are owed by a week from today: from the later of the
-    property's tracking start and the tenancy's first month, through the tenancy's last month,
-    stopping at the first month due after the horizon. None while the property doesn't track
-    rent (rent_tracking_start empty)."""
-    if prop.rent_tracking_start is None:
-        return []
+    """The months the schedule says are owed by a week from today: from the tenancy's first
+    month (or the property's tracking cut-off, when that's later) through its last month,
+    stopping at the first month due after the horizon."""
     horizon = today + timedelta(days=DUE_SOON_DAYS)
-    month = max(prop.rent_tracking_start, tenancy.start_date.replace(day=1))
+    month = tenancy.start_date.replace(day=1)
+    if prop.rent_tracking_start is not None:
+        month = max(month, prop.rent_tracking_start)
     months = []
     while tenancy.end_date is None or month <= tenancy.end_date:
         if due_date_for(month, tenancy.rent_due_day, prop.payment_timing) > horizon:
@@ -71,12 +70,10 @@ def ensure_periods(tenancy: Tenancy, today: date, prop: Property | None = None) 
 
 def ensure_property_periods(prop: Property, today: date) -> None:
     """Creates every scheduled period of the property's tenancies that doesn't exist yet."""
-    if prop.rent_tracking_start is None:
-        return
     horizon = today + timedelta(days=DUE_SOON_DAYS)
-    tenancies = Tenancy.objects.filter(property=prop, start_date__lte=horizon).exclude(
-        end_date__lt=prop.rent_tracking_start
-    )
+    tenancies = Tenancy.objects.filter(property=prop, start_date__lte=horizon)
+    if prop.rent_tracking_start is not None:
+        tenancies = tenancies.exclude(end_date__lt=prop.rent_tracking_start)
     _create(
         [
             new_period(tenancy, prop, month)
@@ -88,7 +85,7 @@ def ensure_property_periods(prop: Property, today: date) -> None:
 
 def period_for_bill(tenancy: Tenancy, month: date) -> RentalPeriod:
     """The period a bill for this month belongs to, created now if it doesn't exist (a month
-    before tracking started, or not yet due). Call it while holding the tenancy's lock, as bill
+    before the tracking cut-off, or not yet due). Call it while holding the tenancy's lock, as bill
     creation does."""
     _create([new_period(tenancy, tenancy.property, month)])
     return RentalPeriod.objects.get(tenancy=tenancy, period_month=month)

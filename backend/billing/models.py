@@ -251,11 +251,14 @@ class RentalPeriodQuerySet(models.QuerySet):
 
     def counted(self):
         """The periods that are owed, with their bill (with_bill): not marked not owed, and
-        either prepared, or tracked (on or after the property's rent tracking start) and within
-        the tenancy's dates. A prepared month always counts, so no bill's balance can drop out
-        of the totals."""
+        either prepared, or tracked (within the tenancy's dates and not before the property's
+        tracking cut-off, when it has one). A prepared month always counts, so no bill's balance
+        can drop out of the totals."""
         tracked = (
-            Q(period_month__gte=F("tenancy__property__rent_tracking_start"))
+            (
+                Q(tenancy__property__rent_tracking_start__isnull=True)
+                | Q(period_month__gte=F("tenancy__property__rent_tracking_start"))
+            )
             & Q(period_month__gte=TruncMonth("tenancy__start_date", output_field=DateField()))
             & (Q(tenancy__end_date__isnull=True) | Q(tenancy__end_date__gte=F("period_month")))
         )
@@ -273,8 +276,9 @@ class RentalPeriodQuerySet(models.QuerySet):
 class RentalPeriod(models.Model):
     """One month of one tenancy's rent: when it's due, whether or not its bill is prepared.
 
-    Created from the tenancy's schedule (billing/periods.py ensure_periods) once the property
-    tracks rent (Property.rent_tracking_start), and for every month that has a bill. Its
+    Created from the tenancy's schedule (billing/periods.py ensure_periods), from its first
+    month or the property's tracking cut-off (Property.rent_tracking_start) when that's later,
+    and for every month that has a bill. Its
     payment timing, due day and due date are copied from the property and tenancy when it's
     created and never worked out again, so changing either later only affects months created
     after; a bill prepared late is still due on its month's date.

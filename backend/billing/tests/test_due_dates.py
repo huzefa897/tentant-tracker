@@ -94,6 +94,10 @@ class BillDueDateTests(TestCase):
     def setUp(self):
         self.user = make_user()
         self.prop = make_property(member=self.user, role="owner")
+        # Months count here only with a bill: these are about a bill's own period, not the
+        # schedule (test_rental_periods).
+        self.prop.rent_tracking_start = date(2030, 1, 1)
+        self.prop.save()
         self.tenancy = make_tenancy(self.prop, rent_due_day=11)
 
     def create(self, month=SEPTEMBER, tenancy=None):
@@ -396,12 +400,12 @@ class PreviewRentTrackingCommandTests(TestCase):
         self.zahid = make_tenancy(self.prop, rent_due_day=11, start_date=date(2026, 8, 20))
         make_entry(self.zahid, self.user, month=date(2026, 8, 1))
 
-    def run_command(self, start, prop=None):
+    def run_command(self, start=None, prop=None):
         out = StringIO()
-        call_command(
-            "preview_rent_tracking", "--property", str((prop or self.prop).pk), "--start", start,
-            stdout=out,
-        )
+        args = ["--property", str((prop or self.prop).pk)]
+        if start is not None:
+            args += ["--start", start]
+        call_command("preview_rent_tracking", *args, stdout=out)
         return out.getvalue()
 
     def test_lists_the_months_with_no_bill_and_saves_nothing(self):
@@ -415,6 +419,23 @@ class PreviewRentTrackingCommandTests(TestCase):
         self.assertIn("1 month(s) would show as due or overdue, awaiting a bill.", out)
         self.assertIsNone(Property.objects.get(pk=self.prop.pk).rent_tracking_start)
         self.assertEqual(RentalPeriod.objects.count(), 1)
+
+    def test_without_a_cut_off_counts_each_tenancy_from_its_first_month(self):
+        make_tenancy(
+            self.prop,
+            name="Mohammed Yusuf",
+            flat_number="301",
+            rent_due_day=5,
+            start_date=date(2026, 7, 5),
+        )
+
+        out = self.run_command()
+
+        for month in ("July", "August", "September"):
+            self.assertIn(f"Flat 301 · Mohammed Yusuf · {month} 2026: no bill", out)
+        self.assertIn("4 month(s) would show as due or overdue, awaiting a bill.", out)
+        # A cut-off leaves out the months before it.
+        self.assertNotIn("Mohammed Yusuf · August", self.run_command("2026-09"))
 
     def test_says_so_when_every_month_has_a_bill(self):
         self.assertIn("Every month from then has a bill.", self.run_command("2026-10"))
