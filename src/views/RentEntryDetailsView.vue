@@ -38,7 +38,8 @@ import {
 import { useTenantStore } from '@/stores/tenant'
 import type { Payment, PaymentInput } from '@/types/payment'
 import { formatINR } from '@/utils/currency'
-import { formatMonthValue, formatTimestamp } from '@/utils/date'
+import { formatDateValue, formatMonthValue, formatTimestamp } from '@/utils/date'
+import { formatPaymentTiming } from '@/utils/rentCalculations'
 
 const props = defineProps<{
   tenantId: string
@@ -47,6 +48,8 @@ const props = defineProps<{
   from?: 'dashboard' | 'history'
   // Opened as the replacement just made by correcting a bill.
   corrected?: boolean
+  // Opened to record a payment: the dialog opens once the bill has loaded, if it takes one.
+  pay?: boolean
 }>()
 
 const rentEntryStore = useRentEntryStore()
@@ -105,6 +108,18 @@ function openPaymentDialog() {
   offerReplacement.value = false
   paymentDialogOpen.value = true
 }
+
+// Once per visit, so closing the dialog doesn't bring it back.
+let payOffered = false
+watch(
+  entry,
+  (loaded) => {
+    if (!props.pay || payOffered || !loaded) return
+    payOffered = true
+    if (loaded.billStatus !== 'void' && loaded.status !== 'paid') openPaymentDialog()
+  },
+  { immediate: true },
+)
 
 // The dialog stays open while a save is in flight, so its result (and any error) is seen.
 function setPaymentDialogOpen(open: boolean) {
@@ -400,6 +415,14 @@ function goToHistory() {
           </h1>
           <EntryStatusBadge :entry="entry" />
         </div>
+        <!-- Saved with the bill when it was created; a bill from before due dates has none. -->
+        <p
+          v-if="entry.dueDate && entry.paymentTiming"
+          class="mt-2 text-muted-foreground"
+          data-testid="due-date"
+        >
+          Due {{ formatDateValue(entry.dueDate) }} · {{ formatPaymentTiming(entry.paymentTiming) }}
+        </p>
         <p
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
           data-testid="tenant-chip"

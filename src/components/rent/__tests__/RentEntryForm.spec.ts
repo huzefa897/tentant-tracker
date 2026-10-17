@@ -19,7 +19,9 @@ const tenant: Tenant = {
 
 let wrapper: VueWrapper | undefined
 
-function mountForm(props: { saveError?: string | null; saving?: boolean } = {}) {
+function mountForm(
+  props: { month?: string | null; saveError?: string | null; saving?: boolean } = {},
+) {
   wrapper = mount(RentEntryForm, {
     props: { tenant, ...props },
     attachTo: document.body,
@@ -64,6 +66,15 @@ describe('RentEntryForm', () => {
       expect(wrapper!.get<HTMLInputElement>('#paymentAmount').element.value).toBe('0')
       expect(wrapper!.get<HTMLTextAreaElement>('#notes').element.value).toBe('')
       expect(text('rate')).toBe('₹6 / unit')
+    })
+
+    it('starts from a given month, e.g. a missing bill’s, and isn’t dirty for it', async () => {
+      mountForm({ month: '2026-09' })
+
+      expect(wrapper!.get<HTMLInputElement>('#billingMonth').element.value).toBe('2026-09')
+      await wrapper!.vm.$nextTick()
+      const changes = wrapper!.emitted('dirtyChange') ?? []
+      expect(changes.some(([dirty]) => dirty === true)).toBe(false)
     })
 
     it('does not let the electricity rate be edited', () => {

@@ -6,7 +6,7 @@ import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
-import { formatMonthValue } from '@/utils/date'
+import { formatDateValue, formatMonthValue } from '@/utils/date'
 
 // Shown in the given order, with the figures the backend calculated. Receipts are issued per
 // payment, on the entry's details page. A void bill is muted and marked VOID: it counts for
@@ -27,10 +27,13 @@ const rows = computed(() =>
   props.entries.map((entry) => ({
     id: entry.id,
     month: formatMonthValue(entry.billingMonth),
+    // A bill from before due dates has none.
+    due: entry.dueDate ? formatDateValue(entry.dueDate) : '—',
     totalDue: entry.totalDue,
     totalPaid: entry.totalPaid,
     outstanding: entry.outstanding,
     status: entry.status,
+    dueStatus: entry.dueStatus,
     billStatus: entry.billStatus,
     isVoid: entry.billStatus === 'void',
   })),
@@ -45,6 +48,7 @@ const rows = computed(() =>
         <thead class="bg-muted/40 text-left text-muted-foreground">
           <tr>
             <th scope="col" class="px-4 py-3 font-medium">Billing month</th>
+            <th scope="col" class="px-4 py-3 font-medium">Due date</th>
             <th scope="col" class="px-4 py-3 text-right font-medium">Total due</th>
             <th scope="col" class="px-4 py-3 text-right font-medium">Total paid</th>
             <th scope="col" class="px-4 py-3 text-right font-medium">Outstanding</th>
@@ -61,6 +65,7 @@ const rows = computed(() =>
             data-testid="history-row"
           >
             <th scope="row" class="px-4 py-3 text-left font-medium">{{ row.month }}</th>
+            <td class="px-4 py-3 whitespace-nowrap" data-testid="history-due">{{ row.due }}</td>
             <td class="px-4 py-3 text-right tabular-nums" :class="{ 'line-through': row.isVoid }">
               {{ formatINR(row.totalDue) }}
             </td>
@@ -119,6 +124,10 @@ const rows = computed(() =>
           <EntryStatusBadge :entry="row" />
         </div>
         <dl class="mt-3 space-y-1.5 text-sm" :class="{ 'line-through': row.isVoid }">
+          <div class="flex justify-between gap-4">
+            <dt class="text-muted-foreground">Due date</dt>
+            <dd>{{ row.due }}</dd>
+          </div>
           <div class="flex justify-between gap-4">
             <dt class="text-muted-foreground">Total due</dt>
             <dd class="tabular-nums">{{ formatINR(row.totalDue) }}</dd>

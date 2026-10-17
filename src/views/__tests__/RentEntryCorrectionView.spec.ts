@@ -111,7 +111,7 @@ describe('RentEntryCorrectionView', () => {
     const months = () =>
       view!
         .findAll('[data-testid="history-row"]')
-        .map((row) => [row.get('th').text(), row.findAll('td')[3]!.text()])
+        .map((row) => [row.get('th').text(), row.findAll('td')[4]!.text()])
     expect(months()).toEqual([
       ['October 2026', 'Unpaid'],
       ['September 2026', 'Unpaid'],

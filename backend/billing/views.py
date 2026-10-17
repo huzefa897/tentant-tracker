@@ -30,6 +30,7 @@ from .services import (
     EntryNotFoundError,
     EntryVoidError,
     NothingToCorrectError,
+    PeriodNotOwedError,
     IdempotencyConflictError,
     PaymentExceedsOutstandingError,
     PaymentNotAllowedError,
@@ -216,6 +217,7 @@ def entry_with_details(entry_id) -> RentEntry:
     """A bill as the API shows it, after a change: its amounts, voider and replacement."""
     return (
         RentEntry.objects.with_amounts()
+        .with_due()
         .select_related("voided_by", "replaced_by")
         .get(pk=entry_id)
     )
@@ -239,8 +241,9 @@ class RentEntryViewSet(
     by voiding it (EntryVoidViewSet) or voiding and replacing it (EntryCorrectionViewSet).
 
     List: newest billing month first; ?status=active (the default)|void|all, ?year=2026,
-    ?billing_month=2026-10 (to check whether a bill exists) and
-    ?payment_status=unpaid|partially_paid|paid (active bills only), applied before paging.
+    ?billing_month=2026-10 (to check whether a bill exists),
+    ?payment_status=unpaid|partially_paid|paid (active bills only) and ?balance=outstanding
+    (active bills with money still to pay), applied before paging.
 
     Create takes an optional Idempotency-Key header (required with an initialPayment): a retry
     with the same key returns the bill it created (200) instead of creating another.
@@ -255,6 +258,7 @@ class RentEntryViewSet(
         return (
             RentEntry.objects.filter(tenancy=self.get_tenancy())
             .with_amounts()
+            .with_due()
             .select_related("voided_by", "replaced_by")
             .order_by("-billing_month", "-created_at")
         )
@@ -295,6 +299,12 @@ class RentEntryViewSet(
                 )
             queryset = queryset.with_payment_status(payment_status)
 
+        balance = params.get("balance")
+        if balance is not None:
+            if balance != "outstanding":
+                raise exceptions.ValidationError({"balance": "The only choice is outstanding."})
+            queryset = queryset.owing()
+
         return queryset
 
     def create(self, request, *args, **kwargs):
@@ -321,6 +331,10 @@ class RentEntryViewSet(
         except BillingMonthOutsideTenancyError:
             raise exceptions.ValidationError(
                 {"billingMonth": ["This month is outside the tenancy's occupancy period."]}
+            ) from None
+        except PeriodNotOwedError:
+            raise exceptions.ValidationError(
+                {"billingMonth": ["This month is marked as not owed, so it can't have a bill."]}
             ) from None
         except IdempotencyConflictError:
             raise IdempotencyConflict() from None

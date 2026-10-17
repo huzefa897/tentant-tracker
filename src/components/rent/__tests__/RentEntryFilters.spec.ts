@@ -19,6 +19,7 @@ describe('RentEntryFilters', () => {
     ])
     expect(wrapper.findAll('#filter-status option').map((o) => o.text())).toEqual([
       'All',
+      'Outstanding',
       'Unpaid',
       'Partially paid',
       'Paid',

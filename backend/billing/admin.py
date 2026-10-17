@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .calculations import entry_amounts
-from .models import LegacyRecord, Payment, PaymentReversal, Receipt, RentEntry
+from .models import LegacyRecord, Payment, PaymentReversal, Receipt, RentalPeriod, RentEntry
 
 
 class ViewOnlyAdminMixin:
@@ -39,6 +39,31 @@ class PaymentInline(ViewOnlyAdminMixin, admin.TabularInline):
         return payment_status(obj)
     extra = 0
     show_change_link = True
+
+
+@admin.register(RentalPeriod)
+class RentalPeriodAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
+    """Created from the tenancy schedule and with bills (billing/periods.py); marked not owed
+    through the app."""
+
+    list_display = ("tenancy", "period_month", "due_date", "payment_timing", "not_owed_at")
+    list_filter = ("tenancy__property", "payment_timing")
+    list_select_related = ("tenancy",)
+    search_fields = ("tenancy__name", "tenancy__flat_number")
+    date_hierarchy = "period_month"
+    fields = (
+        "id",
+        "tenancy",
+        "period_month",
+        "payment_timing",
+        "due_day",
+        "due_date",
+        "created_at",
+        "not_owed_at",
+        "not_owed_by",
+        "not_owed_reason",
+    )
+    readonly_fields = fields
 
 
 @admin.register(RentEntry)

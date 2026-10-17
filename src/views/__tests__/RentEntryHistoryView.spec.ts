@@ -100,9 +100,10 @@ describe('RentEntryHistoryView', () => {
     })
     expect(view!.get('[data-testid="tenant-chip"]').text()).toBe('Shaik Zahid Ali · Flat 202')
     expect(rows()).toEqual([
-      ['October 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
-      ['September 2026', '₹15,450', '₹0', '₹15,450', 'Unpaid', 'View Summary'],
-      ['December 2025', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
+      // The fixtures' due date: each bill shows its own.
+      ['October 2026', '11 Oct 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
+      ['September 2026', '11 Oct 2026', '₹15,450', '₹0', '₹15,450', 'Unpaid', 'View Summary'],
+      ['December 2025', '11 Oct 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
     ])
     expect(view!.text()).not.toContain('July 2026')
   })
@@ -199,6 +200,7 @@ describe('RentEntryHistoryView', () => {
 
     expect(view!.findAll('#filter-status option').map((o) => o.text())).toEqual([
       'All',
+      'Outstanding',
       'Unpaid',
       'Partially paid',
       'Paid',
@@ -213,9 +215,27 @@ describe('RentEntryHistoryView', () => {
       paymentStatus: 'partially_paid',
       page: 1,
     })
-    expect(rows().map((row) => [row[0], row[2], row[3], row[4]])).toEqual([
+    expect(rows().map((row) => [row[0], row[3], row[4], row[5]])).toEqual([
       ['September 2026', '₹5,000', '₹10,450', 'Partially paid'],
     ])
+  })
+
+  it('opens on the bills with money still to pay from the dashboard’s View bills', async () => {
+    fakeEntries.entries = [
+      october,
+      makeEntry({ ...september, totalPaid: 5000, outstanding: 10450, status: 'partially_paid' }),
+      makeEntry({ ...lastYear, totalPaid: 15750, outstanding: 0, status: 'paid' }),
+    ]
+    view = await openPage('/tenants/tenant-001/entries?status=outstanding')
+
+    expect(getEntries).toHaveBeenLastCalledWith(expect.any(String), 'tenant-001', {
+      billStatus: 'active',
+      year: undefined,
+      paymentStatus: 'outstanding',
+      page: 1,
+    })
+    expect(view.get<HTMLSelectElement>('#filter-status').element.value).toBe('outstanding')
+    expect(rows().map((row) => row[0])).toEqual(['October 2026', 'September 2026'])
   })
 
   it('names both filters when nothing matches', async () => {

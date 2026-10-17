@@ -5,7 +5,9 @@ The rule: round electricity to paise, then add it to rent and water. The app's p
 and shown.
 """
 
+from calendar import monthrange
 from dataclasses import dataclass
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db.models import Sum
@@ -42,6 +44,42 @@ def payment_status(total_due: Decimal, total_paid: Decimal) -> str:
     if total_paid == 0:
         return PaymentStatus.UNPAID
     return PaymentStatus.PARTIALLY_PAID
+
+
+class DueStatus:
+    """Whether a bill's money is late, apart from how much of it is paid (PaymentStatus): a
+    partially paid bill can also be overdue."""
+
+    SETTLED = "settled"
+    OVERDUE = "overdue"
+    DUE_TODAY = "due_today"
+    UPCOMING = "upcoming"
+
+
+def due_date_for(billing_month: date, due_day: int, payment_timing: str) -> date:
+    """The day a month's bill is due: the due day of the billing month (prepaid) or of the
+    month after it (postpaid), or that month's last day when it's shorter (due day 31 is
+    30 April, 28 or 29 February)."""
+    year, month = billing_month.year, billing_month.month
+    if payment_timing == "postpaid":
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    elif payment_timing != "prepaid":
+        raise ValueError(f"Unknown payment timing: {payment_timing}")
+    return date(year, month, min(due_day, monthrange(year, month)[1]))
+
+
+def due_status(due_date: date | None, outstanding: Decimal, today: date) -> str | None:
+    """None when there's nothing to say: no due date (a bill from before due dates, until it's
+    given one) or a void bill (call with its outstanding, which is zero, after checking)."""
+    if due_date is None:
+        return None
+    if outstanding <= 0:
+        return DueStatus.SETTLED
+    if due_date < today:
+        return DueStatus.OVERDUE
+    if due_date == today:
+        return DueStatus.DUE_TODAY
+    return DueStatus.UPCOMING
 
 
 @dataclass(frozen=True)

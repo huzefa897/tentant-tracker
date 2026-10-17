@@ -128,6 +128,7 @@ describe('NewRentEntryView', () => {
       expect.any(String),
     )
     expect(savedSummary()).toMatchObject({
+      'Due date': '11 Oct 2026 · Postpaid',
       'Total paid': '₹10,000',
       Outstanding: '₹5,750',
       Status: 'Partially paid',
@@ -162,6 +163,18 @@ describe('NewRentEntryView', () => {
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 
+  it('starts on the month in the URL, as from a missing bill', async () => {
+    app = await openPage('/tenants/tenant-001/entries/new?month=2026-08')
+
+    expect(app.get<HTMLInputElement>('#billingMonth').element.value).toBe('2026-08')
+  })
+
+  it('ignores a malformed month in the URL', async () => {
+    app = await openPage('/tenants/tenant-001/entries/new?month=2026-13')
+
+    expect(app.get<HTMLInputElement>('#billingMonth').element.value).not.toBe('2026-13')
+  })
+
   it('saves the bill through the API and confirms with the saved charges', async () => {
     await openEntryPage()
     await fill(validEntry)
@@ -189,6 +202,8 @@ describe('NewRentEntryView', () => {
     expect(app!.text()).toContain('September 2026 for Shaik Zahid Ali, Flat 202')
     expect(savedSummary()).toEqual({
       'Billing month': 'September 2026',
+      // The backend's: the property's timing and the tenant's due day.
+      'Due date': '11 Oct 2026 · Postpaid',
       Rent: '₹15,000',
       'Electricity (75 units × ₹6)': '₹450',
       Water: '₹300',

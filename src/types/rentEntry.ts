@@ -4,6 +4,17 @@ export type PaymentStatus = 'unpaid' | 'partially_paid' | 'paid'
 // towards nothing (it's never "paid" or "unpaid").
 export type BillStatus = 'active' | 'void'
 
+// When a property's rent is due: during the billing month (prepaid) or the next one (postpaid).
+export type PaymentTiming = 'prepaid' | 'postpaid'
+
+// Whether a bill's money is late, apart from how much is paid: a partially paid bill can also be
+// overdue. From the backend, which compares the due date with today at the property.
+export type DueStatus = 'settled' | 'overdue' | 'due_today' | 'upcoming'
+
+// A filter on a list of bills: one payment status, or outstanding (unpaid or partially paid:
+// money still to pay).
+export type EntryStatusFilter = PaymentStatus | 'outstanding'
+
 // A new bill as the form submits it. The electricity rate is the tenant's current rate, used
 // for the preview only: the backend copies the rate from the tenancy when it saves the bill.
 export interface RentEntryInput {
@@ -50,6 +61,12 @@ export interface RentEntry {
   outstanding: number
   // null for a void bill.
   status: PaymentStatus | null
+  // Saved with the bill when it was created (the property's timing, the tenant's due day), so
+  // later changes never move it. All three are null on a bill from before due dates; dueStatus
+  // is also null on a void bill.
+  paymentTiming: PaymentTiming | null
+  dueDate: string | null // YYYY-MM-DD
+  dueStatus: DueStatus | null
   notes: string
   createdAt: string // ISO timestamp
   billStatus: BillStatus
@@ -94,6 +111,6 @@ export interface RentEntryFilters {
   billStatus?: BillStatus | 'all'
   year?: string // YYYY
   billingMonth?: string // YYYY-MM
-  paymentStatus?: PaymentStatus
+  paymentStatus?: EntryStatusFilter
   page?: number
 }

@@ -5,7 +5,7 @@ export interface Tenant {
   name: string
   flatNumber: string
   rentAmount: number
-  // Day of the month rent is due (1-28)
+  // Day of the month rent is due (1-31; a shorter month's last day when it has fewer)
   rentDueDay: number
   // Rupees per unit of electricity
   electricityRate: number
@@ -17,6 +17,9 @@ export interface Tenant {
   startDate: string
   endDate: string | null
 }
+
+// Whether the occupancy has started, continues or has ended, on today's date at the property.
+export type TenantStatus = 'upcoming' | 'current' | 'ended'
 
 // One page of tenant search results.
 export interface TenantPage {

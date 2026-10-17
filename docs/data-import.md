@@ -28,7 +28,7 @@ Between steps the converted Sheet travels in the page, signed for that property 
 
 From the Sheet:
 
-- **Bills**: one per tenant tab and month, with that month's rent, units, the tab's electricity rate, water and notes. **Total Due and Overdue Amount are never read**: they add last month's balance (on some tabs twice), and the app works out balances from bills and payments itself. Months still in the future, or with no units and no payment yet, are left out.
+- **Bills**: one per tenant tab and month, with that month's rent, units, the tab's electricity rate, water and notes, and its month's rental period, created if needed with the tenancy's due day and the property's payment timing as they are when imported ([rent-entries.md](rent-entries.md#rental-periods-and-due-dates)). **Total Due and Overdue Amount are never read**: they add last month's balance (on some tabs twice), and the app works out balances from bills and payments itself. Months still in the future, or with no units and no payment yet, are left out.
 - **Payments**: a month's Total Paid with its Paid Date, as one payment.
 - **Receipts**: the one the Sheet's script emailed for each payment, with **its original reference** (`RCP-<flat>-<yyyyMM>`, which must be free within the property, as app references are) and the paid date as its issue date. The app doesn't issue a new receipt for it. Its contents are the imported bill and payment as they stood then; the emailed PDFs stay the originals.
 - **Never**: Aadhaar numbers, phone numbers, deposits, the Email Log. Tenancies aren't created from the Sheet: you create them in admin, with their real details.
@@ -78,6 +78,8 @@ In production admin, create each tenancy (flat, dates, rent, rate, deposit) so i
 ```
 
 Tabs are matched only through this file, never by name. A tenant with two flats has two tabs, each mapped to its own tenancy.
+
+Rent is owed from each tenancy's first month, bill or no bill, so a month the Sheet doesn't have would show as overdue. On the property in admin, set the **rent tracking start** (the cut-off) to the first month the app should count without a bill, usually the month after the Sheet's last; earlier months then count only if they're imported. `preview_rent_tracking` (in [rent-entries.md](rent-entries.md#rental-periods-and-due-dates)) lists what would show as due with or without one.
 
 ### 5. Back up, then try it
 

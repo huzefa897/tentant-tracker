@@ -7,7 +7,15 @@ import { makeEntry } from '@/test/rentEntries'
 const entries = [
   makeEntry({ id: 'a', billingMonth: '2026-10', totalPaid: 10000 }),
   makeEntry({ id: 'b', billingMonth: '2026-09', totalPaid: 15750 }),
-  makeEntry({ id: 'c', billingMonth: '2026-08', electricityUnits: 1.125 }),
+  // From before due dates: none to show.
+  makeEntry({
+    id: 'c',
+    billingMonth: '2026-08',
+    electricityUnits: 1.125,
+    paymentTiming: null,
+    dueDate: null,
+    dueStatus: null,
+  }),
 ]
 
 describe('RentEntryHistory', () => {
@@ -21,14 +29,23 @@ describe('RentEntryHistory', () => {
     expect(rows).toEqual([
       [
         'October 2026',
+        '11 Oct 2026',
         '₹15,750',
         '₹10,000',
         '₹5,750',
         'Partially paid',
         'Download receipt View Summary',
       ],
-      ['September 2026', '₹15,750', '₹15,750', '₹0', 'Paid', 'Download receipt View Summary'],
-      ['August 2026', '₹15,306.75', '₹0', '₹15,306.75', 'Unpaid', 'View Summary'],
+      [
+        'September 2026',
+        '11 Oct 2026',
+        '₹15,750',
+        '₹15,750',
+        '₹0',
+        'Paid',
+        'Download receipt View Summary',
+      ],
+      ['August 2026', '—', '₹15,306.75', '₹0', '₹15,306.75', 'Unpaid', 'View Summary'],
     ])
   })
 
@@ -42,6 +59,7 @@ describe('RentEntryHistory', () => {
 
     expect(row.findAll('th, td').map((cell) => cell.text())).toEqual([
       'October 2026',
+      '11 Oct 2026',
       '₹15,750',
       '₹0',
       '₹0',
