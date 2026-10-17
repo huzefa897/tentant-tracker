@@ -29,12 +29,12 @@ import {
 
 export type EntryListStatus = 'idle' | 'loading' | 'ready' | 'error'
 
-export const ENTRIES_LOAD_ERROR_MESSAGE = 'Unable to load rent entries. Please try again.'
+export const ENTRIES_LOAD_ERROR_MESSAGE = 'Unable to load bills. Please try again.'
 export const SAVE_ERROR_MESSAGE =
-  'Unable to save the entry. Your form has been kept. Please try again.'
+  'Unable to save the bill. Your form has been kept. Please try again.'
 export const DUPLICATE_ENTRY_MESSAGE = 'An entry already exists for this tenant and billing month.'
 export const SAVE_UNCONFIRMED_MESSAGE =
-  "We couldn't confirm whether the entry was saved. Save again to retry: it won't be saved twice."
+  "We couldn't confirm whether the bill was saved. Save again to retry: it won't be saved twice."
 export const ENTRY_KEY_CONFLICT_MESSAGE =
   'Your earlier attempt was already saved with different details. Open it to check it before adding another.'
 export const PAYMENTS_LOAD_ERROR_MESSAGE = 'Unable to load payments. Please try again.'
@@ -83,7 +83,7 @@ export function entryLoadErrorMessage(error: unknown): string {
     case 'network':
       return "Couldn't reach the server. Check your connection and try again."
     case 'unavailable':
-      return 'Rent entries are unavailable right now. Please try again shortly.'
+      return 'Bills are unavailable right now. Please try again shortly.'
     case 'unauthorized':
       return "Your sign-in couldn't be verified. Log out and sign in again."
     case 'rate-limited':
@@ -484,7 +484,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       Object.keys(validateRentEntryInput(input)).length > 0 ||
       (initialPayment && Object.keys(validatePaymentDraft(initialPayment)).length > 0)
     ) {
-      throw new EntrySaveError('This entry is not valid. Check the form and try again.')
+      throw new EntrySaveError('This bill is not valid. Check the form and try again.')
     }
 
     const propertyId = requireProperty()
@@ -533,7 +533,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       if (err instanceof ApiError && kind === 'invalid-request') {
         // The backend's own message, e.g. a month outside the tenancy.
         throw new EntrySaveError(
-          firstFieldError(err) ?? 'This entry is not valid. Check the form and try again.',
+          firstFieldError(err) ?? 'This bill is not valid. Check the form and try again.',
         )
       }
 
@@ -545,7 +545,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         throw new EntrySaveError("Your sign-in couldn't be verified. Log out and sign in again.")
       }
       if (kind === 'forbidden') {
-        throw new EntrySaveError("You don't have permission to add entries for this property.")
+        throw new EntrySaveError("You don't have permission to add bills for this property.")
       }
 
       throw new EntrySaveError(SAVE_ERROR_MESSAGE)
@@ -642,7 +642,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
         )
       }
       if (kind === 'not-found') {
-        throw new PaymentSaveError("This entry can't be found. It may no longer be available.")
+        throw new PaymentSaveError("This bill can't be found. It may no longer be available.")
       }
       // Refused before anything was recorded, so trying again later is safe.
       if (kind === 'rate-limited') {
@@ -728,7 +728,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       throw new ReceiptError(
         isUncertainFailure(err)
           ? RECEIPT_ERROR_MESSAGE
-          : receiptErrorMessage(err, "This entry can't be found. It may no longer be available."),
+          : receiptErrorMessage(err, "This bill can't be found. It may no longer be available."),
       )
     }
     // Shown unless a load started since; one under way when this began may predate the newest
@@ -743,7 +743,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
 
     // Reversed payments don't count towards the bill, so they're never its latest receipt.
     const latest = list.find((payment) => payment.status === 'recorded')
-    if (!latest) throw new ReceiptError('No payments have been recorded for this entry yet.')
+    if (!latest) throw new ReceiptError('No payments have been recorded for this bill yet.')
     return getReceipt(tenantId, latest)
   }
 
@@ -875,7 +875,7 @@ export const useRentEntryStore = defineStore('rentEntry', () => {
       return firstFieldError(err) ?? 'These details are not valid. Check them and try again.'
     }
     if (kind === 'forbidden') return "Only the property's owners can void or correct bills."
-    if (kind === 'not-found') return "This entry can't be found. It may no longer be available."
+    if (kind === 'not-found') return "This bill can't be found. It may no longer be available."
     if (kind === 'rate-limited') return RATE_LIMITED_MESSAGE
     if (kind === 'unauthorized')
       return "Your sign-in couldn't be verified. Log out and sign in again."

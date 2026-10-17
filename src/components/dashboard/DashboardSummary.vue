@@ -1,122 +1,132 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import { Button } from '@/components/ui/button'
 import type { DashboardSummary } from '@/types/dashboard'
 import { formatINR } from '@/utils/currency'
 import { formatMonthCount, formatTenantCount } from '@/utils/rentalPeriods'
 
-// The property's rent due: what's known to be outstanding from prepared bills, then counts of
-// rental months by when they're due and whether their bill is prepared. Counts of months are
-// never called tenants; a month awaiting its bill is counted, never added to the amount, and
-// the figure says so. Only late money takes colour.
+// The property's rent due as one strip of three: rental months overdue (and how long the oldest
+// has waited), months whose bill isn't prepared (with a shortcut to them), and the outstanding
+// amount known from prepared bills. When and how much each tab holds is on the tabs below.
+// Counts of months are never called tenants. A month awaiting its bill is counted, never added
+// to an amount: with no prepared bills the amount is "not known yet", never ₹0. Only overdue
+// months take colour.
 const props = defineProps<{
   summary: DashboardSummary
 }>()
 
-const excluded = computed(() => {
-  const awaiting = props.summary.awaitingBillPeriodCount
-  if (awaiting === 0) return 'From prepared bills. Every month that’s owed has its bill.'
-  return `From prepared bills only. ${formatMonthCount(awaiting)} awaiting a bill ${
-    awaiting === 1 ? 'isn’t' : 'aren’t'
-  } included: ${awaiting === 1 ? 'its amount isn’t' : 'their amounts aren’t'} calculated yet.`
+const emit = defineEmits<{
+  // Show the months whose bill isn't prepared.
+  showUnbilled: []
+}>()
+
+const days = (count: number) => `${count} ${count === 1 ? 'day' : 'days'}`
+
+const overdue = computed(() => {
+  const s = props.summary
+  if (s.overduePeriodCount === 0) return { value: null, text: 'Nothing overdue', note: null }
+  return {
+    value: s.overduePeriodCount,
+    text: `${s.overduePeriodCount === 1 ? 'month' : 'months'} overdue`,
+    note: [
+      `Oldest ${days(s.oldestOverdueDays ?? 0)}`,
+      s.knownOverdue > 0 ? `${formatINR(s.knownOverdue)} outstanding` : null,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  }
 })
 
-const parts = computed(() => {
+const unbilled = computed(() => {
   const s = props.summary
-  return [
-    {
-      id: 'overdue',
-      label: 'Overdue',
-      value: formatMonthCount(s.overduePeriodCount),
-      note:
-        s.overduePeriodCount > 0
-          ? `${formatTenantCount(s.overdueTenancyCount)} · ${formatINR(s.knownOverdue)} known`
-          : 'Nothing late',
-      late: s.overduePeriodCount > 0,
-      soon: false,
-    },
-    {
-      id: 'due-today',
-      label: 'Due today',
-      value: formatMonthCount(s.dueTodayPeriodCount),
-      note: s.dueTodayPeriodCount > 0 ? `${formatINR(s.knownDueToday)} known` : null,
-      late: false,
-      soon: s.dueTodayPeriodCount > 0,
-    },
-    {
-      id: 'awaiting-bill',
-      label: 'Awaiting a bill',
-      value: formatMonthCount(s.awaitingBillPeriodCount),
-      note:
-        s.overdueAwaitingBillPeriodCount > 0
-          ? `${s.overdueAwaitingBillPeriodCount} of them overdue`
-          : null,
-      late: false,
-      soon: false,
-    },
-    {
-      id: 'upcoming',
-      label: 'Due in the next 7 days',
-      value: formatMonthCount(s.upcomingPeriodCount),
-      note: null,
-      late: false,
-      soon: false,
-    },
-  ]
+  if (s.awaitingBillPeriodCount === 0) {
+    return { value: null, text: 'Every bill prepared', note: null }
+  }
+  return {
+    value: s.awaitingBillPeriodCount,
+    text: s.awaitingBillPeriodCount === 1 ? 'bill not prepared' : 'bills not prepared',
+    note:
+      s.overdueAwaitingBillPeriodCount > 0
+        ? `${s.overdueAwaitingBillPeriodCount} of them overdue`
+        : null,
+  }
 })
+
+// The amount is only ever what prepared bills say; months awaiting a bill are named, not added.
+const outstanding = computed(() => {
+  const s = props.summary
+  const awaiting = s.awaitingBillPeriodCount
+  if (s.owedPeriodCount === 0) return { value: null, text: 'Nothing owed', note: null }
+  if (s.knownOutstanding === 0) {
+    return {
+      value: null,
+      text: 'No amount yet',
+      note: `${formatMonthCount(awaiting)} awaiting a bill`,
+    }
+  }
+  return {
+    value: formatINR(s.knownOutstanding),
+    text: 'outstanding',
+    note: [
+      formatTenantCount(s.owingTenancyCount),
+      awaiting > 0
+        ? `not counting ${formatMonthCount(awaiting)} awaiting a bill`
+        : 'from prepared bills',
+    ].join(' · '),
+  }
+})
+
+const segments = computed(() => [
+  { id: 'overdue', term: 'Overdue', ...overdue.value },
+  { id: 'unbilled', term: 'Bills', ...unbilled.value },
+  { id: 'total', term: 'Outstanding', ...outstanding.value },
+])
 </script>
 
 <template>
-  <section
-    class="rounded-2xl border bg-card p-5 sm:p-6"
-    aria-labelledby="outstanding-heading"
-    data-testid="dashboard-summary"
-  >
-    <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-end">
-      <div>
-        <h2 id="outstanding-heading" class="text-sm font-medium text-muted-foreground">
-          Known outstanding
-        </h2>
-        <p
-          class="mt-1 text-4xl font-bold tracking-tight tabular-nums"
-          data-testid="summary-known-outstanding"
-        >
-          {{ formatINR(summary.knownOutstanding) }}
-        </p>
-        <p class="mt-1.5 max-w-prose text-sm text-muted-foreground" data-testid="summary-excluded">
-          {{ excluded }}
-        </p>
-      </div>
-
-      <div>
-        <p class="mb-2 text-sm text-muted-foreground">
-          Rental months still owed
-          <span v-if="summary.owingTenancyCount > 0" data-testid="summary-owing-tenants">
-            · {{ formatTenantCount(summary.owingTenancyCount) }}
-          </span>
-        </p>
-        <dl class="grid divide-y border-t sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-          <div
-            v-for="part in parts"
-            :key="part.id"
-            class="flex items-baseline justify-between gap-3 py-3 sm:block sm:px-4 sm:first:pl-0"
-            :data-testid="`summary-${part.id}`"
+  <section aria-labelledby="summary-heading" data-testid="dashboard-summary">
+    <h2 id="summary-heading" class="sr-only">Summary</h2>
+    <dl
+      class="grid divide-y overflow-hidden rounded-xl border bg-card lg:grid-cols-[1fr_1.25fr_1fr] lg:divide-x lg:divide-y-0"
+    >
+      <div
+        v-for="segment in segments"
+        :key="segment.id"
+        class="flex min-h-14 items-center justify-between gap-3 px-4 py-2.5"
+        :class="{ 'bg-destructive/5': segment.id === 'overdue' && segment.value !== null }"
+        :data-testid="`summary-${segment.id}`"
+      >
+        <dt class="sr-only">{{ segment.term }}</dt>
+        <!-- The spaces are in the text, so it reads as words whatever the markup. -->
+        <dd class="flex flex-wrap items-baseline gap-x-2">
+          <span
+            class="font-semibold"
+            :class="{ 'text-destructive': segment.id === 'overdue' && segment.value !== null }"
+            ><template v-if="segment.value !== null"
+              ><span
+                class="text-lg font-bold tabular-nums"
+                :data-testid="
+                  segment.id === 'total' ? 'summary-known-outstanding' : 'summary-value'
+                "
+                >{{ segment.value }}</span
+              >{{ ' ' }}</template
+            >{{ segment.text }}</span
+          ><template v-if="segment.note"
+            >{{ ' '
+            }}<span class="text-sm text-muted-foreground">{{ segment.note }}</span></template
           >
-            <dt class="text-sm text-muted-foreground">{{ part.label }}</dt>
-            <dd class="text-right sm:mt-1 sm:text-left">
-              <span
-                class="text-lg font-semibold tabular-nums"
-                :class="{ 'text-destructive': part.late, 'text-warning': part.soon }"
-              >
-                {{ part.value }}
-              </span>
-              <span v-if="part.note" class="block text-xs text-muted-foreground">
-                {{ part.note }}
-              </span>
-            </dd>
-          </div>
-        </dl>
+        </dd>
+        <Button
+          v-if="segment.id === 'unbilled' && segment.value !== null"
+          variant="outline"
+          class="h-8 shrink-0"
+          data-testid="show-unbilled"
+          @click="emit('showUnbilled')"
+        >
+          Show them
+        </Button>
       </div>
-    </div>
+    </dl>
   </section>
 </template>

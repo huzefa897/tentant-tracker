@@ -40,6 +40,7 @@ import type {
   TimingFilter,
 } from '@/types/dashboard'
 import { formatINR } from '@/utils/currency'
+import { formatMonthValue } from '@/utils/date'
 import { formatOverdueBillCount } from '@/utils/overdueBills'
 import { formatTenantCount, recentMonths } from '@/utils/rentalPeriods'
 
@@ -51,17 +52,17 @@ const overdueStore = useOverdueStore()
 const route = useRoute()
 const router = useRouter()
 
-// Two lists: overdue bills (the default), and rent due (?view=rent-due): every month due or
-// overdue, bill or no bill, where a month without a bill gets one prepared.
+// Two lists: rent due (the default): every month due or overdue, bill or no bill, where a month
+// without a bill gets one prepared; and overdue bills (?view=overdue).
 type DashboardTab = 'overdue' | 'rent-due'
-const tab = computed<DashboardTab>(() => (route.query.view === 'rent-due' ? 'rent-due' : 'overdue'))
+const tab = computed<DashboardTab>(() => (route.query.view === 'overdue' ? 'overdue' : 'rent-due'))
 const tabs: { value: DashboardTab; label: string }[] = [
-  { value: 'overdue', label: 'Overdue bills' },
   { value: 'rent-due', label: 'Rent due' },
+  { value: 'overdue', label: 'Overdue bills' },
 ]
 
 function showTab(next: DashboardTab) {
-  if (next !== tab.value) router.replace({ query: next === 'rent-due' ? { view: next } : {} })
+  if (next !== tab.value) router.replace({ query: next === 'overdue' ? { view: next } : {} })
 }
 
 onMounted(() => {
@@ -171,6 +172,48 @@ const nothingShown = computed(() =>
     : 'No months match these filters.',
 )
 
+// Each timing's count across the property, for its tab; only while nothing else narrows the
+// list, since the summary never changes with the filters.
+const timingCounts = computed(() => {
+  const s = dashboardStore.summary
+  if (!s || dashboardStore.filters.preparation !== 'all' || dashboardStore.filters.month) {
+    return undefined
+  }
+  return {
+    due: s.overduePeriodCount + s.dueTodayPeriodCount,
+    overdue: s.overduePeriodCount,
+    due_today: s.dueTodayPeriodCount,
+    upcoming: s.upcomingPeriodCount,
+    all: s.owedPeriodCount,
+  }
+})
+
+// Read out before the list: "Rental months overdue, awaiting a bill, oldest due first".
+const TIMING_CAPTIONS: Record<TimingFilter, string> = {
+  due: 'due now (overdue or due today)',
+  overdue: 'overdue',
+  due_today: 'due today',
+  upcoming: 'due in the next 7 days',
+  all: 'still owed',
+}
+const periodsCaption = computed(() => {
+  const { timing, preparation, month } = dashboardStore.filters
+  return [
+    `Rental months ${TIMING_CAPTIONS[timing]}`,
+    preparation === 'prepared' ? 'with a prepared bill' : null,
+    preparation === 'not_prepared' ? 'awaiting a bill' : null,
+    month ? `for ${formatMonthValue(month)}` : null,
+    'oldest due first',
+  ]
+    .filter(Boolean)
+    .join(', ')
+})
+
+// The summary's "Show them": every owed month whose bill isn't prepared, due or not yet.
+function showUnbilled() {
+  dashboardStore.setFilters({ timing: 'all', preparation: 'not_prepared', month: null })
+}
+
 function prepareBill(period: RentalPeriodRow) {
   router.push({
     name: 'rent-entry-new',
@@ -273,7 +316,7 @@ function openEntry(entryId: string) {
   const tenant = tenantStore.selectedTenant
   if (!tenant) return
 
-  // The summary's back button then returns here rather than to Previous Entries.
+  // The summary's back button then returns here rather than to Bills.
   router.push({
     name: 'rent-entry-details',
     params: { tenantId: tenant.id, entryId },
@@ -316,7 +359,7 @@ function openHistory() {
         <ArrowLeft aria-hidden="true" />
         {{ tab === 'overdue' ? 'Overdue bills' : 'Rent due' }}
       </Button>
-      <header class="mb-8">
+      <header class="mb-6">
         <p
           v-if="accessStore.selectedProperty"
           class="mb-1 text-sm font-semibold text-primary"
@@ -324,10 +367,7 @@ function openHistory() {
         >
           {{ accessStore.selectedProperty.name }}
         </p>
-        <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Tenant Overview</h1>
-        <p class="mt-2 text-muted-foreground">
-          View tenant details, rent information and manage entries.
-        </p>
+        <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Tenant overview</h1>
       </header>
     </template>
 
@@ -342,7 +382,7 @@ function openHistory() {
       @view-entries="openHistory"
     >
       <template v-if="summaryLoading" #latest-entry>
-        <LoadingRegion label="Loading the latest entry…" data-testid="latest-entry-loading">
+        <LoadingRegion label="Loading the latest bill…" data-testid="latest-entry-loading">
           <div class="rounded-xl border bg-card p-4 sm:p-5">
             <SkeletonLines heading :lines="4" />
           </div>
@@ -369,7 +409,7 @@ function openHistory() {
     <!-- The two lists, until a tenant is chosen above. -->
     <template v-else>
       <div
-        class="mb-6 flex gap-1 rounded-xl border bg-muted/40 p-1 sm:w-fit"
+        class="mb-4 flex gap-1 rounded-xl border bg-muted/40 p-1 sm:w-fit"
         role="group"
         aria-label="Show"
       >
@@ -386,12 +426,12 @@ function openHistory() {
         </button>
       </div>
 
-      <!-- Overdue bills: the default. -->
+      <!-- Overdue bills. -->
       <div v-if="tab === 'overdue'" data-testid="overdue-bills">
-        <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <header class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Overdue bills</h1>
-            <p class="mt-2 text-muted-foreground">
+            <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Overdue bills</h1>
+            <p class="mt-1 text-muted-foreground">
               Bills past their due date with money still to pay, oldest first.
             </p>
           </div>
@@ -491,18 +531,15 @@ function openHistory() {
 
       <!-- Rent due: every month due or overdue, bill or no bill. -->
       <div v-else data-testid="pending-payments">
-        <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
+        <header class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex flex-wrap items-baseline gap-x-3">
+            <h1 class="text-2xl font-bold tracking-tight sm:text-3xl">Rent due</h1>
             <p
               v-if="accessStore.selectedProperty"
-              class="mb-1 text-sm font-semibold text-primary"
+              class="text-sm font-semibold text-primary"
               data-testid="selected-property"
             >
               {{ accessStore.selectedProperty.name }}
-            </p>
-            <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Rent due</h1>
-            <p class="mt-2 text-muted-foreground">
-              Which months are due or overdue, bill or no bill.
             </p>
           </div>
           <RefreshStatus
@@ -534,29 +571,40 @@ function openHistory() {
         </div>
 
         <template v-else>
-          <DashboardSummary v-if="dashboardStore.summary" :summary="dashboardStore.summary" />
+          <DashboardSummary
+            v-if="dashboardStore.summary"
+            :summary="dashboardStore.summary"
+            @show-unbilled="showUnbilled"
+          />
 
-          <section class="mt-10" aria-labelledby="periods-heading">
-            <h2 id="periods-heading" class="mb-4 text-xl font-semibold">Rental months</h2>
+          <section
+            class="mt-4 overflow-hidden rounded-xl border bg-card pt-3 sm:pt-4 lg:pt-2"
+            aria-labelledby="periods-heading"
+          >
             <PeriodFilterBar
               v-model:timing="timing"
               v-model:preparation="preparation"
               v-model:month="month"
-              class="mb-4"
               :months="filterMonths"
+              :counts="timingCounts"
               @clear="dashboardStore.setFilters({ preparation: 'all', month: null })"
-            />
+            >
+              <template #heading>
+                <h2 id="periods-heading" class="sr-only">Rental months</h2>
+              </template>
+            </PeriodFilterBar>
 
             <LoadingRegion
               v-if="dashboardStore.periodsStatus === 'loading'"
               label="Loading rental months…"
+              class="p-4 sm:p-5"
               data-testid="periods-loading"
             >
-              <SkeletonRows bordered :rows="Math.max(1, periods?.periods.length ?? 4)" />
+              <SkeletonRows :rows="Math.max(1, periods?.periods.length ?? 4)" />
             </LoadingRegion>
             <div
               v-else-if="dashboardStore.periodsStatus === 'error'"
-              class="rounded-xl border border-dashed px-4 py-6 text-center"
+              class="px-4 py-8 text-center"
               data-testid="periods-error"
             >
               <p class="text-destructive" role="alert">{{ dashboardStore.periodsError }}</p>
@@ -571,6 +619,7 @@ function openHistory() {
                 class="animate-rise-in"
                 :periods="periods.periods"
                 :as-of-date="dashboardStore.summary.asOfDate"
+                :caption="periodsCaption"
                 @prepare="prepareBill"
                 @view="openBill"
                 @record="openBill($event, true)"
@@ -578,7 +627,7 @@ function openHistory() {
               />
               <p
                 v-else
-                class="rounded-xl border border-dashed px-4 py-6 text-center text-muted-foreground"
+                class="px-4 py-10 text-center text-muted-foreground"
                 data-testid="periods-empty"
               >
                 {{ nothingShown }}
@@ -586,7 +635,7 @@ function openHistory() {
 
               <nav
                 v-if="periods.hasNext || periods.hasPrevious"
-                class="mt-4 flex items-center justify-between gap-3"
+                class="flex items-center justify-between gap-3 border-t px-4 py-3 sm:px-5"
                 aria-label="Pages"
               >
                 <Button

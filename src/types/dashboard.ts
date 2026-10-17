@@ -7,7 +7,10 @@ import type { PaymentTiming } from '@/types/rentEntry'
 export interface DashboardSummary {
   asOfDate: string // YYYY-MM-DD, today at the property
   generatedAt: string // ISO timestamp
+  owedPeriodCount: number // every month still owed, due or not yet
   overduePeriodCount: number
+  // How many days the oldest overdue month is past its due date; null when none is overdue.
+  oldestOverdueDays: number | null
   overdueTenancyCount: number
   dueTodayPeriodCount: number
   upcomingPeriodCount: number

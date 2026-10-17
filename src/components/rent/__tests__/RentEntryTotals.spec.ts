@@ -20,6 +20,24 @@ describe('RentEntryTotals', () => {
     })
   })
 
+  it('stacks on phones, so a large page total has the width it needs', () => {
+    const wrapper = mount(RentEntryTotals, {
+      props: { totals: { totalBilled: 123456789.5, totalPaid: 0, outstanding: 123456789.5 } },
+    })
+    const strip = wrapper.get('[data-testid="entry-totals"]')
+
+    // Three columns only from sm up; one row per figure below that.
+    expect(strip.classes()).toEqual(expect.arrayContaining(['grid', 'sm:grid-cols-3']))
+    expect(strip.classes()).not.toContain('grid-cols-3')
+    expect(wrapper.findAll('dd').map((dd) => dd.text())).toEqual([
+      '₹12,34,56,789.50',
+      '₹0',
+      '₹12,34,56,789.50',
+    ])
+    // Never spills into the next figure, even past the widths above.
+    for (const dd of wrapper.findAll('dd')) expect(dd.classes()).toContain('break-all')
+  })
+
   it('says void bills on the page aren’t counted, only when there are some', () => {
     const totals = { totalBilled: 15750, totalPaid: 0, outstanding: 15750 }
 

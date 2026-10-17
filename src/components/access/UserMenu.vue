@@ -46,7 +46,7 @@ const initials = computed(() =>
     <DropdownMenuTrigger as-child>
       <Button
         variant="ghost"
-        class="h-11 max-w-64 gap-2.5 rounded-full pr-3 pl-1 text-white hover:bg-white/10 hover:text-white aria-expanded:bg-white/10"
+        class="h-11 max-w-64 min-w-0 shrink gap-2.5 rounded-full pr-3 pl-1 text-white hover:bg-white/10 hover:text-white aria-expanded:bg-white/10"
         aria-label="Account menu"
         data-testid="user-menu-trigger"
       >
@@ -57,8 +57,10 @@ const initials = computed(() =>
           <template v-if="initials">{{ initials }}</template>
           <User v-else class="size-5" />
         </span>
-        <span class="truncate font-medium" data-testid="user-menu-name">{{ displayName }}</span>
-        <ChevronDown class="opacity-80" aria-hidden="true" />
+        <span class="truncate font-medium max-sm:hidden" data-testid="user-menu-name">{{
+          displayName
+        }}</span>
+        <ChevronDown class="shrink-0 opacity-80" aria-hidden="true" />
       </Button>
     </DropdownMenuTrigger>
 

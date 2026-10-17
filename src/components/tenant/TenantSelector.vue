@@ -112,7 +112,7 @@ const emptySearch = () => ''
         >
           <Search class="text-muted-foreground" aria-hidden="true" />
           <span v-if="selectedTenant" class="truncate">
-            {{ selectedTenant.name }} - Flat {{ selectedTenant.flatNumber }}
+            {{ selectedTenant.name }} · Flat {{ selectedTenant.flatNumber }}
           </span>
           <span v-else class="truncate text-muted-foreground">Search or select tenant...</span>
           <ChevronDown class="ml-auto text-muted-foreground" aria-hidden="true" />

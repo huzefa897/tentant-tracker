@@ -69,7 +69,7 @@ describe('PaymentHistory', () => {
   it('says when there are no payments', () => {
     const wrapper = mount(PaymentHistory, { props: { payments: [] } })
 
-    expect(wrapper.text()).toBe('No payments recorded for this entry.')
+    expect(wrapper.text()).toBe('No payments recorded for this bill.')
     expect(wrapper.find('table').exists()).toBe(false)
   })
 

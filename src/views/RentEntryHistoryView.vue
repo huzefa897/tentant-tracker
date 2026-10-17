@@ -139,19 +139,19 @@ const years = computed(() => {
 const totals = computed(() => sumEntryAmounts(entries.value))
 const voidCount = computed(() => entries.value.filter((e) => e.billStatus === 'void').length)
 
-// What the empty result is for, e.g. "No paid entries in 2026."
+// What the empty result is for, e.g. "No paid bills in 2026."
 const noMatchesMessage = computed(() => {
   const status =
     selectedStatus.value === 'all'
       ? ''
       : `${formatEntryStatusFilter(selectedStatus.value).toLowerCase()} `
   const year = selectedYear.value === 'all' ? '' : ` in ${selectedYear.value}`
-  return `No ${status}entries${year}.`
+  return `No ${status}bills${year}.`
 })
 
 // All the matching bills, across pages.
 const entriesCountLabel = computed(() =>
-  history.value.count === 1 ? '1 entry' : `${history.value.count} entries`,
+  history.value.count === 1 ? '1 bill' : `${history.value.count} bills`,
 )
 
 const allVoidMessage = computed(() => {
@@ -190,19 +190,19 @@ function viewEntry(entryId: string) {
         @click="goToDashboard"
       >
         <ArrowLeft aria-hidden="true" />
-        Back to Dashboard
+        Back to dashboard
       </Button>
     </template>
 
     <!-- The page's own shape while it loads, so nothing jumps when the bills arrive. -->
     <LoadingRegion
       v-if="tenantStatus === 'loading'"
-      label="Loading entries…"
+      label="Loading bills…"
       data-testid="history-loading"
     >
       <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p class="text-3xl font-bold tracking-tight sm:text-4xl">Previous Entries</p>
+          <p class="text-3xl font-bold tracking-tight sm:text-4xl">Bills</p>
           <TenantChipSkeleton />
         </div>
         <Skeleton class="h-11 w-44" />
@@ -228,13 +228,13 @@ function viewEntry(entryId: string) {
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
         This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to Dashboard</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
     </div>
 
     <template v-else>
       <header class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Previous Entries</h1>
+          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Bills</h1>
           <p
             class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
             data-testid="tenant-chip"
@@ -245,13 +245,13 @@ function viewEntry(entryId: string) {
         </div>
         <Button class="h-11 px-6" @click="addEntry">
           <Plus aria-hidden="true" />
-          Add New Entry
+          New bill
         </Button>
       </header>
 
       <LoadingRegion
         v-if="history.status !== 'ready' && !historyShown"
-        label="Loading entries…"
+        label="Loading bills…"
         data-testid="history-loading"
       >
         <div class="space-y-6">
@@ -276,11 +276,11 @@ function viewEntry(entryId: string) {
           <History class="size-7" />
         </div>
         <p class="max-w-sm text-muted-foreground">
-          No rent entries yet. Add the first entry for this tenant.
+          No bills yet. Add the first bill for this tenant.
         </p>
         <Button class="mt-6 h-11 px-6" @click="addEntry">
           <Plus aria-hidden="true" />
-          Add New Entry
+          New bill
         </Button>
       </div>
 
@@ -299,7 +299,7 @@ function viewEntry(entryId: string) {
 
         <section aria-labelledby="entries-heading" class="rounded-xl border">
           <div class="flex items-baseline justify-between gap-4 border-b px-4 py-3 sm:px-5">
-            <h2 id="entries-heading" class="text-lg font-semibold">Entries</h2>
+            <h2 id="entries-heading" class="text-lg font-semibold">Bills</h2>
             <p
               v-if="history.status === 'ready'"
               class="text-sm text-muted-foreground tabular-nums"
@@ -320,7 +320,7 @@ function viewEntry(entryId: string) {
 
         <LoadingRegion
           v-if="history.status !== 'ready'"
-          label="Loading entries…"
+          label="Loading bills…"
           data-testid="history-loading"
         >
           <SkeletonRows bordered :rows="skeletonRows" />
@@ -352,7 +352,7 @@ function viewEntry(entryId: string) {
               Newer
             </Button>
             <p class="text-sm text-muted-foreground" data-testid="page-position">
-              Page {{ history.page }} of {{ pageCount }} · {{ history.count }} entries
+              Page {{ history.page }} of {{ pageCount }} · {{ entriesCountLabel }}
             </p>
             <Button
               variant="outline"
@@ -379,7 +379,7 @@ function viewEntry(entryId: string) {
             </Button>
             <Button class="h-11 px-6" @click="addEntry">
               <Plus aria-hidden="true" />
-              Add New Entry
+              New bill
             </Button>
           </div>
         </div>

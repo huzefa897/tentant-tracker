@@ -160,7 +160,7 @@ function handleDialogOpenChange(open: boolean) {
         @click="goToDashboard"
       >
         <ArrowLeft aria-hidden="true" />
-        Back to Dashboard
+        Back to dashboard
       </Button>
     </template>
 
@@ -171,7 +171,7 @@ function handleDialogOpenChange(open: boolean) {
       data-testid="tenant-loading"
     >
       <div class="mb-6">
-        <p class="text-3xl font-bold tracking-tight sm:text-4xl">Add Rent Entry</p>
+        <p class="text-3xl font-bold tracking-tight sm:text-4xl">New bill</p>
         <p class="mt-2 text-muted-foreground">Record monthly rent and utility charges.</p>
         <TenantChipSkeleton />
       </div>
@@ -198,7 +198,7 @@ function handleDialogOpenChange(open: boolean) {
         <p class="mt-1 max-w-sm text-sm text-muted-foreground">
           This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
         </p>
-        <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to Dashboard</Button>
+        <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
       </div>
     </template>
 
@@ -215,7 +215,7 @@ function handleDialogOpenChange(open: boolean) {
           <CircleCheck class="size-9" />
         </div>
         <h1 id="entry-saved-heading" class="text-2xl font-bold tracking-tight sm:text-3xl">
-          Entry saved
+          Bill saved
         </h1>
         <p class="mt-2 text-muted-foreground">
           {{ savedSummary.month }} for {{ tenant.name }}, Flat {{ tenant.flatNumber }}, has been
@@ -293,13 +293,13 @@ function handleDialogOpenChange(open: boolean) {
           <ChevronRight aria-hidden="true" />
         </Button>
         <Button class="mt-3 h-12 w-full text-base" @click="goToDashboard">
-          Back to Dashboard
+          Back to dashboard
         </Button>
       </section>
 
       <template v-else>
         <header class="mb-6">
-          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Add Rent Entry</h1>
+          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">New bill</h1>
           <p class="mt-2 text-muted-foreground">Record monthly rent and utility charges.</p>
           <p
             class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
@@ -341,7 +341,7 @@ function handleDialogOpenChange(open: boolean) {
     <AlertDialog :open="discardDialogOpen" @update:open="handleDialogOpenChange">
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Discard this entry?</AlertDialogTitle>
+          <AlertDialogTitle>Discard this bill?</AlertDialogTitle>
           <AlertDialogDescription>
             You have unsaved changes. If you leave now, they will be lost.
           </AlertDialogDescription>

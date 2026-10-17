@@ -34,7 +34,7 @@ describe('RentEntryHistory', () => {
         '₹10,000',
         '₹5,750',
         'Partially paid',
-        'Download receipt View Summary',
+        'Download receipt View bill',
       ],
       [
         'September 2026',
@@ -43,9 +43,9 @@ describe('RentEntryHistory', () => {
         '₹15,750',
         '₹0',
         'Paid',
-        'Download receipt View Summary',
+        'Download receipt View bill',
       ],
-      ['August 2026', '—', '₹15,306.75', '₹0', '₹15,306.75', 'Unpaid', 'View Summary'],
+      ['August 2026', '—', '₹15,306.75', '₹0', '₹15,306.75', 'Unpaid', 'View bill'],
     ])
   })
 
@@ -64,7 +64,7 @@ describe('RentEntryHistory', () => {
       '₹0',
       '₹0',
       'Void',
-      'View Summary',
+      'View bill',
     ])
     expect(row.classes()).toContain('text-muted-foreground')
     expect(row.findAll('td.line-through')).toHaveLength(3)
@@ -94,7 +94,7 @@ describe('RentEntryHistory', () => {
 
   it('emits view with the entry id from the table and the cards', async () => {
     const wrapper = mount(RentEntryHistory, { props: { entries } })
-    const summaries = wrapper.findAll('[aria-label="View summary for September 2026"]')
+    const summaries = wrapper.findAll('[aria-label="View bill for September 2026"]')
 
     await summaries[0]!.trigger('click')
     await summaries[1]!.trigger('click')

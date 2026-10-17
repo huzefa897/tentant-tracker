@@ -42,8 +42,8 @@ vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 let view: VueWrapper | undefined
 const body = new DOMWrapper(document.body)
-// Where the dashboard opens: overdue bills, unless a describe chooses rent due.
-const RENT_DUE = '/dashboard?view=rent-due'
+// Where the dashboard opens: rent due, unless a describe chooses overdue bills.
+const OVERDUE = '/dashboard?view=overdue'
 let openAt = '/dashboard'
 
 // beforeOpen runs with the fresh pinia active, before navigating to the dashboard.
@@ -75,11 +75,15 @@ afterEach(() => {
 })
 
 describe('DashboardView', () => {
-  it('loads tenants but opens on overdue bills until one is selected', async () => {
+  it('loads tenants but opens on rent due until one is selected', async () => {
     await mountView()
 
     expect(useTenantStore().results).toHaveLength(3)
-    expect(view!.get('h1').text()).toBe('Overdue bills')
+    expect(view!.get('h1').text()).toBe('Rent due')
+    expect(view!.findAll('[data-testid^="dashboard-tab-"]').map((tab) => tab.text())).toEqual([
+      'Rent due',
+      'Overdue bills',
+    ])
     expect(view!.find('#tenant-name').exists()).toBe(false)
   })
 
@@ -101,7 +105,7 @@ describe('DashboardView', () => {
     useTenantStore().selectTenant('tenant-002')
     await flushPromises()
 
-    const addEntry = view!.findAll('button').find((button) => button.text() === 'Add New Entry')
+    const addEntry = view!.findAll('button').find((button) => button.text() === 'New bill')
     await addEntry!.trigger('click')
 
     // The entry page is lazy loaded, so navigation finishes after its chunk is imported.
@@ -116,7 +120,7 @@ describe('DashboardView', () => {
 
     const previousEntries = view!
       .findAll('button')
-      .find((button) => button.text().startsWith('Previous Entries'))
+      .find((button) => button.text().startsWith('Bills'))
     await previousEntries!.trigger('click')
 
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
@@ -203,7 +207,7 @@ describe('DashboardView', () => {
     function previousEntriesText() {
       return view!
         .findAll('button')
-        .find((b) => b.text().startsWith('Previous Entries'))!
+        .find((b) => b.text().startsWith('Bills'))!
         .text()
     }
 
@@ -223,11 +227,11 @@ describe('DashboardView', () => {
         testProperty.id,
         'tenant-001',
       )
-      expect(previousEntriesText()).toBe('Previous Entries (2)')
+      expect(previousEntriesText()).toBe('Bills (2)')
 
       useTenantStore().selectTenant('tenant-002')
       await flushPromises()
-      expect(previousEntriesText()).toBe('Previous Entries (0)')
+      expect(previousEntriesText()).toBe('Bills (0)')
     })
 
     it('shows a skeleton instead of a count or latest entry on error, then auto-retries', async () => {
@@ -240,13 +244,13 @@ describe('DashboardView', () => {
         await flushPromises()
 
         expect(view!.find('[data-testid="entries-error"]').exists()).toBe(false)
-        expect(previousEntriesText()).toBe('Previous Entries')
+        expect(previousEntriesText()).toBe('Bills')
         expect(view!.find('[data-testid="latest-entry-loading"]').exists()).toBe(true)
 
         vi.advanceTimersByTime(5000)
         await flushPromises()
 
-        expect(previousEntriesText()).toBe('Previous Entries (1)')
+        expect(previousEntriesText()).toBe('Bills (1)')
         expect(view!.find('[data-testid="latest-entry-loading"]').exists()).toBe(false)
       } finally {
         vi.useRealTimers()
@@ -357,7 +361,7 @@ describe('DashboardView', () => {
       await flushPromises()
 
       expect(view!.get('[data-testid="latest-entry-loading"]').text()).toBe(
-        'Loading the latest entry…',
+        'Loading the latest bill…',
       )
       expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
     })
@@ -369,7 +373,7 @@ describe('DashboardView', () => {
       await flushPromises()
 
       expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
-      expect(previousEntriesText()).toBe('Previous Entries (0)')
+      expect(previousEntriesText()).toBe('Bills (0)')
     })
 
     it('reloads the latest entry when returning with a tenant selected', async () => {
@@ -420,10 +424,6 @@ describe('DashboardView', () => {
   })
 
   describe('property', () => {
-    beforeEach(() => {
-      openAt = RENT_DUE
-    })
-
     const annex = {
       id: '6f1c2a4e-0000-4000-8000-000000000002',
       name: 'Annex',
@@ -498,14 +498,10 @@ describe('DashboardView', () => {
   })
 
   describe('rent due', () => {
-    beforeEach(() => {
-      openAt = RENT_DUE
-    })
-
     function shownMonths() {
       return view!
         .findAll('[data-testid="period-row"]')
-        .map((row) => `${row.get('th span').text()} ${row.findAll('td')[0]!.text()}`)
+        .map((row) => `${row.get('th').text()} ${row.findAll('td')[1]!.text()}`)
     }
 
     function rowButton(label: string, index = 0) {
@@ -519,13 +515,35 @@ describe('DashboardView', () => {
 
       expect(view!.get('[data-testid="summary-known-outstanding"]').text()).toBe('₹5,750')
       expect(view!.get('[data-testid="summary-overdue"]').text()).toContain('2 months')
-      expect(view!.get('[data-testid="summary-awaiting-bill"]').text()).toContain('2 months')
+      expect(view!.get('[data-testid="summary-total"]').text()).toContain(
+        'not counting 2 months awaiting a bill',
+      )
       expect(shownMonths()).toEqual([
         'Mohammed Yusuf August 2026',
         'Shaik Zahid Ali September 2026',
       ])
-      expect(view!.get('[data-testid="awaiting-calculation"]').text()).toBe('Awaiting calculation')
+      expect(view!.get('[data-testid="awaiting-bill"]').text()).toBe('Bill not prepared')
       expect(view!.get('[data-testid="updated-at"]').text()).toBe('Updated just now')
+    })
+
+    it('counts each timing’s months on its tab until another filter narrows the list', async () => {
+      await mountView()
+      const counts = () =>
+        view!.findAll('[data-testid="timing-count"]').map((count) => count.text())
+
+      // The summary: 2 overdue, none due today, 1 in the next 7 days, 3 owed in all.
+      expect(counts()).toEqual(['2', '2', '0', '1', '3'])
+      expect(view!.get('caption').text()).toBe(
+        'Rental months due now (overdue or due today), oldest due first',
+      )
+
+      await view!.get('[data-testid="filter-preparation"]').setValue('not_prepared')
+      await flushPromises()
+
+      expect(counts()).toEqual([])
+      expect(view!.get('caption').text()).toBe(
+        'Rental months due now (overdue or due today), awaiting a bill, oldest due first',
+      )
     })
 
     it('prepares a missing bill on its month', async () => {
@@ -549,6 +567,23 @@ describe('DashboardView', () => {
         entryId: 'entry-001',
       })
       expect(router.currentRoute.value.query).toEqual({ from: 'dashboard', pay: '1' })
+    })
+
+    it('shows every month without a bill from the summary', async () => {
+      await mountView()
+
+      await view!.get('[data-testid="show-unbilled"]').trigger('click')
+      await flushPromises()
+
+      expect(dashboardService.getRentalPeriods).toHaveBeenLastCalledWith(
+        expect.any(String),
+        { timing: 'all', preparation: 'not_prepared', month: null },
+        1,
+      )
+      expect(view!.get('[data-testid="timing-filter-all"]').attributes('aria-pressed')).toBe('true')
+      expect(
+        (view!.get('[data-testid="filter-preparation"]').element as HTMLSelectElement).value,
+      ).toBe('not_prepared')
     })
 
     it('filters the list, leaving the summary alone', async () => {
@@ -677,6 +712,10 @@ describe('DashboardView', () => {
     })
   })
   describe('overdue bills', () => {
+    beforeEach(() => {
+      openAt = OVERDUE
+    })
+
     const annex = {
       id: '6f1c2a4e-0000-4000-8000-000000000002',
       name: 'Annex',
@@ -726,7 +765,7 @@ describe('DashboardView', () => {
           .get('[data-testid="overdue-bill"]')
           .findAll('td')
           .map((td) => td.text()),
-      ).toEqual(['11 Oct 2026 4 days overdue', '₹15,750', '₹10,000', '₹5,750', 'View bill'])
+      ).toEqual(['11 Oct 2026 Overdue 4 days', '₹15,750', '₹10,000', '₹5,750', 'View bill'])
       expect(view!.get('[data-testid="updated-at"]').text()).toBe('Updated just now')
     })
 
@@ -890,13 +929,14 @@ describe('DashboardView', () => {
       await view!.get('[data-testid="dashboard-tab-rent-due"]').trigger('click')
       await flushPromises()
 
-      expect(router.currentRoute.value.query).toEqual({ view: 'rent-due' })
+      expect(router.currentRoute.value.query).toEqual({})
       expect(view!.get('h1').text()).toBe('Rent due')
       expect(dashboardService.getSummary).toHaveBeenCalledTimes(1)
 
       await view!.get('[data-testid="dashboard-tab-overdue"]').trigger('click')
       await flushPromises()
 
+      expect(router.currentRoute.value.query).toEqual({ view: 'overdue' })
       expect(view!.get('h1').text()).toBe('Overdue bills')
       expect(dashboardService.getOverdueBills).toHaveBeenCalledTimes(2)
     })

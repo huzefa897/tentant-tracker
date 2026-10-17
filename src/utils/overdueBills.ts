@@ -7,7 +7,7 @@ export function formatOverdueBillCount(count: number): string {
   return plural(count, 'overdue bill', 'overdue bills')
 }
 
-// "34 days overdue", "1 day overdue".
+// "Overdue 34 days", "Overdue 1 day": worded as Rent due's status badges are.
 export function formatDaysOverdue(days: number): string {
-  return `${plural(days, 'day', 'days')} overdue`
+  return `Overdue ${plural(days, 'day', 'days')}`
 }

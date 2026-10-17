@@ -184,7 +184,7 @@ function goToDashboard() {
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
         This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to Dashboard</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
     </div>
 
     <RentEntriesLoadError
@@ -198,9 +198,9 @@ function goToDashboard() {
       class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
       role="alert"
     >
-      <h1 class="text-lg font-semibold">Entry not found</h1>
+      <h1 class="text-lg font-semibold">Bill not found</h1>
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
-        This entry doesn't exist for {{ tenant.name }}, Flat {{ tenant.flatNumber }}.
+        This bill doesn't exist for {{ tenant.name }}, Flat {{ tenant.flatNumber }}.
       </p>
     </div>
 

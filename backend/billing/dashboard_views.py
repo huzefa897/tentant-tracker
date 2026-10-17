@@ -57,7 +57,14 @@ class DashboardSummaryView(DashboardView):
                 "asOfDate": self.today().isoformat(),
                 "generatedAt": serializers.DateTimeField().to_representation(timezone.now()),
                 "currency": "INR",
+                "owedPeriodCount": totals["owed_periods"],
                 "overduePeriodCount": totals["overdue_periods"],
+                # Days the oldest overdue month is past its due date; null when none is.
+                "oldestOverdueDays": (
+                    None
+                    if totals["oldest_overdue_due_date"] is None
+                    else (self.today() - totals["oldest_overdue_due_date"]).days
+                ),
                 "overdueTenancyCount": totals["overdue_tenancies"],
                 "dueTodayPeriodCount": totals["due_today_periods"],
                 "upcomingPeriodCount": totals["upcoming_periods"],

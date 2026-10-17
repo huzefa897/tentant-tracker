@@ -5,7 +5,12 @@ import PeriodFilterBar from '@/components/dashboard/PeriodFilterBar.vue'
 import type { PreparationFilter, TimingFilter } from '@/types/dashboard'
 
 function render(
-  props: { timing?: TimingFilter; preparation?: PreparationFilter; month?: string | null } = {},
+  props: {
+    timing?: TimingFilter
+    preparation?: PreparationFilter
+    month?: string | null
+    counts?: Partial<Record<TimingFilter, number>>
+  } = {},
 ) {
   return mount(PeriodFilterBar, {
     props: {
@@ -13,7 +18,9 @@ function render(
       preparation: props.preparation ?? 'all',
       month: props.month ?? null,
       months: ['2026-10', '2026-09'],
+      counts: props.counts,
     },
+    slots: { heading: '<h2>Rental months</h2>' },
   })
 }
 
@@ -34,6 +41,25 @@ describe('PeriodFilterBar', () => {
     await wrapper.get('[data-testid="timing-filter-upcoming"]').trigger('click')
 
     expect(wrapper.emitted('update:timing')).toEqual([['upcoming']])
+  })
+
+  it('shows how many months each timing has, read out as months', () => {
+    const wrapper = render({ counts: { due: 3, overdue: 2, due_today: 1, upcoming: 0 } })
+    const due = wrapper.get('[data-testid="timing-filter-due"]')
+
+    expect(wrapper.findAll('[data-testid="timing-count"]').map((c) => c.text())).toEqual([
+      '3',
+      '2',
+      '1',
+      '0',
+    ])
+    expect(due.get('[data-testid="timing-count"]').attributes('aria-hidden')).toBe('true')
+    expect(due.get('.sr-only').text()).toBe('(3 months)')
+    expect(wrapper.get('[data-testid="timing-filter-all"]').text()).toBe('All owed')
+  })
+
+  it('puts the list’s heading beside its filters', () => {
+    expect(render().get('h2').text()).toBe('Rental months')
   })
 
   it('chooses whether the bill is prepared, and a month or every month', async () => {

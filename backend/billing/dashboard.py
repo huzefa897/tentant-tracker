@@ -12,7 +12,7 @@ any paging.
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from django.db.models import Count, DecimalField, Q, Sum, Value
+from django.db.models import Count, DecimalField, Min, Q, Sum, Value
 from django.db.models.functions import Coalesce
 
 from properties.models import Property
@@ -76,7 +76,9 @@ def summary(prop: Property, today: date) -> dict:
     billed = Q(has_bill=True)
     unbilled = Q(has_bill=False)
     return owing_periods(prop).aggregate(
+        owed_periods=Count("pk"),
         overdue_periods=Count("pk", filter=timing.overdue),
+        oldest_overdue_due_date=Min("due_date", filter=timing.overdue),
         overdue_tenancies=Count("tenancy", distinct=True, filter=timing.overdue),
         due_today_periods=Count("pk", filter=timing.due_today),
         upcoming_periods=Count("pk", filter=timing.upcoming),

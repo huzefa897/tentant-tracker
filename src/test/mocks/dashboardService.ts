@@ -65,7 +65,9 @@ export function makeSummary(overrides: Partial<DashboardSummary> = {}): Dashboar
   return {
     asOfDate: '2026-10-15',
     generatedAt: '2026-10-15T06:30:00Z',
+    owedPeriodCount: 3,
     overduePeriodCount: 2,
+    oldestOverdueDays: 25,
     overdueTenancyCount: 2,
     dueTodayPeriodCount: 0,
     upcomingPeriodCount: 1,
