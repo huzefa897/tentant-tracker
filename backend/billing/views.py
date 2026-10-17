@@ -241,8 +241,9 @@ class RentEntryViewSet(
     by voiding it (EntryVoidViewSet) or voiding and replacing it (EntryCorrectionViewSet).
 
     List: newest billing month first; ?status=active (the default)|void|all, ?year=2026,
-    ?billing_month=2026-10 (to check whether a bill exists) and
-    ?payment_status=unpaid|partially_paid|paid (active bills only), applied before paging.
+    ?billing_month=2026-10 (to check whether a bill exists),
+    ?payment_status=unpaid|partially_paid|paid (active bills only) and ?balance=outstanding
+    (active bills with money still to pay), applied before paging.
 
     Create takes an optional Idempotency-Key header (required with an initialPayment): a retry
     with the same key returns the bill it created (200) instead of creating another.
@@ -297,6 +298,12 @@ class RentEntryViewSet(
                     {"payment_status": f"Choose one of: {', '.join(PAYMENT_STATUSES)}."}
                 )
             queryset = queryset.with_payment_status(payment_status)
+
+        balance = params.get("balance")
+        if balance is not None:
+            if balance != "outstanding":
+                raise exceptions.ValidationError({"balance": "The only choice is outstanding."})
+            queryset = queryset.owing()
 
         return queryset
 

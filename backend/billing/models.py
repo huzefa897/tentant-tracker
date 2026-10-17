@@ -5,8 +5,8 @@ from datetime import date
 
 from django.conf import settings
 from django.db import models
-from django.db.models import DecimalField, F, OuterRef, Q, Subquery, Sum, Value
-from django.db.models.functions import Coalesce, Round
+from django.db.models import DateField, DecimalField, Exists, F, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce, Round, TruncMonth
 
 from properties.models import PaymentTiming, Property, Tenancy
 
@@ -26,34 +26,58 @@ def tenancy_covers_month(tenancy: Tenancy, billing_month: date) -> bool:
 MONEY = DecimalField(max_digits=12, decimal_places=2)
 
 
+# The one definition of a bill's amounts in SQL, shared by bill lists, their filters and the
+# dashboard; billing/calculations.py is the same rule in Python. Payments are summed in a
+# subquery per bill, never joined, so adding up many bills never counts a bill once per payment.
+
+
+def effective_paid_sql():
+    """The bill's payments that weren't reversed (reversals are corrections, kept as history)."""
+    paid = (
+        Payment.objects.filter(entry=OuterRef("pk"), reversal__isnull=True)
+        .order_by()
+        .values("entry")
+        .annotate(total=Sum("amount"))
+        .values("total")
+    )
+    return Coalesce(Subquery(paid, output_field=MONEY), Value(0), output_field=MONEY)
+
+
+def total_due_sql():
+    """Electricity rounded to paise, then added. PostgreSQL rounds halves away from zero, which
+    is half up for these non-negative amounts."""
+    return models.ExpressionWrapper(
+        F("rent_amount")
+        + Round(F("electricity_units") * F("electricity_rate"), 2)
+        + F("water_amount"),
+        output_field=MONEY,
+    )
+
+
+def outstanding_sql():
+    """What's left to pay. Callers keep to active bills: a void bill owes nothing."""
+    return models.ExpressionWrapper(total_due_sql() - effective_paid_sql(), output_field=MONEY)
+
+
 class RentEntryQuerySet(models.QuerySet):
     def active(self):
         """Bills that count: a void bill is kept as history but owes nothing."""
         return self.filter(status=RentEntry.Status.ACTIVE)
 
     def with_amounts(self):
-        """Annotates each bill's effective payments sum (`paid_total`) and total due
-        (`due_total`) in the query itself, so a list of bills needs no query per bill and can be
-        filtered by status.
-
-        due_total follows billing/calculations.py: electricity rounded to paise, then added.
-        PostgreSQL rounds halves away from zero, which is half up for these non-negative
-        amounts. The serializer still calculates the shown figures with calculations.py.
-        """
+        """Annotates each bill's effective payments sum (`paid_total`), total due (`due_total`)
+        and what's left (`outstanding_total`; meaningful for active bills) in the query itself,
+        so a list of bills needs no query per bill and can be filtered by them. The serializer
+        still calculates the shown figures with calculations.py."""
         return self.annotate(
-            # Reversed payments don't count: they're corrections, kept only as history.
-            paid_total=Coalesce(
-                Sum("payments__amount", filter=Q(payments__reversal__isnull=True)),
-                Value(0),
-                output_field=MONEY,
-            ),
-            due_total=models.ExpressionWrapper(
-                F("rent_amount")
-                + Round(F("electricity_units") * F("electricity_rate"), 2)
-                + F("water_amount"),
-                output_field=MONEY,
-            ),
+            paid_total=effective_paid_sql(),
+            due_total=total_due_sql(),
+            outstanding_total=outstanding_sql(),
         )
+
+    def owing(self):
+        """Active bills with money still to pay. Needs with_amounts()."""
+        return self.active().filter(outstanding_total__gt=0)
 
     def with_due(self):
         """Annotates each bill's rental period's due date and payment timing (`period_due_date`,
@@ -208,6 +232,47 @@ class RentEntry(models.Model):
         return f"{self.tenancy} — {self.billing_month:%B %Y}"
 
 
+class RentalPeriodQuerySet(models.QuerySet):
+    def with_bill(self):
+        """Annotates each period's active bill, if it's prepared: `has_bill`, `bill_id`, and its
+        `bill_total`, `bill_paid` and `outstanding` (the one SQL definition, so reversed
+        payments don't count), all null without a bill. Never a zero for a missing bill."""
+        bill = RentEntry.objects.active().filter(
+            tenancy=OuterRef("tenancy"), billing_month=OuterRef("period_month")
+        )
+        amounts = bill.with_amounts()
+        return self.annotate(
+            has_bill=Exists(bill),
+            bill_id=Subquery(bill.values("pk")[:1]),
+            bill_total=Subquery(amounts.values("due_total")[:1], output_field=MONEY),
+            bill_paid=Subquery(amounts.values("paid_total")[:1], output_field=MONEY),
+            outstanding=Subquery(amounts.values("outstanding_total")[:1], output_field=MONEY),
+        )
+
+    def counted(self):
+        """The periods that are owed, with their bill (with_bill): not marked not owed, and
+        either prepared, or tracked (within the tenancy's dates and not before the property's
+        tracking cut-off, when it has one). A prepared month always counts, so no bill's balance
+        can drop out of the totals."""
+        tracked = (
+            (
+                Q(tenancy__property__rent_tracking_start__isnull=True)
+                | Q(period_month__gte=F("tenancy__property__rent_tracking_start"))
+            )
+            & Q(period_month__gte=TruncMonth("tenancy__start_date", output_field=DateField()))
+            & (Q(tenancy__end_date__isnull=True) | Q(tenancy__end_date__gte=F("period_month")))
+        )
+        return (
+            self.with_bill()
+            .filter(not_owed_at__isnull=True)
+            .filter(Q(has_bill=True) | tracked)
+        )
+
+    def owing(self):
+        """Counted periods with money still to pay, or an amount not yet known (no bill)."""
+        return self.counted().filter(Q(has_bill=False) | Q(outstanding__gt=0))
+
+
 class RentalPeriod(models.Model):
     """One month of one tenancy's rent: when it's due, whether or not its bill is prepared.
 
@@ -246,6 +311,8 @@ class RentalPeriod(models.Model):
         related_name="+",
     )
     not_owed_reason = models.CharField(max_length=500, blank=True)
+
+    objects = RentalPeriodQuerySet.as_manager()
 
     class Meta:
         ordering = ("-period_month", "tenancy_id")
