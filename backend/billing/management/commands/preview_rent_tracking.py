@@ -11,15 +11,18 @@ from ._months import parse_month
 
 class Command(BaseCommand):
     help = (
-        "Lists the months that would show as due or overdue without a bill if the property "
-        "tracked rent from --start (Property.rent_tracking_start, docs/rent-entries.md). Saves "
-        "nothing. Run it before setting the tracking start, and mark any month already settled "
+        "Lists the months that would show as due or overdue without a bill if the property's "
+        "tracking cut-off were --start, or with no cut-off (each tenancy from its first month) "
+        "without it (Property.rent_tracking_start, docs/rent-entries.md). Saves nothing. Run "
+        "it before importing or changing the cut-off, and mark any month already settled "
         "outside the app as not owed."
     )
 
     def add_arguments(self, parser):
         parser.add_argument("--property", required=True, help="The property's id.")
-        parser.add_argument("--start", required=True, help="The first tracked month (YYYY-MM).")
+        parser.add_argument(
+            "--start", help="The cut-off: the first month counted without a bill (YYYY-MM)."
+        )
 
     def handle(self, *args, **options):
         try:
@@ -27,7 +30,9 @@ class Command(BaseCommand):
         except (ValueError, Property.DoesNotExist):
             raise CommandError(f"No property with the id {options['property']!r}.") from None
         # An unsaved copy: the stored property doesn't change.
-        prop.rent_tracking_start = parse_month("--start", options["start"])
+        prop.rent_tracking_start = (
+            parse_month("--start", options["start"]) if options["start"] else None
+        )
         today = business_date()
 
         billed = set(
