@@ -34,7 +34,7 @@ function switchProperty() {
      leaving a thin strip of backdrop so it still reads as floating. It stops growing at 1800px
      so tables stay readable on very wide monitors. -->
 <template>
-  <main class="relative min-h-dvh overflow-hidden bg-[#020f2e] p-3 sm:p-5 lg:p-6">
+  <main class="relative min-h-dvh overflow-clip bg-[#020f2e] p-3 sm:p-5 lg:p-6">
     <WaveBackground />
 
     <div
@@ -61,7 +61,7 @@ function switchProperty() {
         <!-- The way back on the left, the screen's main control (the tenant search) centred. -->
         <div
           v-if="$slots.back || $slots.toolbar"
-          class="grid items-center gap-3 border-b px-6 py-4 sm:grid-cols-[1fr_minmax(0,36rem)_1fr] sm:px-10 lg:px-12"
+          class="grid items-center gap-3 border-b px-4 py-4 sm:grid-cols-[1fr_minmax(0,36rem)_1fr] sm:px-10 lg:px-12"
           data-testid="app-toolbar"
         >
           <div class="min-w-0 justify-self-start">
@@ -74,7 +74,7 @@ function switchProperty() {
 
         <!-- Each screen mounts its own layout, so the content eases in on every screen change. -->
         <div
-          class="flex-1 animate-page-in px-6 py-8 sm:px-10 lg:px-12 lg:py-10"
+          class="flex-1 animate-page-in px-4 py-6 sm:px-10 sm:py-8 lg:px-12 lg:py-10"
           data-testid="app-content"
         >
           <slot />

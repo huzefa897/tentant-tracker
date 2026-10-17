@@ -100,9 +100,10 @@ describe('RentEntryHistoryView', () => {
     })
     expect(view!.get('[data-testid="tenant-chip"]').text()).toBe('Shaik Zahid Ali · Flat 202')
     expect(rows()).toEqual([
-      ['October 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
-      ['September 2026', '₹15,450', '₹0', '₹15,450', 'Unpaid', 'View Summary'],
-      ['December 2025', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View Summary'],
+      // The fixtures' due date: each bill shows its own.
+      ['October 2026', '11 Oct 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View bill'],
+      ['September 2026', '11 Oct 2026', '₹15,450', '₹0', '₹15,450', 'Unpaid', 'View bill'],
+      ['December 2025', '11 Oct 2026', '₹15,750', '₹0', '₹15,750', 'Unpaid', 'View bill'],
     ])
     expect(view!.text()).not.toContain('July 2026')
   })
@@ -112,8 +113,8 @@ describe('RentEntryHistoryView', () => {
     await openHistory()
 
     const loading = view!.get('[data-testid="history-loading"]')
-    expect(loading.text()).toBe('Loading entries…')
-    expect(view!.text()).not.toContain('No rent entries yet.')
+    expect(loading.text()).toBe('Loading bills…')
+    expect(view!.text()).not.toContain('No bills yet.')
   })
 
   it('keeps the filters on screen while another filter loads', async () => {
@@ -125,7 +126,7 @@ describe('RentEntryHistoryView', () => {
     await flushPromises()
 
     expect(view!.get<HTMLSelectElement>('#filter-year').element.value).toBe('2025')
-    expect(view!.get('[data-testid="history-loading"]').text()).toBe('Loading entries…')
+    expect(view!.get('[data-testid="history-loading"]').text()).toBe('Loading bills…')
     expect(view!.find('[data-testid="history-row"]').exists()).toBe(false)
   })
 
@@ -146,7 +147,7 @@ describe('RentEntryHistoryView', () => {
     await openHistory()
 
     expect(rows()).toHaveLength(12)
-    expect(view!.get('[data-testid="page-position"]').text()).toBe('Page 1 of 2 · 14 entries')
+    expect(view!.get('[data-testid="page-position"]').text()).toBe('Page 1 of 2 · 14 bills')
     expect(totals()['Total billed']).toBe('₹1,89,000')
     expect(button('Newer').attributes('disabled')).toBeDefined()
 
@@ -154,7 +155,7 @@ describe('RentEntryHistoryView', () => {
     await flushPromises()
 
     expect(rows().map((row) => row[0])).toEqual(['October 2025', 'September 2025'])
-    expect(view!.get('[data-testid="page-position"]').text()).toBe('Page 2 of 2 · 14 entries')
+    expect(view!.get('[data-testid="page-position"]').text()).toBe('Page 2 of 2 · 14 bills')
     expect(totals()['Total billed']).toBe('₹31,500')
     expect(button('Older').attributes('disabled')).toBeDefined()
   })
@@ -199,6 +200,7 @@ describe('RentEntryHistoryView', () => {
 
     expect(view!.findAll('#filter-status option').map((o) => o.text())).toEqual([
       'All',
+      'Outstanding',
       'Unpaid',
       'Partially paid',
       'Paid',
@@ -213,9 +215,27 @@ describe('RentEntryHistoryView', () => {
       paymentStatus: 'partially_paid',
       page: 1,
     })
-    expect(rows().map((row) => [row[0], row[2], row[3], row[4]])).toEqual([
+    expect(rows().map((row) => [row[0], row[3], row[4], row[5]])).toEqual([
       ['September 2026', '₹5,000', '₹10,450', 'Partially paid'],
     ])
+  })
+
+  it('opens on the bills with money still to pay from the dashboard’s View bills', async () => {
+    fakeEntries.entries = [
+      october,
+      makeEntry({ ...september, totalPaid: 5000, outstanding: 10450, status: 'partially_paid' }),
+      makeEntry({ ...lastYear, totalPaid: 15750, outstanding: 0, status: 'paid' }),
+    ]
+    view = await openPage('/tenants/tenant-001/entries?status=outstanding')
+
+    expect(getEntries).toHaveBeenLastCalledWith(expect.any(String), 'tenant-001', {
+      billStatus: 'active',
+      year: undefined,
+      paymentStatus: 'outstanding',
+      page: 1,
+    })
+    expect(view.get<HTMLSelectElement>('#filter-status').element.value).toBe('outstanding')
+    expect(rows().map((row) => row[0])).toEqual(['October 2026', 'September 2026'])
   })
 
   it('names both filters when nothing matches', async () => {
@@ -226,7 +246,7 @@ describe('RentEntryHistoryView', () => {
     await view!.get('#filter-status').setValue('paid')
     await flushPromises()
 
-    expect(view!.text()).toContain('No paid entries in 2026.')
+    expect(view!.text()).toContain('No paid bills in 2026.')
   })
 
   it('shows a no-match message with Clear filters when a year has no bills', async () => {
@@ -236,7 +256,7 @@ describe('RentEntryHistoryView', () => {
     await view!.get('#filter-year').setValue('2025')
     await flushPromises()
 
-    expect(view!.text()).toContain('No entries in 2025.')
+    expect(view!.text()).toContain('No bills in 2025.')
     expect(view!.find('[data-testid="history-row"]').exists()).toBe(false)
 
     await view!
@@ -252,10 +272,10 @@ describe('RentEntryHistoryView', () => {
   it('shows the first-entry empty state when the tenant has no bills', async () => {
     await openHistory()
 
-    expect(view!.text()).toContain('No rent entries yet.')
+    expect(view!.text()).toContain('No bills yet.')
     expect(view!.find('section[aria-labelledby="entry-totals-heading"]').exists()).toBe(false)
 
-    await button('Add New Entry').trigger('click')
+    await button('New bill').trigger('click')
 
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-new'))
   })
@@ -264,7 +284,7 @@ describe('RentEntryHistoryView', () => {
     fakeEntries.entries = [{ ...october, billStatus: 'void' }]
     await openHistory()
 
-    expect(view!.text()).not.toContain('No rent entries yet.')
+    expect(view!.text()).not.toContain('No bills yet.')
     expect(view!.get('[data-testid="all-bills-void"]').text()).toContain(
       'No active bills. The only bill is void, so it’s hidden.',
     )
@@ -286,7 +306,7 @@ describe('RentEntryHistoryView', () => {
       await openHistory()
 
       expect(view!.find('[data-testid="history-loading"]').exists()).toBe(true)
-      expect(view!.text()).not.toContain('No rent entries yet.')
+      expect(view!.text()).not.toContain('No bills yet.')
       expect(view!.find('section[aria-labelledby="entry-totals-heading"]').exists()).toBe(false)
 
       vi.advanceTimersByTime(5000)
@@ -401,7 +421,7 @@ describe('RentEntryHistoryView', () => {
     fakeEntries.entries = [october]
     await openHistory()
 
-    await view!.get('[aria-label="View summary for October 2026"]').trigger('click')
+    await view!.get('[aria-label="View bill for October 2026"]').trigger('click')
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
 
     expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'oct' })
@@ -410,7 +430,7 @@ describe('RentEntryHistoryView', () => {
   it('goes back to the dashboard', async () => {
     await openHistory()
 
-    await button('Back to Dashboard').trigger('click')
+    await button('Back to dashboard').trigger('click')
     await flushPromises()
 
     expect(router.currentRoute.value.name).toBe('dashboard')

@@ -32,6 +32,7 @@ from properties.models import Property, Tenancy
 from .calculations import ZERO, entry_amounts
 from .legacy_ledger import RECEIPT_SUFFIX, Ledger, LedgerBill, LedgerPayment
 from .models import LegacyRecord, Payment, Receipt, RentEntry, tenancy_covers_month
+from .periods import period_for_bill
 from .services import receipt_problem, receipt_snapshot
 
 # Imported payments' idempotency keys are derived from their source ids, so they're stable.
@@ -204,6 +205,9 @@ class _Importer:
                     "wasn't imported from this source; remove one of them first"
                 )
                 return
+            # Its month's rental period, created with the tenancy's due day and the property's
+            # timing as they are now if it doesn't exist: the Sheet keeps no history of either.
+            period_for_bill(tenancy, bill.billing_month)
             entry = RentEntry.objects.create(
                 tenancy=tenancy,
                 billing_month=bill.billing_month,

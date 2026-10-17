@@ -3,9 +3,11 @@ import { ApiError } from '@/services/apiError'
 import type {
   BillStatus,
   CorrectedEntry,
+  DueStatus,
   EntryCorrectionInput,
   NewRentEntrySubmission,
   PaymentStatus,
+  PaymentTiming,
   RentEntry,
   RentEntryFilters,
   RentEntryInput,
@@ -29,6 +31,10 @@ export interface RentEntryDto {
   outstandingAmount: string
   // null for a void bill.
   paymentStatus: PaymentStatus | null
+  // All null on a bill from before due dates; dueStatus is also null on a void bill.
+  paymentTiming: PaymentTiming | null
+  dueDate: string | null // YYYY-MM-DD
+  dueStatus: DueStatus | null
   notes: string
   createdAt: string
   status: BillStatus
@@ -69,6 +75,9 @@ export interface CreateRentEntryDto {
 
 const STATUSES: readonly PaymentStatus[] = ['unpaid', 'partially_paid', 'paid']
 const BILL_STATUSES: readonly BillStatus[] = ['active', 'void']
+const TIMINGS: readonly PaymentTiming[] = ['prepaid', 'postpaid']
+const DUE_STATUSES: readonly DueStatus[] = ['settled', 'overdue', 'due_today', 'upcoming']
+const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 const MONEY = /^-?\d+\.\d{2}$/
 const UNITS = /^\d+\.\d{3}$/
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/
@@ -125,6 +134,18 @@ export function parseRentEntry(value: unknown): RentEntryDto {
   for (const key of ['replacesEntryId', 'replacedByEntryId'] as const) {
     if (value[key] !== null && (typeof value[key] !== 'string' || value[key] === '')) invalid(key)
   }
+  // The timing and due date come together or not at all (a bill from before due dates); a due
+  // status only with a due date, and never on a void bill.
+  if (value.dueDate === null) {
+    if (value.paymentTiming !== null) invalid('paymentTiming')
+    if (value.dueStatus !== null) invalid('dueStatus')
+  } else {
+    if (typeof value.dueDate !== 'string' || !DATE.test(value.dueDate)) invalid('dueDate')
+    if (!TIMINGS.includes(value.paymentTiming as PaymentTiming)) invalid('paymentTiming')
+    if (isVoid ? value.dueStatus !== null : !DUE_STATUSES.includes(value.dueStatus as DueStatus)) {
+      invalid('dueStatus')
+    }
+  }
 
   return value as unknown as RentEntryDto
 }
@@ -144,6 +165,9 @@ export function toRentEntry(dto: RentEntryDto): RentEntry {
     totalPaid: Number(dto.totalPaid),
     outstanding: Number(dto.outstandingAmount),
     status: dto.paymentStatus,
+    paymentTiming: dto.paymentTiming,
+    dueDate: dto.dueDate,
+    dueStatus: dto.dueStatus,
     notes: dto.notes,
     createdAt: dto.createdAt,
     billStatus: dto.status,
@@ -276,7 +300,8 @@ export const rentEntryService = {
     if (filters.billStatus && filters.billStatus !== 'active') params.status = filters.billStatus
     if (filters.year) params.year = filters.year
     if (filters.billingMonth) params.billing_month = filters.billingMonth
-    if (filters.paymentStatus) params.payment_status = filters.paymentStatus
+    if (filters.paymentStatus === 'outstanding') params.balance = 'outstanding'
+    else if (filters.paymentStatus) params.payment_status = filters.paymentStatus
     if (page > 1) params.page = page
 
     const data = await request(() => api.get(entriesUrl(propertyId, tenancyId), { params }))

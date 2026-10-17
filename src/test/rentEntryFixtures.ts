@@ -40,6 +40,14 @@ export function makeEntry(overrides: Partial<RentEntry> = {}): RentEntry {
     totalPaid,
     outstanding: isVoid ? 0 : calculateOutstanding(totalDue, totalPaid),
     status: isVoid ? null : getPaymentStatus(totalDue, totalPaid),
+    // September, postpaid, due on the 11th: due in October, not yet past.
+    paymentTiming: 'postpaid',
+    dueDate: '2026-10-11',
+    dueStatus: isVoid
+      ? null
+      : calculateOutstanding(totalDue, totalPaid) <= 0
+        ? 'settled'
+        : 'upcoming',
     notes: '',
     createdAt: '2026-10-03T06:00:00.000Z',
     billStatus: 'active',

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { onBeforeRouteLeave, useRouter, type RouteLocationRaw } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import { ArrowLeft, ChevronRight, CircleCheck, User } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -25,7 +25,8 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { EntrySaveError, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
-import { formatMonthValue } from '@/utils/date'
+import { formatDateValue, formatMonthValue, isValidMonthValue } from '@/utils/date'
+import { formatPaymentTiming } from '@/utils/rentCalculations'
 
 // From the route (`props: true`), so the entry always belongs to the tenant in the URL.
 const props = defineProps<{
@@ -33,7 +34,14 @@ const props = defineProps<{
 }>()
 
 const rentEntryStore = useRentEntryStore()
+const route = useRoute()
 const router = useRouter()
+
+// ?month=YYYY-MM starts the form on that month (the dashboard's Create bill for a missing one).
+const presetMonth = computed(() => {
+  const month = route.query.month
+  return typeof month === 'string' && isValidMonthValue(month) ? month : null
+})
 
 const {
   tenant,
@@ -87,6 +95,11 @@ const savedSummary = computed(() => {
   return {
     entry,
     month: formatMonthValue(entry.billingMonth),
+    // From the backend, which works it out from the property's timing and the tenant's due day.
+    due:
+      entry.dueDate && entry.paymentTiming
+        ? `${formatDateValue(entry.dueDate)} · ${formatPaymentTiming(entry.paymentTiming)}`
+        : null,
     rentChanged: previewedRent.value !== null && previewedRent.value !== entry.rentAmount,
     rateChanged: previewedRate.value !== null && previewedRate.value !== entry.electricityRate,
     charges: [
@@ -147,7 +160,7 @@ function handleDialogOpenChange(open: boolean) {
         @click="goToDashboard"
       >
         <ArrowLeft aria-hidden="true" />
-        Back to Dashboard
+        Back to dashboard
       </Button>
     </template>
 
@@ -158,7 +171,7 @@ function handleDialogOpenChange(open: boolean) {
       data-testid="tenant-loading"
     >
       <div class="mb-6">
-        <p class="text-3xl font-bold tracking-tight sm:text-4xl">Add Rent Entry</p>
+        <p class="text-3xl font-bold tracking-tight sm:text-4xl">New bill</p>
         <p class="mt-2 text-muted-foreground">Record monthly rent and utility charges.</p>
         <TenantChipSkeleton />
       </div>
@@ -185,7 +198,7 @@ function handleDialogOpenChange(open: boolean) {
         <p class="mt-1 max-w-sm text-sm text-muted-foreground">
           This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
         </p>
-        <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to Dashboard</Button>
+        <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
       </div>
     </template>
 
@@ -202,7 +215,7 @@ function handleDialogOpenChange(open: boolean) {
           <CircleCheck class="size-9" />
         </div>
         <h1 id="entry-saved-heading" class="text-2xl font-bold tracking-tight sm:text-3xl">
-          Entry saved
+          Bill saved
         </h1>
         <p class="mt-2 text-muted-foreground">
           {{ savedSummary.month }} for {{ tenant.name }}, Flat {{ tenant.flatNumber }}, has been
@@ -234,6 +247,10 @@ function handleDialogOpenChange(open: boolean) {
           <div class="flex justify-between gap-4">
             <dt class="text-muted-foreground">Billing month</dt>
             <dd class="font-medium">{{ savedSummary.month }}</dd>
+          </div>
+          <div v-if="savedSummary.due" class="flex justify-between gap-4" data-testid="saved-due">
+            <dt class="text-muted-foreground">Due date</dt>
+            <dd class="font-medium">{{ savedSummary.due }}</dd>
           </div>
           <div
             v-for="item in savedSummary.charges"
@@ -276,13 +293,13 @@ function handleDialogOpenChange(open: boolean) {
           <ChevronRight aria-hidden="true" />
         </Button>
         <Button class="mt-3 h-12 w-full text-base" @click="goToDashboard">
-          Back to Dashboard
+          Back to dashboard
         </Button>
       </section>
 
       <template v-else>
         <header class="mb-6">
-          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Add Rent Entry</h1>
+          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">New bill</h1>
           <p class="mt-2 text-muted-foreground">Record monthly rent and utility charges.</p>
           <p
             class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
@@ -311,6 +328,7 @@ function handleDialogOpenChange(open: boolean) {
         <RentEntryForm
           :key="tenant.id"
           :tenant="tenant"
+          :month="presetMonth"
           :save-error="saveError"
           :saving="saving"
           @save="handleSave"
@@ -323,7 +341,7 @@ function handleDialogOpenChange(open: boolean) {
     <AlertDialog :open="discardDialogOpen" @update:open="handleDialogOpenChange">
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Discard this entry?</AlertDialogTitle>
+          <AlertDialogTitle>Discard this bill?</AlertDialogTitle>
           <AlertDialogDescription>
             You have unsaved changes. If you leave now, they will be lost.
           </AlertDialogDescription>

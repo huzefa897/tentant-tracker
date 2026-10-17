@@ -36,14 +36,25 @@ describe('TenantDetails', () => {
     const wrapper = mount(TenantDetails, { props: { tenant } })
 
     expect(details(wrapper)).toEqual({
-      'Name of Tenant': 'Shaik Zahid Ali',
-      'Rent Amount': '₹15,000',
-      'Flat Number': '202',
-      'Rent Due Day (of month)': '11th',
-      'Electricity Per Unit': '₹6 / unit',
-      'Mobile Number': '83414 13827',
-      'Deposit Amount': '₹90,000',
+      Rent: '₹15,000',
+      'Due each month': '11th',
+      Electricity: '₹6 / unit',
+      Deposit: '₹90,000',
+      Mobile: '83414 13827',
     })
+  })
+
+  it('never repeats the name or flat in the details', () => {
+    const wrapper = mount(TenantDetails, { props: { tenant } })
+
+    expect(wrapper.get('dl').text()).not.toContain('Shaik Zahid Ali')
+    expect(Object.keys(details(wrapper))).not.toContain('Flat')
+  })
+
+  it('links the mobile number for calling', () => {
+    const wrapper = mount(TenantDetails, { props: { tenant } })
+
+    expect(wrapper.get('dl a').attributes('href')).toBe('tel:+918341413827')
   })
 
   it('updates when the tenant prop changes', async () => {
@@ -51,7 +62,7 @@ describe('TenantDetails', () => {
 
     await wrapper.setProps({ tenant: { ...tenant, name: 'Mohammed Yusuf', depositAmount: 100000 } })
 
-    expect(details(wrapper)['Deposit Amount']).toBe('₹1,00,000')
+    expect(details(wrapper).Deposit).toBe('₹1,00,000')
     expect(wrapper.get('h2').text()).toBe('Mohammed Yusuf')
   })
 
@@ -59,30 +70,30 @@ describe('TenantDetails', () => {
     const wrapper = mount(TenantDetails, { props: { tenant } })
     const buttons = wrapper.findAll('button')
 
-    await buttons.find((b) => b.text() === 'Add New Entry')!.trigger('click')
-    await buttons.find((b) => b.text() === 'Previous Entries')!.trigger('click')
+    await buttons.find((b) => b.text() === 'New bill')!.trigger('click')
+    await buttons.find((b) => b.text() === 'Bills')!.trigger('click')
 
     expect(wrapper.emitted('addEntry')).toHaveLength(1)
     expect(wrapper.emitted('viewEntries')).toHaveLength(1)
   })
 
-  it('shows the saved entry count on Previous Entries', () => {
+  it('shows the saved entry count on Bills', () => {
     const wrapper = mount(TenantDetails, { props: { tenant, entryCount: 2 } })
 
-    expect(wrapper.text()).toContain('Previous Entries (2)')
+    expect(wrapper.text()).toContain('Bills (2)')
   })
 
   it('shows a count of 0', () => {
     const wrapper = mount(TenantDetails, { props: { tenant, entryCount: 0 } })
 
-    expect(wrapper.text()).toContain('Previous Entries (0)')
+    expect(wrapper.text()).toContain('Bills (0)')
   })
 
   it('leaves out the count while it is unknown', () => {
     const wrapper = mount(TenantDetails, { props: { tenant, entryCount: null } })
 
-    expect(wrapper.text()).toContain('Previous Entries')
-    expect(wrapper.text()).not.toContain('Previous Entries (')
+    expect(wrapper.text()).toContain('Bills')
+    expect(wrapper.text()).not.toContain('Bills (')
   })
 
   it('shows the latest-entry slot between the name and the details', () => {

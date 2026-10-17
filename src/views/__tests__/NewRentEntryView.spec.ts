@@ -108,7 +108,7 @@ describe('NewRentEntryView', () => {
   it('loads the tenant and shows the form for the tenant in the URL', async () => {
     await openEntryPage('tenant-002')
 
-    expect(app!.get('h1').text()).toBe('Add Rent Entry')
+    expect(app!.get('h1').text()).toBe('New bill')
     expect(app!.get('[data-testid="tenant-chip"]').text()).toBe('Mohammed Yusuf · Flat 301')
     expect(app!.get<HTMLInputElement>('#rentAmount').element.value).toBe('18000')
   })
@@ -128,6 +128,7 @@ describe('NewRentEntryView', () => {
       expect.any(String),
     )
     expect(savedSummary()).toMatchObject({
+      'Due date': '11 Oct 2026 · Postpaid',
       'Total paid': '₹10,000',
       Outstanding: '₹5,750',
       Status: 'Partially paid',
@@ -156,10 +157,22 @@ describe('NewRentEntryView', () => {
     expect(app!.text()).toContain('Tenant not found')
     expect(app!.find('form').exists()).toBe(false)
 
-    await button('Back to Dashboard').trigger('click')
+    await button('Back to dashboard').trigger('click')
     await flushPromises()
 
     expect(router.currentRoute.value.name).toBe('dashboard')
+  })
+
+  it('starts on the month in the URL, as from a missing bill', async () => {
+    app = await openPage('/tenants/tenant-001/entries/new?month=2026-08')
+
+    expect(app.get<HTMLInputElement>('#billingMonth').element.value).toBe('2026-08')
+  })
+
+  it('ignores a malformed month in the URL', async () => {
+    app = await openPage('/tenants/tenant-001/entries/new?month=2026-13')
+
+    expect(app.get<HTMLInputElement>('#billingMonth').element.value).not.toBe('2026-13')
   })
 
   it('saves the bill through the API and confirms with the saved charges', async () => {
@@ -185,10 +198,12 @@ describe('NewRentEntryView', () => {
       },
       expect.stringMatching(/^[0-9a-f-]{36}$/),
     )
-    expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+    expect(app!.get('#entry-saved-heading').text()).toBe('Bill saved')
     expect(app!.text()).toContain('September 2026 for Shaik Zahid Ali, Flat 202')
     expect(savedSummary()).toEqual({
       'Billing month': 'September 2026',
+      // The backend's: the property's timing and the tenant's due day.
+      'Due date': '11 Oct 2026 · Postpaid',
       Rent: '₹15,000',
       'Electricity (75 units × ₹6)': '₹450',
       Water: '₹300',
@@ -251,7 +266,7 @@ describe('NewRentEntryView', () => {
     await fill(validEntry)
     await save()
 
-    await button('Back to Dashboard').trigger('click')
+    await button('Back to dashboard').trigger('click')
     await flushPromises()
 
     expect(router.currentRoute.value.name).toBe('dashboard')
@@ -276,7 +291,7 @@ describe('NewRentEntryView', () => {
 
     finish()
     await flushPromises()
-    expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+    expect(app!.get('#entry-saved-heading').text()).toBe('Bill saved')
   })
 
   it('stays on the page while the save is in flight, with no way to discard it', async () => {
@@ -292,7 +307,7 @@ describe('NewRentEntryView', () => {
     await app!.get('form').trigger('submit')
 
     expect(button('Cancel').attributes('disabled')).toBeDefined()
-    expect(button('Back to Dashboard').attributes('disabled')).toBeDefined()
+    expect(button('Back to dashboard').attributes('disabled')).toBeDefined()
     // Any other navigation (a link, Back) is refused without offering to discard.
     await router.push('/dashboard')
     await flushPromises()
@@ -301,8 +316,8 @@ describe('NewRentEntryView', () => {
 
     finish()
     await flushPromises()
-    expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
-    expect(button('Back to Dashboard').attributes('disabled')).toBeUndefined()
+    expect(app!.get('#entry-saved-heading').text()).toBe('Bill saved')
+    expect(button('Back to dashboard').attributes('disabled')).toBeUndefined()
   })
 
   it('still lets signing out leave while a save is in flight', async () => {
@@ -331,7 +346,7 @@ describe('NewRentEntryView', () => {
 
     // Trying again works.
     await save()
-    expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+    expect(app!.get('#entry-saved-heading').text()).toBe('Bill saved')
   })
 
   it('shows a duplicate-month error with a link to the saved entry, and keeps the form', async () => {
@@ -377,7 +392,7 @@ describe('NewRentEntryView', () => {
 
     const [first, retry] = createEntry.mock.calls
     expect(retry![3]).toBe(first![3])
-    expect(app!.get('#entry-saved-heading').text()).toBe('Entry saved')
+    expect(app!.get('#entry-saved-heading').text()).toBe('Bill saved')
     expect(fakeEntries.entries).toHaveLength(1)
     expect(fakeEntries.payments).toHaveLength(1)
   })
@@ -429,7 +444,7 @@ describe('NewRentEntryView', () => {
       await flushPromises()
 
       expect(router.currentRoute.value.name).toBe('rent-entry-new')
-      expect(body.get('[role="alertdialog"]').text()).toContain('Discard this entry?')
+      expect(body.get('[role="alertdialog"]').text()).toContain('Discard this bill?')
 
       await button('Keep editing').trigger('click')
       await flushPromises()
@@ -456,7 +471,7 @@ describe('NewRentEntryView', () => {
       await openEntryPage()
       await fill({ notes: 'Paid via UPI' })
 
-      await button('Back to Dashboard').trigger('click')
+      await button('Back to dashboard').trigger('click')
       await flushPromises()
 
       expect(router.currentRoute.value.name).toBe('rent-entry-new')

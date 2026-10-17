@@ -42,7 +42,7 @@ describe('LatestEntryCard', () => {
   it('emits view with the entry id', async () => {
     const wrapper = mount(LatestEntryCard, { props: { entry: makeEntry() } })
 
-    await wrapper.get('button[aria-label="View summary for September 2026"]').trigger('click')
+    await wrapper.get('button[aria-label="View bill for September 2026"]').trigger('click')
 
     expect(wrapper.emitted('view')).toEqual([['entry-1']])
   })

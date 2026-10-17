@@ -58,10 +58,10 @@ describe('TenantSelector', () => {
     expect(trigger(mountSelector()).text()).toContain('Search or select tenant...')
   })
 
-  it('shows the selected tenant as "Name - Flat N", even when it isn’t in the results', () => {
+  it('shows the selected tenant as "Name · Flat N", even when it isn’t in the results', () => {
     const selector = mountSelector({ tenants: [testTenants[1]!], selectedTenant: testTenants[0]! })
 
-    expect(trigger(selector).text()).toContain('Shaik Zahid Ali - Flat 202')
+    expect(trigger(selector).text()).toContain('Shaik Zahid Ali · Flat 202')
   })
 
   it('lists the results it is given', async () => {

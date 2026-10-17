@@ -31,6 +31,9 @@ import {
 const props = withDefaults(
   defineProps<{
     tenant: Tenant
+    // The month to start on (YYYY-MM), e.g. a missing bill's from the dashboard; this month
+    // otherwise.
+    month?: string | null
     // Shown above the actions, e.g. a duplicate-entry error from the store.
     saveError?: string | null
     // While the page saves: every field, Save and Cancel are disabled, so one click sends one
@@ -38,7 +41,7 @@ const props = withDefaults(
     // bill can't be discarded while it's being created.
     saving?: boolean
   }>(),
-  { saveError: null, saving: false },
+  { month: null, saveError: null, saving: false },
 )
 
 const emit = defineEmits<{
@@ -52,7 +55,7 @@ const PLACEHOLDER = '—'
 // Read once: the form is short-lived, and these are only defaults and the "future" limit.
 const now = new Date()
 const today = toDateValue(now)
-const initialMonth = toMonthValue(now)
+const initialMonth = props.month ?? toMonthValue(now)
 
 // The unfinished entry stays local; the store only receives it once Save succeeds.
 const billingMonth = ref(initialMonth)
@@ -224,7 +227,7 @@ const lockedClass =
       <section :class="sectionClass" aria-labelledby="rent-details-heading">
         <div>
           <h2 id="rent-details-heading" class="font-semibold">Rent details</h2>
-          <p class="text-sm text-muted-foreground">Billing month and rent for this entry.</p>
+          <p class="text-sm text-muted-foreground">Billing month and rent for this bill.</p>
         </div>
 
         <div class="grid gap-4 sm:grid-cols-2">
@@ -382,7 +385,7 @@ const lockedClass =
           <h2 id="payment-heading" class="font-semibold">Payment</h2>
           <p class="text-sm text-muted-foreground">
             Record a payment received with this bill, or leave it at 0 if nothing has been paid yet.
-            Later payments can be added from the entry's details.
+            Later payments can be added from the bill's page.
           </p>
         </div>
 
@@ -542,7 +545,7 @@ const lockedClass =
       <!-- Save first when stacked; Cancel on the left when side by side. -->
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
         <Button type="submit" class="h-12 text-base sm:order-last lg:order-none" :disabled="saving">
-          {{ saving ? 'Saving…' : 'Save Entry' }}
+          {{ saving ? 'Saving…' : 'Save bill' }}
         </Button>
         <Button
           type="button"

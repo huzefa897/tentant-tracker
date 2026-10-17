@@ -5,7 +5,9 @@ import {
   calculateElectricity,
   calculateOutstanding,
   calculateTotalDue,
+  formatDueStatus,
   formatPaymentStatus,
+  formatPaymentTiming,
   getPaymentStatus,
   sortPaymentsNewestFirst,
   sumEntryAmounts,
@@ -100,6 +102,24 @@ describe('formatPaymentStatus', () => {
     ['paid', 'Paid'],
   ] as const)('labels %s as %s', (status, label) => {
     expect(formatPaymentStatus(status)).toBe(label)
+  })
+})
+
+describe('formatDueStatus', () => {
+  it.each([
+    ['overdue', 'Overdue'],
+    ['due_today', 'Due today'],
+    ['upcoming', 'Upcoming'],
+    ['settled', 'Settled'],
+  ] as const)('labels %s as %s', (status, label) => {
+    expect(formatDueStatus(status)).toBe(label)
+  })
+})
+
+describe('formatPaymentTiming', () => {
+  it('labels prepaid and postpaid', () => {
+    expect(formatPaymentTiming('prepaid')).toBe('Prepaid')
+    expect(formatPaymentTiming('postpaid')).toBe('Postpaid')
   })
 })
 

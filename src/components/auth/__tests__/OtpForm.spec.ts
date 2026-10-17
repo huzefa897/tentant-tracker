@@ -55,6 +55,67 @@ describe('OtpForm', () => {
     expect(form.emitted('submit')?.[0]).toEqual(['924636'])
   })
 
+  it('emits a code once, and again only after it changes', async () => {
+    const form = mountForm()
+
+    await typeCode(form, '924636')
+    await typeCode(form, '924636')
+    expect(form.emitted('submit')).toEqual([['924636']])
+
+    await slots(form)[5]!.setValue('7')
+    await flushPromises()
+    expect(form.emitted('submit')).toEqual([['924636'], ['924637']])
+  })
+
+  it('verifies the same code again from the Verify button', async () => {
+    const form = mountForm()
+
+    await typeCode(form, '924636')
+    await form.get('form').trigger('submit')
+
+    expect(form.emitted('submit')).toEqual([['924636'], ['924636']])
+  })
+
+  it('offers the code from the SMS to the phone’s autofill', () => {
+    for (const slot of slots(mountForm())) {
+      expect(slot.attributes('autocomplete')).toBe('one-time-code')
+    }
+  })
+
+  it('clears the code and focuses the first slot', async () => {
+    const form = mountForm()
+    const clear = form.get('[data-testid="clear-code"]')
+    expect(clear.attributes('disabled')).toBeDefined()
+
+    await typeCode(form, '924')
+    expect(clear.attributes('disabled')).toBeUndefined()
+    await clear.trigger('click')
+    await flushPromises()
+
+    expect(slots(form).map((slot) => (slot.element as HTMLInputElement).value)).toEqual(
+      Array(6).fill(''),
+    )
+    expect(form.emitted('clear')).toHaveLength(1)
+    expect(document.activeElement).toBe(slots(form)[0]!.element)
+    expect(clear.attributes('disabled')).toBeDefined()
+  })
+
+  it('verifies a code typed again after clearing it', async () => {
+    const form = mountForm()
+
+    await typeCode(form, '924636')
+    await form.get('[data-testid="clear-code"]').trigger('click')
+    await typeCode(form, '924636')
+
+    expect(form.emitted('submit')).toEqual([['924636'], ['924636']])
+  })
+
+  it('cannot clear while verifying', () => {
+    expect(
+      mountForm({ loading: true }).get('[data-testid="clear-code"]').attributes('disabled'),
+    ).toBeDefined()
+  })
+
   it('does not emit while loading', async () => {
     const form = mountForm({ loading: true })
 

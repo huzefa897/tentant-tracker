@@ -13,13 +13,13 @@ function bones(wrapper: ReturnType<typeof mount>) {
 describe('LoadingRegion', () => {
   it('announces its label and hides the placeholder shapes from screen readers', () => {
     const wrapper = mount(LoadingRegion, {
-      props: { label: 'Loading entries…' },
+      props: { label: 'Loading bills…' },
       slots: { default: '<div data-testid="shape" />' },
     })
 
     expect(wrapper.attributes()).toMatchObject({ role: 'status', 'aria-busy': 'true' })
-    expect(wrapper.text()).toBe('Loading entries…')
-    expect(wrapper.get('.sr-only').text()).toBe('Loading entries…')
+    expect(wrapper.text()).toBe('Loading bills…')
+    expect(wrapper.get('.sr-only').text()).toBe('Loading bills…')
     expect(
       wrapper.get('[data-testid="shape"]').element.closest('[aria-hidden="true"]'),
     ).not.toBeNull()

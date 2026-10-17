@@ -38,7 +38,8 @@ import {
 import { useTenantStore } from '@/stores/tenant'
 import type { Payment, PaymentInput } from '@/types/payment'
 import { formatINR } from '@/utils/currency'
-import { formatMonthValue, formatTimestamp } from '@/utils/date'
+import { formatDateValue, formatMonthValue, formatTimestamp } from '@/utils/date'
+import { formatPaymentTiming } from '@/utils/rentCalculations'
 
 const props = defineProps<{
   tenantId: string
@@ -47,6 +48,8 @@ const props = defineProps<{
   from?: 'dashboard' | 'history'
   // Opened as the replacement just made by correcting a bill.
   corrected?: boolean
+  // Opened to record a payment: the dialog opens once the bill has loaded, if it takes one.
+  pay?: boolean
 }>()
 
 const rentEntryStore = useRentEntryStore()
@@ -105,6 +108,18 @@ function openPaymentDialog() {
   offerReplacement.value = false
   paymentDialogOpen.value = true
 }
+
+// Once per visit, so closing the dialog doesn't bring it back.
+let payOffered = false
+watch(
+  entry,
+  (loaded) => {
+    if (!props.pay || payOffered || !loaded) return
+    payOffered = true
+    if (loaded.billStatus !== 'void' && loaded.status !== 'paid') openPaymentDialog()
+  },
+  { immediate: true },
+)
 
 // The dialog stays open while a save is in flight, so its result (and any error) is seen.
 function setPaymentDialogOpen(open: boolean) {
@@ -322,7 +337,7 @@ function goToHistory() {
         @click="goToHistory"
       >
         <ArrowLeft aria-hidden="true" />
-        Back to Previous Entries
+        Back to bills
       </Button>
       <Button
         v-else
@@ -332,7 +347,7 @@ function goToHistory() {
         @click="backToDashboard"
       >
         <ArrowLeft aria-hidden="true" />
-        Back to Dashboard
+        Back to dashboard
       </Button>
     </template>
 
@@ -345,7 +360,7 @@ function goToHistory() {
         </div>
         <TenantChipSkeleton />
       </header>
-      <div class="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
+      <div class="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
         <SkeletonLines card heading :lines="5" />
         <SkeletonLines card heading :lines="3" action />
         <div class="rounded-xl border p-4 sm:p-6 lg:col-span-2 xl:order-last xl:col-span-3">
@@ -371,7 +386,7 @@ function goToHistory() {
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
         This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to Dashboard</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
     </div>
 
     <SlowLoadScreen
@@ -385,11 +400,11 @@ function goToHistory() {
       class="flex flex-col items-center rounded-2xl border border-dashed px-6 py-14 text-center"
       role="alert"
     >
-      <h1 class="text-lg font-semibold">Entry not found</h1>
+      <h1 class="text-lg font-semibold">Bill not found</h1>
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
-        This entry doesn't exist for {{ tenant.name }}, Flat {{ tenant.flatNumber }}.
+        This bill doesn't exist for {{ tenant.name }}, Flat {{ tenant.flatNumber }}.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToHistory">Back to Previous Entries</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToHistory">Back to bills</Button>
     </div>
 
     <template v-else>
@@ -400,6 +415,14 @@ function goToHistory() {
           </h1>
           <EntryStatusBadge :entry="entry" />
         </div>
+        <!-- Saved with the bill when it was created; a bill from before due dates has none. -->
+        <p
+          v-if="entry.dueDate && entry.paymentTiming"
+          class="mt-2 text-muted-foreground"
+          data-testid="due-date"
+        >
+          Due {{ formatDateValue(entry.dueDate) }} · {{ formatPaymentTiming(entry.paymentTiming) }}
+        </p>
         <p
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
           data-testid="tenant-chip"
@@ -492,7 +515,7 @@ function goToHistory() {
       </header>
 
       <!-- Wide screens: charges, payment and other in one row, payment history below it. -->
-      <div class="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
+      <div class="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
         <section aria-labelledby="charges-heading" class="rounded-xl border p-4 sm:p-6">
           <h2 id="charges-heading" class="mb-3 font-semibold">Charges</h2>
           <dl class="space-y-2 text-sm" data-testid="charges">
@@ -539,7 +562,7 @@ function goToHistory() {
           </p>
           <Button v-else class="mt-4 h-11 w-full" @click="openPaymentDialog">
             <Plus aria-hidden="true" />
-            Record Payment
+            Record payment
           </Button>
         </section>
 
@@ -599,7 +622,7 @@ function goToHistory() {
       <Dialog :open="paymentDialogOpen" @update:open="setPaymentDialogOpen">
         <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Record Payment</DialogTitle>
+            <DialogTitle>Record payment</DialogTitle>
             <DialogDescription>Money received against this bill.</DialogDescription>
           </DialogHeader>
           <RecordPaymentForm

@@ -9,7 +9,7 @@ import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
 
 // A tenant's most recent bill in full, for the dashboard, with the figures the backend
-// calculated, so they match Previous Entries and the summary page.
+// calculated, so they match Bills and the summary page.
 const props = defineProps<{
   entry: RentEntry
   // While its receipt is being prepared: the button waits.
@@ -43,7 +43,7 @@ const charges = computed(() => [
   >
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p class="text-xs text-muted-foreground">Latest entry</p>
+        <p class="text-xs text-muted-foreground">Latest bill</p>
         <div class="mt-0.5 flex flex-wrap items-center gap-2">
           <h3 id="latest-entry-heading" class="text-lg font-semibold">{{ month }}</h3>
           <EntryStatusBadge :entry="entry" />
@@ -65,10 +65,10 @@ const charges = computed(() => [
         <Button
           variant="outline"
           class="h-10"
-          :aria-label="`View summary for ${month}`"
+          :aria-label="`View bill for ${month}`"
           @click="emit('view', entry.id)"
         >
-          View Summary
+          View bill
           <ChevronRight aria-hidden="true" />
         </Button>
       </div>

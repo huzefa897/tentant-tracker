@@ -1,13 +1,15 @@
 import uuid
 from datetime import date
 from decimal import Decimal
+from unittest import mock
 
 from django.db import connection
 from django.db.migrations.exceptions import IrreversibleError
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
-from billing.models import Receipt, RentEntry
+from billing.models import Receipt, RentalPeriod, RentEntry
+from properties.models import Property
 from billing.services import (
     issue_payment_receipt,
     record_payment,
@@ -137,7 +139,9 @@ class BillVoidRollbackTests(TransactionTestCase):
         with self.assertRaisesMessage(IrreversibleError, "1 void bill(s)"):
             self.migrate_back()
 
-        self.assertEqual(RentEntry.objects.get(pk=self.entry.pk).status, "void")
+        # Only the status: the rollback undid the later migrations' columns before it stopped.
+        status = RentEntry.objects.filter(pk=self.entry.pk).values_list("status", flat=True)
+        self.assertEqual(status.get(), "void")
 
     def test_rolling_back_works_without_void_bills(self):
         self.migrate_back()
@@ -166,3 +170,81 @@ class ReceiptAuthorizedByBackfillTests(TransactionTestCase):
         receipt.refresh_from_db()
         self.assertEqual(receipt.authorized_by_name, "Issued By Then")
         self.assertEqual(receipt.received_by_name, "Issued By Then")
+
+
+class RentalPeriodBackfillTests(TransactionTestCase):
+    """billing.0012 gives every month that has a bill, void or not, its rental period, from the
+    property's timing and the tenancy's due day as they are when it runs."""
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def bill(self, tenancy, user, month, **fields):
+        return RentEntry.objects.create(
+            tenancy=tenancy,
+            billing_month=month,
+            rent_amount=Decimal("15000.00"),
+            electricity_units=Decimal("75.000"),
+            electricity_rate=Decimal("6.00"),
+            water_amount=Decimal("300.00"),
+            created_by=user,
+            **fields,
+        )
+
+    def test_each_billed_month_gets_one_period(self):
+        user = make_user()
+        prop = make_property()
+        tenancy = make_tenancy(prop, rent_due_day=31)
+        self.bill(
+            tenancy,
+            user,
+            date(2027, 1, 1),
+            status="void",
+            voided_at="2027-02-01T10:00:00Z",
+            voided_by=user,
+            void_reason="Entered twice",
+        )
+        self.bill(tenancy, user, date(2027, 1, 1))
+        self.bill(tenancy, user, date(2027, 2, 1))
+
+        MigrationExecutor(connection).migrate([("billing", "0010_receipt_authorized_by")])
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+        self.assertEqual(
+            list(
+                RentalPeriod.objects.order_by("period_month").values_list(
+                    "tenancy_id", "period_month", "payment_timing", "due_day", "due_date"
+                )
+            ),
+            [
+                (tenancy.pk, date(2027, 1, 1), "postpaid", 31, date(2027, 2, 28)),
+                (tenancy.pk, date(2027, 2, 1), "postpaid", 31, date(2027, 3, 31)),
+            ],
+        )
+
+
+class RentTrackingCutOffBackfillTests(TransactionTestCase):
+    """properties.0006 makes an empty cut-off mean every tenancy's months are owed, so the
+    properties that exist when it runs get this month as their cut-off: months before it still
+    count only with a bill. One that already has a cut-off keeps it."""
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+    def test_existing_properties_are_cut_off_at_this_month(self):
+        make_property(name="Property A")
+        tracked = make_property(name="Property B")
+        Property.objects.filter(pk=tracked.pk).update(rent_tracking_start=date(2026, 3, 1))
+
+        MigrationExecutor(connection).migrate([("properties", "0005_due_dates")])
+        executor = MigrationExecutor(connection)
+        with mock.patch("django.utils.timezone.localdate", return_value=date(2026, 10, 17)):
+            executor.migrate(executor.loader.graph.leaf_nodes())
+
+        self.assertEqual(
+            dict(Property.objects.values_list("name", "rent_tracking_start")),
+            {"Property A": date(2026, 10, 1), "Property B": date(2026, 3, 1)},
+        )

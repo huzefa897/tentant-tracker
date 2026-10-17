@@ -15,18 +15,25 @@ defineProps<{
     <h2 id="entry-totals-heading" class="mb-3 text-sm font-medium text-muted-foreground">
       Totals for this page
     </h2>
-    <dl class="grid gap-3 sm:grid-cols-3">
-      <div class="rounded-xl border bg-muted/40 p-4">
-        <dt class="text-xs text-muted-foreground">Total billed</dt>
-        <dd class="mt-1 text-lg font-semibold tabular-nums">{{ formatINR(totals.totalBilled) }}</dd>
-      </div>
-      <div class="rounded-xl border bg-muted/40 p-4">
-        <dt class="text-xs text-muted-foreground">Total paid</dt>
-        <dd class="mt-1 text-lg font-semibold tabular-nums">{{ formatINR(totals.totalPaid) }}</dd>
-      </div>
-      <div class="rounded-xl border bg-muted/40 p-4">
-        <dt class="text-xs text-muted-foreground">Outstanding</dt>
-        <dd class="mt-1 text-lg font-semibold tabular-nums">{{ formatINR(totals.outstanding) }}</dd>
+    <!-- Stacked rows on phones, each label beside its amount, so a large total (₹1,00,00,000 and
+         more on a page) has the width it needs; one strip of three from sm up. -->
+    <dl
+      class="grid divide-y rounded-xl border sm:grid-cols-3 sm:divide-x sm:divide-y-0"
+      data-testid="entry-totals"
+    >
+      <div
+        v-for="figure in [
+          { label: 'Total billed', amount: totals.totalBilled },
+          { label: 'Total paid', amount: totals.totalPaid },
+          { label: 'Outstanding', amount: totals.outstanding },
+        ]"
+        :key="figure.label"
+        class="flex min-w-0 items-baseline justify-between gap-3 px-3 py-2.5 sm:block sm:px-4 sm:py-3"
+      >
+        <dt class="text-sm text-muted-foreground">{{ figure.label }}</dt>
+        <dd class="font-semibold break-all tabular-nums sm:mt-0.5 sm:text-lg">
+          {{ formatINR(figure.amount) }}
+        </dd>
       </div>
     </dl>
     <p v-if="voidCount" class="mt-2 text-xs text-muted-foreground" data-testid="void-not-counted">

@@ -37,6 +37,7 @@ class LedgerSummaryTests(TestCase):
                 "properties": "1",
                 "memberships": "1",
                 "tenancies": "1",
+                "rental periods": "2",
                 "bills": "2",
                 "void bills": "0",
                 "payments": "2",

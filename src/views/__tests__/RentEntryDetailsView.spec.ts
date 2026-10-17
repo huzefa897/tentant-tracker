@@ -153,6 +153,31 @@ describe('RentEntryDetailsView', () => {
     expect(view!.text()).toContain('Unpaid')
   })
 
+  it('shows when the bill is due, and Overdue once that has passed with money owed', async () => {
+    fakeEntries.entries = [
+      makeEntry({
+        ...entry,
+        paymentTiming: 'postpaid',
+        dueDate: '2026-10-11',
+        dueStatus: 'overdue',
+      }),
+    ]
+    await openDetails('tenant-001', 'sep')
+
+    expect(view!.get('[data-testid="due-date"]').text()).toBe('Due 11 Oct 2026 · Postpaid')
+    expect(view!.get('[data-testid="due-status-badge"]').text()).toBe('Overdue')
+  })
+
+  it('shows no due date for a bill from before due dates', async () => {
+    fakeEntries.entries = [
+      makeEntry({ ...entry, paymentTiming: null, dueDate: null, dueStatus: null }),
+    ]
+    await openDetails('tenant-001', 'sep')
+
+    expect(view!.find('[data-testid="due-date"]').exists()).toBe(false)
+    expect(view!.find('[data-testid="due-status-badge"]').exists()).toBe(false)
+  })
+
   it('shows Fully paid for a paid bill', async () => {
     fakeEntries.entries = [
       makeEntry({ ...entry, totalPaid: 14712.5, outstanding: 0, status: 'paid' }),
@@ -160,7 +185,7 @@ describe('RentEntryDetailsView', () => {
     await openDetails('tenant-001', 'sep')
 
     expect(view!.get('[data-testid="fully-paid"]').text()).toBe('Fully paid')
-    expect(view!.findAll('button').some((b) => b.text() === 'Record Payment')).toBe(false)
+    expect(view!.findAll('button').some((b) => b.text() === 'Record payment')).toBe(false)
   })
 
   it('renders notes as text, and shows when the entry was created', async () => {
@@ -180,21 +205,21 @@ describe('RentEntryDetailsView', () => {
     expect(section('other').Notes).toBe('No notes')
   })
 
-  it('shows Entry not found for another tenant’s entry under this tenant’s URL', async () => {
+  it('shows Bill not found for another tenant’s entry under this tenant’s URL', async () => {
     await openDetails('tenant-002', 'sep')
 
-    expect(view!.get('[role="alert"]').text()).toContain('Entry not found')
+    expect(view!.get('[role="alert"]').text()).toContain('Bill not found')
     expect(view!.text()).not.toContain('₹14,000')
 
-    await button('Back to Previous Entries').trigger('click')
+    await button('Back to bills').trigger('click')
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
     expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
   })
 
-  it('shows Entry not found for an unknown entry id', async () => {
+  it('shows Bill not found for an unknown entry id', async () => {
     await openDetails('tenant-001', 'nope')
 
-    expect(view!.get('[role="alert"]').text()).toContain('Entry not found')
+    expect(view!.get('[role="alert"]').text()).toContain('Bill not found')
   })
 
   it('shows Tenant not found for an unknown tenant', async () => {
@@ -202,12 +227,12 @@ describe('RentEntryDetailsView', () => {
 
     expect(view!.get('[role="alert"]').text()).toContain('Tenant not found')
 
-    await button('Back to Dashboard').trigger('click')
+    await button('Back to dashboard').trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.name).toBe('dashboard')
   })
 
-  it('shows the slow-load screen rather than Entry not found, then auto-retries', async () => {
+  it('shows the slow-load screen rather than Bill not found, then auto-retries', async () => {
     vi.useFakeTimers()
     try {
       view = await openPage('/tenants/tenant-001/entries/sep', () => {
@@ -215,7 +240,7 @@ describe('RentEntryDetailsView', () => {
       })
 
       expect(view.text()).toContain("It's taking longer than usual")
-      expect(view.text()).not.toContain('Entry not found')
+      expect(view.text()).not.toContain('Bill not found')
 
       vi.advanceTimersByTime(10_000)
       await flushPromises()
@@ -230,7 +255,7 @@ describe('RentEntryDetailsView', () => {
     await openDetails('tenant-001', 'sep')
     const back = vi.spyOn(router, 'back')
 
-    await button('Back to Previous Entries').trigger('click')
+    await button('Back to bills').trigger('click')
 
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
     expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
@@ -240,8 +265,8 @@ describe('RentEntryDetailsView', () => {
   it('goes back to the dashboard, with the tenant selected, when opened from there', async () => {
     await openDetails('tenant-001', 'sep', '?from=dashboard')
 
-    expect(view!.text()).not.toContain('Back to Previous Entries')
-    await button('Back to Dashboard').trigger('click')
+    expect(view!.text()).not.toContain('Back to bills')
+    await button('Back to dashboard').trigger('click')
 
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('dashboard'))
     expect(useTenantStore().selectedTenantId).toBe('tenant-001')
@@ -250,7 +275,7 @@ describe('RentEntryDetailsView', () => {
   it('ignores an unknown entry point and goes back to the history', async () => {
     await openDetails('tenant-001', 'sep', '?from=elsewhere')
 
-    await button('Back to Previous Entries').trigger('click')
+    await button('Back to bills').trigger('click')
 
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
   })
@@ -310,7 +335,7 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
     }
 
     async function openDialog() {
-      await button('Record Payment').trigger('click')
+      await button('Record payment').trigger('click')
       await flushPromises()
     }
 
@@ -325,6 +350,20 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       await openDialog()
       await submitPayment(amount, notes)
     }
+
+    it('opens Record payment by itself when opened to record one (?pay=1)', async () => {
+      await openDetails('tenant-001', 'sep', '?from=dashboard&pay=1')
+
+      expect(dialog().text()).toContain('Record payment')
+
+      await dialog()
+        .findAll('button')
+        .find((b) => b.text() === 'Cancel')!
+        .trigger('click')
+      await flushPromises()
+
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+    })
 
     it('lists the bill’s payments from the API, each offering a receipt', async () => {
       await openDetails('tenant-001', 'sep')
@@ -469,7 +508,7 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       await dialog().get('form').trigger('submit')
       await flushPromises()
 
-      expect(button('Back to Previous Entries').attributes('disabled')).toBeDefined()
+      expect(button('Back to bills').attributes('disabled')).toBeDefined()
       await router.push('/tenants/tenant-001/entries/aug')
       await router.push('/tenants/tenant-001/entries')
       await flushPromises()
@@ -483,7 +522,7 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       fail()
       await flushPromises()
       expect(dialog().get('[role="alert"]').text()).toBe(PAYMENT_UNCONFIRMED_MESSAGE)
-      expect(button('Back to Previous Entries').attributes('disabled')).toBeUndefined()
+      expect(button('Back to bills').attributes('disabled')).toBeUndefined()
 
       await dialog().get('form').trigger('submit')
       await flushPromises()
@@ -809,7 +848,7 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
         await dialog().get('form').trigger('submit')
         await flushPromises()
 
-        expect(button('Back to Previous Entries').attributes('disabled')).toBeDefined()
+        expect(button('Back to bills').attributes('disabled')).toBeDefined()
         await router.push('/tenants/tenant-001/entries/aug')
         await flushPromises()
         expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
@@ -896,7 +935,7 @@ describe('RentEntryDetailsView for voiding and correcting bills', () => {
     expect(notice).toContain(REASON)
     expect(section('payment')).toMatchObject({ 'Total due': '₹14,712.50', Outstanding: '₹0' })
     expect(view!.find('[data-testid="void-owes-nothing"]').exists()).toBe(true)
-    expect(view!.findAll('button').some((b) => b.text() === 'Record Payment')).toBe(false)
+    expect(view!.findAll('button').some((b) => b.text() === 'Record payment')).toBe(false)
     expect(view!.find('[data-testid="bill-actions"]').exists()).toBe(false)
   })
 
