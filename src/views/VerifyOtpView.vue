@@ -110,26 +110,27 @@ async function handleChangeNumber() {
       @clear="authStore.clearError"
     />
 
-    <div class="mt-6 text-center text-sm text-muted-foreground" role="status">
+    <div class="mt-8 border-t pt-5 text-center text-sm text-muted-foreground" role="status">
       <p v-if="resent" class="mb-1">A new code has been sent.</p>
 
       <p v-if="resending" class="inline-flex items-center gap-2">
         <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
         Sending a new code…
       </p>
-      <p v-else-if="secondsLeft > 0">
-        Resend code in <span class="font-semibold text-foreground">{{ countdownLabel }}</span>
-      </p>
+      <!-- Resend stays in place, waiting out the countdown beside it. -->
       <p v-else>
         Didn't get a code?
         <Button
           variant="link"
           class="h-auto p-0 font-semibold"
-          :disabled="authStore.loading"
+          :disabled="authStore.loading || secondsLeft > 0"
           @click="handleResend"
         >
           Resend code
         </Button>
+        <template v-if="secondsLeft > 0">
+          in <span class="font-semibold text-foreground">{{ countdownLabel }}</span>
+        </template>
       </p>
     </div>
     <div ref="recaptcha-host" />
