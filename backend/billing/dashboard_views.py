@@ -6,15 +6,18 @@ Each read first creates the property's rental periods that are due by now and do
 (periods.ensure_property_periods), so the dashboard is right after any downtime without a
 scheduled job."""
 
+import uuid
+
 from django.utils import timezone
 from rest_framework import exceptions, serializers, status, views
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from properties.models import Tenancy, business_date
+from properties.queries import properties_for_user
 from properties.roles import Capability, role_can
 
-from . import dashboard
+from . import dashboard, overdue
 from .models import RentalPeriod
 from .periods import ensure_property_periods
 from .serializers import BillingMonthField, format_month, money, person_name
@@ -107,12 +110,7 @@ class RentalPeriodsView(DashboardView):
             raise exceptions.ValidationError(
                 {"preparation": f"Choose one of: {', '.join(dashboard.PREPARATION_FILTERS)}."}
             )
-        month = None
-        if "month" in params:
-            try:
-                month = BillingMonthField().to_internal_value(params["month"])
-            except exceptions.ValidationError as error:
-                raise exceptions.ValidationError({"month": error.detail}) from None
+        month = month_param(params)
 
         today = self.today()
         rows = dashboard.periods(prop, today, timing=timing, preparation=preparation, month=month)
@@ -228,3 +226,89 @@ class PeriodNotOwedView(DashboardView):
             },
             status=status.HTTP_201_CREATED if result.created else status.HTTP_200_OK,
         )
+
+
+def month_param(params):
+    """?month=YYYY-MM as the month's first day, or None without one."""
+    if "month" not in params:
+        return None
+    try:
+        return BillingMonthField().to_internal_value(params["month"])
+    except exceptions.ValidationError as error:
+        raise exceptions.ValidationError({"month": error.detail}) from None
+
+
+class OverdueBillsView(views.APIView):
+    """GET /api/v1/overdue-bills/: every active bill past its due date with money still to pay,
+    across the user's properties, grouped by tenancy (the oldest overdue bill first). Amounts
+    leave out void bills and reversed payments, as the bill page does. ?property=<id> keeps one
+    of the user's properties (another is 400, never a hint it exists), ?month=YYYY-MM one
+    billing month, ?search= a tenant name or flat ("Flat 102" finds 102). The totals are the
+    filtered list's.
+
+    Only bills: a month without one is on the rent-due list, never treated as paid. Not paged:
+    one group per tenancy that owes, each with its overdue months."""
+
+    def get(self, request):
+        params = request.query_params
+        properties = properties_for_user(request.user)
+
+        property_id = None
+        if params.get("property"):
+            try:
+                property_id = uuid.UUID(params["property"])
+            except ValueError:
+                property_id = None
+            if property_id is None or not properties.filter(pk=property_id).exists():
+                raise exceptions.ValidationError({"property": "Choose one of your properties."})
+        month = month_param(params)
+        search = params.get("search", "")
+        if len(search) > overdue.SEARCH_MAX_LENGTH:
+            raise exceptions.ValidationError(
+                {"search": f"Search for {overdue.SEARCH_MAX_LENGTH} characters or fewer."}
+            )
+
+        today = business_date()
+        bills = overdue.overdue_bills(
+            properties, today, property_id=property_id, month=month, search=search
+        )
+        tenancies = overdue.by_tenancy(bills, today)
+        return Response(
+            {
+                "asOfDate": today.isoformat(),
+                "generatedAt": serializers.DateTimeField().to_representation(timezone.now()),
+                "currency": "INR",
+                "tenantCount": len(tenancies),
+                "billCount": sum(len(group.bills) for group in tenancies),
+                "totalOutstandingAmount": money(
+                    sum((group.outstanding for group in tenancies), 0)
+                ),
+                "tenants": [self.tenancy(group, today) for group in tenancies],
+            }
+        )
+
+    @staticmethod
+    def tenancy(group, today):
+        return {
+            "tenancyId": str(group.tenancy_id),
+            "name": group.name,
+            "flatNumber": group.flat_number,
+            "tenancyStatus": group.tenancy_status,
+            "propertyId": str(group.property_id),
+            "propertyName": group.property_name,
+            "overdueBillCount": len(group.bills),
+            "outstandingAmount": money(group.outstanding),
+            "oldestDueDate": group.oldest_due_date.isoformat(),
+            "bills": [
+                {
+                    "id": str(bill["id"]),
+                    "billingMonth": format_month(bill["billing_month"]),
+                    "dueDate": bill["period_due_date"].isoformat(),
+                    "daysOverdue": (today - bill["period_due_date"]).days,
+                    "totalAmount": money(bill["due_total"]),
+                    "paidAmount": money(bill["paid_total"]),
+                    "outstandingAmount": money(bill["outstanding_total"]),
+                }
+                for bill in group.bills
+            ],
+        }

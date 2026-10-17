@@ -24,7 +24,13 @@ import { downloadReceiptPdf } from '@/utils/receiptDownload'
 import DashboardView from '@/views/DashboardView.vue'
 import { SEARCH_DEBOUNCE_MS } from '@/components/tenant/TenantSelector.vue'
 import { resetTenantService } from '@/test/mocks/tenantService'
-import { fakeDashboard, makeSummary, makeUnbilledPeriod } from '@/test/mocks/dashboardService'
+import {
+  fakeDashboard,
+  makeOverdueBill,
+  makeOverdueTenant,
+  makeSummary,
+  makeUnbilledPeriod,
+} from '@/test/mocks/dashboardService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
@@ -36,6 +42,9 @@ vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 let view: VueWrapper | undefined
 const body = new DOMWrapper(document.body)
+// Where the dashboard opens: overdue bills, unless a describe chooses rent due.
+const RENT_DUE = '/dashboard?view=rent-due'
+let openAt = '/dashboard'
 
 // beforeOpen runs with the fresh pinia active, before navigating to the dashboard.
 async function mountView(beforeOpen?: () => Promise<void>) {
@@ -43,7 +52,7 @@ async function mountView(beforeOpen?: () => Promise<void>) {
   const pinia = createPinia()
   setActivePinia(pinia)
   await beforeOpen?.()
-  await router.push('/dashboard')
+  await router.push(openAt)
   view = mount(DashboardView, { global: { plugins: [pinia, router] }, attachTo: document.body })
   await flushPromises()
   return view
@@ -61,15 +70,16 @@ beforeEach(() => {
 afterEach(() => {
   view?.unmount()
   view = undefined
+  openAt = '/dashboard'
   vi.useRealTimers()
 })
 
 describe('DashboardView', () => {
-  it('loads tenants but opens on rent due until one is selected', async () => {
+  it('loads tenants but opens on overdue bills until one is selected', async () => {
     await mountView()
 
     expect(useTenantStore().results).toHaveLength(3)
-    expect(view!.get('h1').text()).toBe('Rent due')
+    expect(view!.get('h1').text()).toBe('Overdue bills')
     expect(view!.find('#tenant-name').exists()).toBe(false)
   })
 
@@ -410,6 +420,10 @@ describe('DashboardView', () => {
   })
 
   describe('property', () => {
+    beforeEach(() => {
+      openAt = RENT_DUE
+    })
+
     const annex = {
       id: '6f1c2a4e-0000-4000-8000-000000000002',
       name: 'Annex',
@@ -484,6 +498,10 @@ describe('DashboardView', () => {
   })
 
   describe('rent due', () => {
+    beforeEach(() => {
+      openAt = RENT_DUE
+    })
+
     function shownMonths() {
       return view!
         .findAll('[data-testid="period-row"]')
@@ -656,6 +674,231 @@ describe('DashboardView', () => {
 
       expect(view!.find('[data-testid="pending-payments"]').exists()).toBe(true)
       expect(dashboardService.getSummary).toHaveBeenCalledTimes(2)
+    })
+  })
+  describe('overdue bills', () => {
+    const annex = {
+      id: '6f1c2a4e-0000-4000-8000-000000000002',
+      name: 'Annex',
+      role: 'manager' as const,
+    }
+
+    function shownTenants() {
+      return view!.findAll('[data-testid="overdue-tenant"]').map((tenant) => ({
+        name: tenant.get('[data-testid="overdue-tenant-name"]').text(),
+        outstanding: tenant.get('[data-testid="overdue-tenant-outstanding"]').text(),
+        months: tenant.findAll('[data-testid="overdue-bill"] th').map((th) => th.text()),
+      }))
+    }
+
+    async function search(text: string) {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await view!.get('[data-testid="overdue-search"]').setValue(text)
+      vi.advanceTimersByTime(300)
+      vi.useRealTimers()
+      await flushPromises()
+    }
+
+    it('opens on every overdue month, grouped by tenant, the oldest first', async () => {
+      await mountView()
+
+      expect(dashboardService.getOverdueBills).toHaveBeenCalledWith({
+        propertyId: null,
+        month: null,
+        search: '',
+      })
+      expect(shownTenants()).toEqual([
+        {
+          name: 'Mohammed Yusuf',
+          outstanding: '₹31,500',
+          months: ['August 2026', 'September 2026'],
+        },
+        { name: 'Shaik Zahid Ali', outstanding: '₹5,750', months: ['September 2026'] },
+      ])
+      expect(view!.get('[data-testid="overdue-totals"]').text()).toBe(
+        '₹37,250 outstanding · 2 tenants · 3 overdue bills',
+      )
+      const zahid = view!.findAll('[data-testid="overdue-tenant"]')[1]!
+      expect(zahid.text()).toContain('Flat 202')
+      expect(zahid.text()).toContain('1 overdue bill')
+      expect(
+        zahid
+          .get('[data-testid="overdue-bill"]')
+          .findAll('td')
+          .map((td) => td.text()),
+      ).toEqual(['11 Oct 2026 4 days overdue', '₹15,750', '₹10,000', '₹5,750', 'View bill'])
+      expect(view!.get('[data-testid="updated-at"]').text()).toBe('Updated just now')
+    })
+
+    it('opens a bill, and a tenant’s bills', async () => {
+      await mountView()
+
+      await view!
+        .get('button[aria-label="View bill: August 2026 · Mohammed Yusuf"]')
+        .trigger('click')
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
+      expect(router.currentRoute.value.params).toEqual({
+        tenantId: 'tenant-002',
+        entryId: 'entry-002',
+      })
+      expect(router.currentRoute.value.query).toEqual({ from: 'dashboard' })
+
+      view!.unmount()
+      view = undefined
+      await mountView()
+      await view!.findAll('[data-testid="overdue-tenant-name"]')[1]!.trigger('click')
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
+    })
+
+    it('selects another property’s bill’s property before opening it', async () => {
+      vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty, annex]))
+      fakeDashboard.overdueTenants = [
+        makeOverdueTenant({ propertyId: annex.id, propertyName: 'Annex' }),
+      ]
+      await mountView(async () => {
+        await useAuthStore().init()
+        await useAccessStore().load()
+        useAccessStore().selectProperty(testProperty.id)
+      })
+      expect(view!.get('[data-testid="overdue-tenant"]').text()).toContain('Annex · Flat 202')
+
+      await view!
+        .get('button[aria-label="View bill: September 2026 · Shaik Zahid Ali"]')
+        .trigger('click')
+
+      expect(useAccessStore().selectedPropertyId).toBe(annex.id)
+      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
+    })
+
+    it('searches and filters, then clears back to the full list', async () => {
+      vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty, annex]))
+      await mountView(async () => {
+        await useAuthStore().init()
+        await useAccessStore().load()
+        useAccessStore().selectProperty(testProperty.id)
+      })
+
+      await search('flat 202')
+      expect(shownTenants().map((tenant) => tenant.name)).toEqual(['Shaik Zahid Ali'])
+
+      await view!.get('[data-testid="overdue-filter-month"]').setValue('2026-08')
+      await flushPromises()
+      expect(dashboardService.getOverdueBills).toHaveBeenLastCalledWith({
+        propertyId: null,
+        month: '2026-08',
+        search: 'flat 202',
+      })
+      expect(view!.find('[data-testid="overdue-tenant"]').exists()).toBe(false)
+      expect(view!.get('[data-testid="overdue-empty"]').text()).toContain(
+        'No overdue bills match your filters.',
+      )
+
+      await view!.get('[data-testid="overdue-filter-property"]').setValue(annex.id)
+      await flushPromises()
+      expect(dashboardService.getOverdueBills).toHaveBeenLastCalledWith({
+        propertyId: annex.id,
+        month: '2026-08',
+        search: 'flat 202',
+      })
+
+      await view!.get('[data-testid="overdue-empty"] button').trigger('click')
+      await flushPromises()
+
+      expect(dashboardService.getOverdueBills).toHaveBeenLastCalledWith({
+        propertyId: null,
+        month: null,
+        search: '',
+      })
+      expect(shownTenants()).toHaveLength(2)
+      expect((view!.get('[data-testid="overdue-search"]').element as HTMLInputElement).value).toBe(
+        '',
+      )
+    })
+
+    it('offers no property filter with a single property', async () => {
+      await mountView()
+
+      expect(view!.find('[data-testid="overdue-filter-property"]').exists()).toBe(false)
+      expect(view!.get('[data-testid="overdue-tenant"]').text()).not.toContain('Test Towers')
+    })
+
+    it('says so when nothing is overdue', async () => {
+      fakeDashboard.overdueTenants = []
+      await mountView()
+
+      expect(view!.get('[data-testid="overdue-empty"]').text()).toBe('No overdue bills.')
+      expect(view!.find('[data-testid="overdue-totals"]').exists()).toBe(false)
+    })
+
+    it('shows an error with Try again, never “No overdue bills”, when loading fails', async () => {
+      vi.mocked(dashboardService.getOverdueBills).mockRejectedValue(
+        new ApiError('unavailable', 'down'),
+      )
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await mountView()
+      vi.useRealTimers()
+
+      expect(view!.get('[data-testid="overdue-error"]').text()).toContain(
+        'Overdue bills are unavailable right now.',
+      )
+      expect(view!.text()).not.toContain('No overdue bills')
+
+      vi.mocked(dashboardService.getOverdueBills)
+        .mockReset()
+        .mockResolvedValue({
+          asOfDate: '2026-10-15',
+          generatedAt: '2026-10-15T06:30:00Z',
+          tenantCount: 1,
+          billCount: 1,
+          totalOutstanding: 5750,
+          tenants: [makeOverdueTenant()],
+        })
+      await view!.get('[data-testid="overdue-error"] button').trigger('click')
+      await flushPromises()
+
+      expect(shownTenants().map((tenant) => tenant.name)).toEqual(['Shaik Zahid Ali'])
+    })
+
+    it('keeps the list, with its time, when a refresh fails; a refresh shows newer bills', async () => {
+      await mountView()
+      vi.mocked(dashboardService.getOverdueBills).mockRejectedValueOnce(
+        new ApiError('network', 'offline'),
+      )
+
+      await view!.get('[data-testid="refresh"]').trigger('click')
+      await flushPromises()
+
+      expect(view!.get('[data-testid="refresh-error"]').text()).toContain('Couldn’t refresh')
+      expect(shownTenants()).toHaveLength(2)
+
+      fakeDashboard.overdueTenants = [
+        makeOverdueTenant({ bills: [makeOverdueBill({ outstanding: 1000 })] }),
+      ]
+      await view!.get('[data-testid="refresh"]').trigger('click')
+      await flushPromises()
+
+      expect(view!.find('[data-testid="refresh-error"]').exists()).toBe(false)
+      expect(shownTenants()).toEqual([
+        { name: 'Shaik Zahid Ali', outstanding: '₹1,000', months: ['September 2026'] },
+      ])
+    })
+
+    it('switches to rent due and back', async () => {
+      await mountView()
+
+      await view!.get('[data-testid="dashboard-tab-rent-due"]').trigger('click')
+      await flushPromises()
+
+      expect(router.currentRoute.value.query).toEqual({ view: 'rent-due' })
+      expect(view!.get('h1').text()).toBe('Rent due')
+      expect(dashboardService.getSummary).toHaveBeenCalledTimes(1)
+
+      await view!.get('[data-testid="dashboard-tab-overdue"]').trigger('click')
+      await flushPromises()
+
+      expect(view!.get('h1').text()).toBe('Overdue bills')
+      expect(dashboardService.getOverdueBills).toHaveBeenCalledTimes(2)
     })
   })
 })

@@ -2,6 +2,10 @@ import { vi } from 'vitest'
 
 import type {
   DashboardSummary,
+  OverdueBill,
+  OverdueBills,
+  OverdueFilters,
+  OverdueTenant,
   PeriodFilters,
   RentalPeriodPage,
   RentalPeriodRow,
@@ -9,7 +13,8 @@ import type {
 
 // A fake dashboardService, mocked for every test in src/test/setup.ts (the dashboard is where
 // sign-in lands, so no test may reach the API through it). It filters and pages
-// fakeDashboard.periods like the API; the summary is what tests set. markNotOwed removes the
+// fakeDashboard.periods like the API; the summary is what tests set. getOverdueBills filters
+// and totals fakeDashboard.overdueTenants. markNotOwed removes the
 // month, as the backend's list would. Fictional people; the ids are the tenant fake's
 // (tenant-001…).
 
@@ -75,6 +80,72 @@ export function makeSummary(overrides: Partial<DashboardSummary> = {}): Dashboar
   }
 }
 
+// Shaik Zahid Ali's September bill, part paid: ₹5,750 left, overdue 4 days on 15 October.
+export function makeOverdueBill(overrides: Partial<OverdueBill> = {}): OverdueBill {
+  return {
+    id: 'entry-001',
+    billingMonth: '2026-09',
+    dueDate: '2026-10-11',
+    daysOverdue: 4,
+    totalAmount: 15750,
+    paidAmount: 10000,
+    outstanding: 5750,
+    ...overrides,
+  }
+}
+
+// A tenant with these bills (oldest due first); the count, total and oldest date follow them.
+export function makeOverdueTenant(
+  overrides: Partial<
+    Omit<OverdueTenant, 'overdueBillCount' | 'outstanding' | 'oldestDueDate'>
+  > = {},
+): OverdueTenant {
+  const bills = overrides.bills ?? [makeOverdueBill()]
+  return {
+    tenantId: 'tenant-001',
+    name: 'Shaik Zahid Ali',
+    flatNumber: '202',
+    tenancyStatus: 'current',
+    propertyId: '6f1c2a4e-0000-4000-8000-000000000001',
+    propertyName: 'Test Towers',
+    ...overrides,
+    bills,
+    overdueBillCount: bills.length,
+    outstanding: bills.reduce((sum, bill) => sum + bill.outstanding, 0),
+    oldestDueDate: bills[0]!.dueDate,
+  }
+}
+
+// Mohammed Yusuf owes August and September in full; then Shaik Zahid Ali's September.
+function defaultOverdueTenants(): OverdueTenant[] {
+  return [
+    makeOverdueTenant({
+      tenantId: 'tenant-002',
+      name: 'Mohammed Yusuf',
+      flatNumber: '301',
+      bills: [
+        makeOverdueBill({
+          id: 'entry-002',
+          billingMonth: '2026-08',
+          dueDate: '2026-09-10',
+          daysOverdue: 35,
+          paidAmount: 0,
+          outstanding: 15750,
+        }),
+        makeOverdueBill({
+          id: 'entry-003',
+          billingMonth: '2026-09',
+          dueDate: '2026-10-10',
+          daysOverdue: 5,
+          paidAmount: 0,
+          outstanding: 15750,
+        }),
+      ],
+    }),
+    makeOverdueTenant(),
+  ]
+}
+
 function defaults() {
   return {
     summary: makeSummary(),
@@ -91,6 +162,8 @@ function defaults() {
       }),
     ],
     pageSize: 20,
+    overdueTenants: defaultOverdueTenants(),
+    overdueAsOf: '2026-10-15',
   }
 }
 
@@ -124,10 +197,43 @@ export function periodPage(
   }
 }
 
+// The overdue list for these filters, as the API filters and totals it.
+export function overdueBills(
+  filters: OverdueFilters = { propertyId: null, month: null, search: '' },
+): OverdueBills {
+  const search = filters.search
+    .trim()
+    .toLowerCase()
+    .replace(/^flat\s+/, '')
+  const tenants = fakeDashboard.overdueTenants
+    .filter((tenant) => !filters.propertyId || tenant.propertyId === filters.propertyId)
+    .filter(
+      (tenant) =>
+        !search ||
+        tenant.name.toLowerCase().includes(search) ||
+        tenant.flatNumber.toLowerCase().includes(search),
+    )
+    .map((tenant) => ({
+      tenant,
+      bills: tenant.bills.filter((bill) => !filters.month || bill.billingMonth === filters.month),
+    }))
+    .filter(({ bills }) => bills.length > 0)
+    .map(({ tenant, bills }) => makeOverdueTenant({ ...tenant, bills }))
+  return {
+    asOfDate: fakeDashboard.overdueAsOf,
+    generatedAt: `${fakeDashboard.overdueAsOf}T06:30:00Z`,
+    tenantCount: tenants.length,
+    billCount: tenants.reduce((sum, tenant) => sum + tenant.bills.length, 0),
+    totalOutstanding: tenants.reduce((sum, tenant) => sum + tenant.outstanding, 0),
+    tenants,
+  }
+}
+
 export const dashboardService = {
   getSummary: vi.fn(),
   getRentalPeriods: vi.fn(),
   markNotOwed: vi.fn(),
+  getOverdueBills: vi.fn(),
 }
 
 export function resetDashboardService() {
@@ -138,6 +244,9 @@ export function resetDashboardService() {
     .mockImplementation(async (_propertyId: string, filters?: PeriodFilters, page?: number) =>
       periodPage(filters, page),
     )
+  dashboardService.getOverdueBills
+    .mockReset()
+    .mockImplementation(async (filters?: OverdueFilters) => overdueBills(filters))
   dashboardService.markNotOwed
     .mockReset()
     .mockImplementation(async (_propertyId: string, periodId: string) => {

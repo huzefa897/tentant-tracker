@@ -4,6 +4,7 @@ import { api } from '@/services/api'
 import { ApiError } from '@/services/apiError'
 import {
   dashboardService,
+  parseOverdueBills,
   parsePeriodPage,
   parseRentalPeriod,
   parseSummary,
@@ -166,7 +167,123 @@ describe('parsePeriodPage', () => {
   })
 })
 
+const overdueDto = {
+  asOfDate: '2026-10-15',
+  generatedAt: '2026-10-15T06:30:00Z',
+  currency: 'INR',
+  tenantCount: 1,
+  billCount: 1,
+  totalOutstandingAmount: '5750.00',
+  tenants: [
+    {
+      tenancyId: '0b9d7a1e-0000-4000-8000-000000000101',
+      name: 'Shaik Zahid Ali',
+      flatNumber: '202',
+      tenancyStatus: 'current',
+      propertyId: PROPERTY_ID,
+      propertyName: 'Saleem Towers',
+      overdueBillCount: 1,
+      outstandingAmount: '5750.00',
+      oldestDueDate: '2026-10-11',
+      bills: [
+        {
+          id: '7a0d7a1e-0000-4000-8000-000000000301',
+          billingMonth: '2026-09',
+          dueDate: '2026-10-11',
+          daysOverdue: 4,
+          totalAmount: '15750.00',
+          paidAmount: '10000.00',
+          outstandingAmount: '5750.00',
+        },
+      ],
+    },
+  ],
+}
+
+function overdueWith(tenant: Record<string, unknown>, bill: Record<string, unknown> = {}) {
+  const [first] = overdueDto.tenants
+  return {
+    ...overdueDto,
+    tenants: [{ ...first, bills: [{ ...first!.bills[0], ...bill }], ...tenant }],
+  }
+}
+
+describe('parseOverdueBills', () => {
+  it('maps tenants and their overdue bills, money as numbers', () => {
+    expect(parseOverdueBills(overdueDto)).toEqual({
+      asOfDate: '2026-10-15',
+      generatedAt: '2026-10-15T06:30:00Z',
+      tenantCount: 1,
+      billCount: 1,
+      totalOutstanding: 5750,
+      tenants: [
+        {
+          tenantId: '0b9d7a1e-0000-4000-8000-000000000101',
+          name: 'Shaik Zahid Ali',
+          flatNumber: '202',
+          tenancyStatus: 'current',
+          propertyId: PROPERTY_ID,
+          propertyName: 'Saleem Towers',
+          overdueBillCount: 1,
+          outstanding: 5750,
+          oldestDueDate: '2026-10-11',
+          bills: [
+            {
+              id: '7a0d7a1e-0000-4000-8000-000000000301',
+              billingMonth: '2026-09',
+              dueDate: '2026-10-11',
+              daysOverdue: 4,
+              totalAmount: 15750,
+              paidAmount: 10000,
+              outstanding: 5750,
+            },
+          ],
+        },
+      ],
+    })
+  })
+
+  it('maps an empty list', () => {
+    expect(
+      parseOverdueBills({ ...overdueDto, tenantCount: 0, billCount: 0, tenants: [] }).tenants,
+    ).toEqual([])
+  })
+
+  it.each([
+    ['no tenants', { ...overdueDto, tenants: undefined }],
+    ['a wrong tenant count', { ...overdueDto, tenantCount: 2 }],
+    ['another currency', { ...overdueDto, currency: 'USD' }],
+    ['a tenant without bills', overdueWith({ bills: [] })],
+    ['a wrong bill count', overdueWith({ overdueBillCount: 2 })],
+    ['a paid bill', overdueWith({}, { outstandingAmount: '0.00' })],
+    ['a bill not yet overdue', overdueWith({}, { daysOverdue: 0 })],
+    ['a bad month', overdueWith({}, { billingMonth: '2026-13' })],
+    ['money as a number', overdueWith({}, { paidAmount: 10000 })],
+  ])('rejects %s', (_, dto) => {
+    expect(() => parseOverdueBills(dto)).toThrow(ApiError)
+  })
+})
+
 describe('dashboardService', () => {
+  it('asks for overdue bills with only the filters set', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue({ data: overdueDto })
+
+    await dashboardService.getOverdueBills({ propertyId: null, month: null, search: '  ' })
+    await dashboardService.getOverdueBills({
+      propertyId: PROPERTY_ID,
+      month: '2026-09',
+      search: ' flat 202 ',
+    })
+
+    expect(get.mock.calls).toEqual([
+      ['/overdue-bills/', { params: {} }],
+      [
+        '/overdue-bills/',
+        { params: { property: PROPERTY_ID, month: '2026-09', search: 'flat 202' } },
+      ],
+    ])
+  })
+
   it('asks for the summary and a filtered page', async () => {
     const get = vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
       if (url.endsWith('/summary/')) return { data: summaryDto }

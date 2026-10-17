@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ChevronLeft, ChevronRight } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -8,6 +8,8 @@ import SkeletonLines from '@/components/common/SkeletonLines.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
 import DashboardSummary from '@/components/dashboard/DashboardSummary.vue'
 import NotOwedForm from '@/components/dashboard/NotOwedForm.vue'
+import OverdueFilterBar from '@/components/dashboard/OverdueFilterBar.vue'
+import OverdueTenantList from '@/components/dashboard/OverdueTenantList.vue'
 import PeriodFilterBar from '@/components/dashboard/PeriodFilterBar.vue'
 import RefreshStatus from '@/components/dashboard/RefreshStatus.vue'
 import RentalPeriodTable from '@/components/dashboard/RentalPeriodTable.vue'
@@ -27,36 +29,108 @@ import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
 import { useDashboardStore } from '@/stores/dashboard'
+import { useOverdueStore } from '@/stores/overdue'
 import { useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
-import type { PreparationFilter, RentalPeriodRow, TimingFilter } from '@/types/dashboard'
-import { recentMonths } from '@/utils/rentalPeriods'
+import type {
+  OverdueBill,
+  OverdueTenant,
+  PreparationFilter,
+  RentalPeriodRow,
+  TimingFilter,
+} from '@/types/dashboard'
+import { formatINR } from '@/utils/currency'
+import { formatOverdueBillCount } from '@/utils/overdueBills'
+import { formatTenantCount, recentMonths } from '@/utils/rentalPeriods'
 
 const accessStore = useAccessStore()
 const tenantStore = useTenantStore()
 const rentEntryStore = useRentEntryStore()
 const dashboardStore = useDashboardStore()
+const overdueStore = useOverdueStore()
+const route = useRoute()
 const router = useRouter()
+
+// Two lists: overdue bills (the default), and rent due (?view=rent-due): every month due or
+// overdue, bill or no bill, where a month without a bill gets one prepared.
+type DashboardTab = 'overdue' | 'rent-due'
+const tab = computed<DashboardTab>(() => (route.query.view === 'rent-due' ? 'rent-due' : 'overdue'))
+const tabs: { value: DashboardTab; label: string }[] = [
+  { value: 'overdue', label: 'Overdue bills' },
+  { value: 'rent-due', label: 'Rent due' },
+]
+
+function showTab(next: DashboardTab) {
+  if (next !== tab.value) router.replace({ query: next === 'rent-due' ? { view: next } : {} })
+}
 
 onMounted(() => {
   // The full list: the selector's search box starts empty.
   tenantStore.searchTenants('')
 })
 
-// Rent due, the default view: refreshed every time it's shown (opening the dashboard,
-// coming back from a payment, reversal, new or corrected bill, or another property), keeping
-// what's already shown while it loads.
+// Each list is refreshed every time it's shown (opening the dashboard, coming back from a
+// payment, reversal, new or corrected bill, or another property), keeping what's already shown
+// while it loads.
 watch(
-  () => [accessStore.selectedPropertyId, tenantStore.selectedTenantId] as const,
-  ([propertyId, tenantId]) => {
-    if (propertyId && !tenantId) void dashboardStore.refresh()
+  () => [tab.value, accessStore.selectedPropertyId, tenantStore.selectedTenantId] as const,
+  ([shown, propertyId, tenantId]) => {
+    if (tenantId) return
+    if (shown === 'overdue') void overdueStore.refresh()
+    else if (propertyId) void dashboardStore.refresh()
   },
   { immediate: true },
 )
 useAutoRetry(
-  () => dashboardStore.status,
+  () => (tab.value === 'rent-due' ? dashboardStore.status : 'idle'),
   () => dashboardStore.refresh(),
 )
+useAutoRetry(
+  () => (tab.value === 'overdue' ? overdueStore.status : 'idle'),
+  () => overdueStore.refresh(),
+)
+
+// Overdue bills: across every property, so a bill or tenant elsewhere selects its property
+// first (the bill pages work within the selected one).
+const overdue = computed(() => overdueStore.bills)
+const overdueProperties = computed(() => accessStore.properties)
+// Two years of billing months, from today at the property.
+const overdueMonths = computed(() =>
+  overdue.value ? recentMonths(overdue.value.asOfDate, 24) : [],
+)
+
+const overduePropertyId = computed({
+  get: () => overdueStore.filters.propertyId,
+  set: (next: string | null) => void overdueStore.setFilters({ propertyId: next }),
+})
+const overdueMonth = computed({
+  get: () => overdueStore.filters.month,
+  set: (next: string | null) => void overdueStore.setFilters({ month: next }),
+})
+const overdueSearch = computed({
+  get: () => overdueStore.filters.search,
+  set: (next: string) => void overdueStore.setFilters({ search: next }),
+})
+
+function withPropertyOf(tenant: OverdueTenant) {
+  if (tenant.propertyId !== accessStore.selectedPropertyId) {
+    accessStore.selectProperty(tenant.propertyId)
+  }
+}
+
+function openOverdueBill(tenant: OverdueTenant, bill: OverdueBill) {
+  withPropertyOf(tenant)
+  router.push({
+    name: 'rent-entry-details',
+    params: { tenantId: tenant.tenantId, entryId: bill.id },
+    query: { from: 'dashboard' },
+  })
+}
+
+function openOverdueTenant(tenant: OverdueTenant) {
+  withPropertyOf(tenant)
+  router.push({ name: 'rent-entry-history', params: { tenantId: tenant.tenantId } })
+}
 
 // Months per page, as the API returns them (backend RentalPeriodsPagination).
 const PERIODS_PAGE_SIZE = 20
@@ -240,7 +314,7 @@ function openHistory() {
         @click="tenantStore.clearSelectedTenant"
       >
         <ArrowLeft aria-hidden="true" />
-        Rent due
+        {{ tab === 'overdue' ? 'Overdue bills' : 'Rent due' }}
       </Button>
       <header class="mb-8">
         <p
@@ -292,151 +366,275 @@ function openHistory() {
       </template>
     </TenantDetails>
 
-    <!-- Rent due: the default view, until a tenant is chosen above. -->
-    <div v-else data-testid="pending-payments">
-      <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p
-            v-if="accessStore.selectedProperty"
-            class="mb-1 text-sm font-semibold text-primary"
-            data-testid="selected-property"
-          >
-            {{ accessStore.selectedProperty.name }}
-          </p>
-          <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Rent due</h1>
-          <p class="mt-2 text-muted-foreground">
-            Which months are due or overdue, bill or no bill.
-          </p>
-        </div>
-        <RefreshStatus
-          v-if="dashboardStore.loaded"
-          :loaded-at="dashboardStore.loadedAt"
-          :refreshing="dashboardStore.refreshing"
-          :error="dashboardStore.refreshError"
-          @refresh="dashboardStore.refresh"
-        />
-      </header>
-
-      <!-- The first load: the shapes of what's coming, never zeros. -->
-      <LoadingRegion
-        v-if="!dashboardStore.loaded && dashboardStore.status !== 'error'"
-        label="Loading rent due…"
-        data-testid="dashboard-loading"
-      >
-        <SkeletonLines card :lines="4" />
-        <SkeletonRows class="mt-10" bordered :rows="4" />
-      </LoadingRegion>
-
+    <!-- The two lists, until a tenant is chosen above. -->
+    <template v-else>
       <div
-        v-else-if="!dashboardStore.loaded"
-        class="rounded-2xl border border-dashed px-6 py-10 text-center"
-        data-testid="dashboard-error"
+        class="mb-6 flex gap-1 rounded-xl border bg-muted/40 p-1 sm:w-fit"
+        role="group"
+        aria-label="Show"
       >
-        <p class="text-destructive" role="alert">{{ dashboardStore.error }}</p>
-        <Button class="mt-4 h-11" @click="dashboardStore.refresh">Try again</Button>
+        <button
+          v-for="option in tabs"
+          :key="option.value"
+          type="button"
+          class="h-10 flex-1 rounded-lg px-4 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 aria-pressed:bg-background aria-pressed:text-foreground aria-pressed:shadow-sm sm:flex-none"
+          :aria-pressed="tab === option.value"
+          :data-testid="`dashboard-tab-${option.value}`"
+          @click="showTab(option.value)"
+        >
+          {{ option.label }}
+        </button>
       </div>
 
-      <template v-else>
-        <DashboardSummary v-if="dashboardStore.summary" :summary="dashboardStore.summary" />
+      <!-- Overdue bills: the default. -->
+      <div v-if="tab === 'overdue'" data-testid="overdue-bills">
+        <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Overdue bills</h1>
+            <p class="mt-2 text-muted-foreground">
+              Bills past their due date with money still to pay, oldest first.
+            </p>
+          </div>
+          <RefreshStatus
+            v-if="overdueStore.loaded"
+            :loaded-at="overdueStore.loadedAt"
+            :refreshing="overdueStore.refreshing"
+            :error="overdueStore.refreshError"
+            @refresh="overdueStore.refresh"
+          />
+        </header>
 
-        <section class="mt-10" aria-labelledby="periods-heading">
-          <h2 id="periods-heading" class="mb-4 text-xl font-semibold">Rental months</h2>
-          <PeriodFilterBar
-            v-model:timing="timing"
-            v-model:preparation="preparation"
-            v-model:month="month"
+        <!-- The first load: the shapes of what's coming, never an empty list. -->
+        <LoadingRegion
+          v-if="!overdueStore.loaded && overdueStore.status !== 'error'"
+          label="Loading overdue bills…"
+          data-testid="overdue-loading"
+        >
+          <SkeletonLines :lines="1" />
+          <SkeletonRows class="mt-6" bordered :rows="4" />
+        </LoadingRegion>
+
+        <div
+          v-else-if="!overdueStore.loaded"
+          class="rounded-2xl border border-dashed px-6 py-10 text-center"
+          data-testid="overdue-error"
+        >
+          <p class="text-destructive" role="alert">{{ overdueStore.error }}</p>
+          <Button class="mt-4 h-11" @click="overdueStore.refresh">Try again</Button>
+        </div>
+
+        <template v-else-if="overdue">
+          <OverdueFilterBar
+            v-model:property-id="overduePropertyId"
+            v-model:month="overdueMonth"
+            v-model:search="overdueSearch"
             class="mb-4"
-            :months="filterMonths"
-            @clear="dashboardStore.setFilters({ preparation: 'all', month: null })"
+            :properties="overdueProperties"
+            :months="overdueMonths"
+            @clear="overdueStore.clearFilters"
           />
 
           <LoadingRegion
-            v-if="dashboardStore.periodsStatus === 'loading'"
-            label="Loading rental months…"
-            data-testid="periods-loading"
+            v-if="overdueStore.listStatus === 'loading'"
+            label="Loading overdue bills…"
+            data-testid="overdue-list-loading"
           >
-            <SkeletonRows bordered :rows="Math.max(1, periods?.periods.length ?? 4)" />
+            <SkeletonRows bordered :rows="Math.max(1, Math.min(overdue.billCount, 6))" />
           </LoadingRegion>
           <div
-            v-else-if="dashboardStore.periodsStatus === 'error'"
+            v-else-if="overdueStore.listStatus === 'error'"
             class="rounded-xl border border-dashed px-4 py-6 text-center"
-            data-testid="periods-error"
+            data-testid="overdue-list-error"
           >
-            <p class="text-destructive" role="alert">{{ dashboardStore.periodsError }}</p>
-            <Button variant="outline" class="mt-3 h-11" @click="dashboardStore.retryPeriods">
+            <p class="text-destructive" role="alert">{{ overdueStore.listError }}</p>
+            <Button variant="outline" class="mt-3 h-11" @click="overdueStore.refresh">
               Try again
             </Button>
           </div>
-          <template v-else-if="periods && dashboardStore.summary">
-            <RentalPeriodTable
-              v-if="periods.periods.length"
-              :key="`${timing}-${preparation}-${month}-${periods.page}`"
-              class="animate-rise-in"
-              :periods="periods.periods"
-              :as-of-date="dashboardStore.summary.asOfDate"
-              @prepare="prepareBill"
-              @view="openBill"
-              @record="openBill($event, true)"
-              @not-owed="askNotOwed"
-            />
+          <template v-else>
             <p
-              v-else
-              class="rounded-xl border border-dashed px-4 py-6 text-center text-muted-foreground"
-              data-testid="periods-empty"
+              v-if="overdue.tenantCount"
+              class="mb-4 text-sm text-muted-foreground"
+              data-testid="overdue-totals"
             >
-              {{ nothingShown }}
+              <span class="text-base font-semibold text-foreground tabular-nums">{{
+                formatINR(overdue.totalOutstanding)
+              }}</span>
+              outstanding · {{ formatTenantCount(overdue.tenantCount) }} ·
+              {{ formatOverdueBillCount(overdue.billCount) }}
             </p>
-
-            <nav
-              v-if="periods.hasNext || periods.hasPrevious"
-              class="mt-4 flex items-center justify-between gap-3"
-              aria-label="Pages"
-            >
-              <Button
-                variant="outline"
-                class="h-11"
-                :disabled="!periods.hasPrevious"
-                @click="dashboardStore.goToPage(periods.page - 1)"
-              >
-                <ChevronLeft aria-hidden="true" />
-                Previous
-              </Button>
-              <p class="text-sm text-muted-foreground" data-testid="periods-page-position">
-                Page {{ periods.page }} of {{ periodsPageCount }} · {{ periods.count }}
-                {{ periods.count === 1 ? 'month' : 'months' }}
-              </p>
-              <Button
-                variant="outline"
-                class="h-11"
-                :disabled="!periods.hasNext"
-                @click="dashboardStore.goToPage(periods.page + 1)"
-              >
-                Next
-                <ChevronRight aria-hidden="true" />
-              </Button>
-            </nav>
-          </template>
-        </section>
-
-        <Dialog :open="notOwedPeriod !== null" @update:open="setNotOwedOpen">
-          <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Mark month not owed</DialogTitle>
-              <DialogDescription
-                >For rent that was waived or settled outside the app.</DialogDescription
-              >
-            </DialogHeader>
-            <NotOwedForm
-              v-if="notOwedPeriod"
-              :period="notOwedPeriod"
-              :saving="dashboardStore.markingId === notOwedPeriod.id"
-              :save-error="dashboardStore.markError"
-              @save="saveNotOwed"
-              @cancel="setNotOwedOpen(false)"
+            <OverdueTenantList
+              v-if="overdue.tenants.length"
+              :key="JSON.stringify(overdueStore.filters)"
+              class="animate-rise-in"
+              :tenants="overdue.tenants"
+              :show-property="overdueProperties.length > 1"
+              @view-bill="openOverdueBill"
+              @view-tenant="openOverdueTenant"
             />
-          </DialogContent>
-        </Dialog>
-      </template>
-    </div>
+            <div
+              v-else
+              class="rounded-xl border border-dashed px-4 py-8 text-center"
+              data-testid="overdue-empty"
+            >
+              <template v-if="overdueStore.filtered">
+                <p class="text-muted-foreground">No overdue bills match your filters.</p>
+                <Button variant="outline" class="mt-3 h-11" @click="overdueStore.clearFilters">
+                  Clear filters
+                </Button>
+              </template>
+              <p v-else class="text-muted-foreground">No overdue bills.</p>
+            </div>
+          </template>
+        </template>
+      </div>
+
+      <!-- Rent due: every month due or overdue, bill or no bill. -->
+      <div v-else data-testid="pending-payments">
+        <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p
+              v-if="accessStore.selectedProperty"
+              class="mb-1 text-sm font-semibold text-primary"
+              data-testid="selected-property"
+            >
+              {{ accessStore.selectedProperty.name }}
+            </p>
+            <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Rent due</h1>
+            <p class="mt-2 text-muted-foreground">
+              Which months are due or overdue, bill or no bill.
+            </p>
+          </div>
+          <RefreshStatus
+            v-if="dashboardStore.loaded"
+            :loaded-at="dashboardStore.loadedAt"
+            :refreshing="dashboardStore.refreshing"
+            :error="dashboardStore.refreshError"
+            @refresh="dashboardStore.refresh"
+          />
+        </header>
+
+        <!-- The first load: the shapes of what's coming, never zeros. -->
+        <LoadingRegion
+          v-if="!dashboardStore.loaded && dashboardStore.status !== 'error'"
+          label="Loading rent due…"
+          data-testid="dashboard-loading"
+        >
+          <SkeletonLines card :lines="4" />
+          <SkeletonRows class="mt-10" bordered :rows="4" />
+        </LoadingRegion>
+
+        <div
+          v-else-if="!dashboardStore.loaded"
+          class="rounded-2xl border border-dashed px-6 py-10 text-center"
+          data-testid="dashboard-error"
+        >
+          <p class="text-destructive" role="alert">{{ dashboardStore.error }}</p>
+          <Button class="mt-4 h-11" @click="dashboardStore.refresh">Try again</Button>
+        </div>
+
+        <template v-else>
+          <DashboardSummary v-if="dashboardStore.summary" :summary="dashboardStore.summary" />
+
+          <section class="mt-10" aria-labelledby="periods-heading">
+            <h2 id="periods-heading" class="mb-4 text-xl font-semibold">Rental months</h2>
+            <PeriodFilterBar
+              v-model:timing="timing"
+              v-model:preparation="preparation"
+              v-model:month="month"
+              class="mb-4"
+              :months="filterMonths"
+              @clear="dashboardStore.setFilters({ preparation: 'all', month: null })"
+            />
+
+            <LoadingRegion
+              v-if="dashboardStore.periodsStatus === 'loading'"
+              label="Loading rental months…"
+              data-testid="periods-loading"
+            >
+              <SkeletonRows bordered :rows="Math.max(1, periods?.periods.length ?? 4)" />
+            </LoadingRegion>
+            <div
+              v-else-if="dashboardStore.periodsStatus === 'error'"
+              class="rounded-xl border border-dashed px-4 py-6 text-center"
+              data-testid="periods-error"
+            >
+              <p class="text-destructive" role="alert">{{ dashboardStore.periodsError }}</p>
+              <Button variant="outline" class="mt-3 h-11" @click="dashboardStore.retryPeriods">
+                Try again
+              </Button>
+            </div>
+            <template v-else-if="periods && dashboardStore.summary">
+              <RentalPeriodTable
+                v-if="periods.periods.length"
+                :key="`${timing}-${preparation}-${month}-${periods.page}`"
+                class="animate-rise-in"
+                :periods="periods.periods"
+                :as-of-date="dashboardStore.summary.asOfDate"
+                @prepare="prepareBill"
+                @view="openBill"
+                @record="openBill($event, true)"
+                @not-owed="askNotOwed"
+              />
+              <p
+                v-else
+                class="rounded-xl border border-dashed px-4 py-6 text-center text-muted-foreground"
+                data-testid="periods-empty"
+              >
+                {{ nothingShown }}
+              </p>
+
+              <nav
+                v-if="periods.hasNext || periods.hasPrevious"
+                class="mt-4 flex items-center justify-between gap-3"
+                aria-label="Pages"
+              >
+                <Button
+                  variant="outline"
+                  class="h-11"
+                  :disabled="!periods.hasPrevious"
+                  @click="dashboardStore.goToPage(periods.page - 1)"
+                >
+                  <ChevronLeft aria-hidden="true" />
+                  Previous
+                </Button>
+                <p class="text-sm text-muted-foreground" data-testid="periods-page-position">
+                  Page {{ periods.page }} of {{ periodsPageCount }} · {{ periods.count }}
+                  {{ periods.count === 1 ? 'month' : 'months' }}
+                </p>
+                <Button
+                  variant="outline"
+                  class="h-11"
+                  :disabled="!periods.hasNext"
+                  @click="dashboardStore.goToPage(periods.page + 1)"
+                >
+                  Next
+                  <ChevronRight aria-hidden="true" />
+                </Button>
+              </nav>
+            </template>
+          </section>
+
+          <Dialog :open="notOwedPeriod !== null" @update:open="setNotOwedOpen">
+            <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Mark month not owed</DialogTitle>
+                <DialogDescription
+                  >For rent that was waived or settled outside the app.</DialogDescription
+                >
+              </DialogHeader>
+              <NotOwedForm
+                v-if="notOwedPeriod"
+                :period="notOwedPeriod"
+                :saving="dashboardStore.markingId === notOwedPeriod.id"
+                :save-error="dashboardStore.markError"
+                @save="saveNotOwed"
+                @cancel="setNotOwedOpen(false)"
+              />
+            </DialogContent>
+          </Dialog>
+        </template>
+      </div>
+    </template>
   </AppLayout>
 </template>

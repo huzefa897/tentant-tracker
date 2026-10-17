@@ -3,6 +3,10 @@ import { ApiError } from '@/services/apiError'
 import type {
   BillPreparation,
   DashboardSummary,
+  OverdueBill,
+  OverdueBills,
+  OverdueFilters,
+  OverdueTenant,
   PeriodAction,
   PeriodFilters,
   PeriodTiming,
@@ -153,6 +157,57 @@ export function parsePeriodPage(value: unknown, page: number): RentalPeriodPage 
   }
 }
 
+function parseOverdueBill(value: unknown): OverdueBill {
+  const data = record(value, 'overdue bill')
+  return {
+    id: text(data, 'id'),
+    billingMonth: matching(data, 'billingMonth', MONTH),
+    dueDate: matching(data, 'dueDate', DATE),
+    daysOverdue: count(data, 'daysOverdue'),
+    totalAmount: money(data, 'totalAmount'),
+    paidAmount: money(data, 'paidAmount'),
+    outstanding: money(data, 'outstandingAmount'),
+  }
+}
+
+function parseOverdueTenant(value: unknown): OverdueTenant {
+  const data = record(value, 'overdue tenant')
+  if (!Array.isArray(data.bills) || data.bills.length === 0) invalid('bills')
+  const bills = data.bills.map(parseOverdueBill)
+  if (bills.some((bill) => bill.daysOverdue < 1 || bill.outstanding <= 0)) invalid('bills')
+  const overdueBillCount = count(data, 'overdueBillCount')
+  if (overdueBillCount !== bills.length) invalid('overdueBillCount')
+  return {
+    tenantId: text(data, 'tenancyId'),
+    name: text(data, 'name'),
+    flatNumber: text(data, 'flatNumber'),
+    tenancyStatus: oneOf(data, 'tenancyStatus', TENANCY_STATUSES),
+    propertyId: text(data, 'propertyId'),
+    propertyName: text(data, 'propertyName'),
+    overdueBillCount,
+    outstanding: money(data, 'outstandingAmount'),
+    oldestDueDate: matching(data, 'oldestDueDate', DATE),
+    bills,
+  }
+}
+
+export function parseOverdueBills(value: unknown): OverdueBills {
+  const data = record(value, 'overdue bills')
+  if (data.currency !== 'INR') invalid('currency')
+  if (!Array.isArray(data.tenants)) invalid('tenants')
+  const tenants = data.tenants.map(parseOverdueTenant)
+  const tenantCount = count(data, 'tenantCount')
+  if (tenantCount !== tenants.length) invalid('tenantCount')
+  return {
+    asOfDate: matching(data, 'asOfDate', DATE),
+    generatedAt: text(data, 'generatedAt'),
+    tenantCount,
+    billCount: count(data, 'billCount'),
+    totalOutstanding: money(data, 'totalOutstandingAmount'),
+    tenants,
+  }
+}
+
 function dashboardUrl(propertyId: string, name: string) {
   return `/properties/${encodeURIComponent(propertyId)}/dashboard/${name}/`
 }
@@ -184,6 +239,16 @@ export const dashboardService = {
     if (filters.month) params.month = filters.month
     if (page > 1) params.page = page
     return parsePeriodPage(await get(dashboardUrl(propertyId, 'rental-periods'), params), page)
+  },
+
+  // Every overdue bill across the user's properties, grouped by tenant. Not paged.
+  async getOverdueBills(filters: OverdueFilters): Promise<OverdueBills> {
+    const params: Record<string, string> = {}
+    if (filters.propertyId) params.property = filters.propertyId
+    if (filters.month) params.month = filters.month
+    const search = filters.search.trim()
+    if (search) params.search = search
+    return parseOverdueBills(await get('/overdue-bills/', params))
   },
 
   // Marks a month's rent as not owed (owners only), with why. A retry with the same reason is

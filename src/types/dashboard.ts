@@ -66,3 +66,44 @@ export interface PeriodFilters {
   preparation: PreparationFilter
   month: string | null // YYYY-MM, or every month
 }
+
+// Overdue bills (services/dashboard.service.ts getOverdueBills): active bills past their due
+// date with money still to pay, across the user's properties, grouped by tenancy. Only bills:
+// a month without one is on the rent-due list, never counted as paid.
+export interface OverdueBill {
+  id: string
+  billingMonth: string // YYYY-MM
+  dueDate: string // YYYY-MM-DD
+  daysOverdue: number
+  totalAmount: number
+  paidAmount: number // payments not reversed
+  outstanding: number
+}
+
+export interface OverdueTenant {
+  tenantId: string // the tenancy id
+  name: string
+  flatNumber: string
+  tenancyStatus: TenantStatus
+  propertyId: string
+  propertyName: string
+  overdueBillCount: number
+  outstanding: number
+  oldestDueDate: string // YYYY-MM-DD
+  bills: OverdueBill[] // oldest due first
+}
+
+export interface OverdueBills {
+  asOfDate: string // YYYY-MM-DD, today at the property
+  generatedAt: string
+  tenantCount: number
+  billCount: number
+  totalOutstanding: number
+  tenants: OverdueTenant[] // the oldest overdue bill first
+}
+
+export interface OverdueFilters {
+  propertyId: string | null // every property
+  month: string | null // YYYY-MM, or every month
+  search: string // a tenant name or flat
+}
