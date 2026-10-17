@@ -38,7 +38,8 @@ import {
 import { useTenantStore } from '@/stores/tenant'
 import type { Payment, PaymentInput } from '@/types/payment'
 import { formatINR } from '@/utils/currency'
-import { formatMonthValue, formatTimestamp } from '@/utils/date'
+import { formatDateValue, formatMonthValue, formatTimestamp } from '@/utils/date'
+import { formatPaymentTiming } from '@/utils/rentCalculations'
 
 const props = defineProps<{
   tenantId: string
@@ -400,6 +401,14 @@ function goToHistory() {
           </h1>
           <EntryStatusBadge :entry="entry" />
         </div>
+        <!-- Saved with the bill when it was created; a bill from before due dates has none. -->
+        <p
+          v-if="entry.dueDate && entry.paymentTiming"
+          class="mt-2 text-muted-foreground"
+          data-testid="due-date"
+        >
+          Due {{ formatDateValue(entry.dueDate) }} · {{ formatPaymentTiming(entry.paymentTiming) }}
+        </p>
         <p
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
           data-testid="tenant-chip"

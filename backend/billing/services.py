@@ -21,6 +21,7 @@ from .models import (
     receipt_reference,
     tenancy_covers_month,
 )
+from .periods import period_for_bill
 
 UNIQUE_MONTH_CONSTRAINT = "unique_active_tenancy_billing_month"
 PAYMENT_KEY_CONSTRAINT = "unique_payment_idempotency_key"
@@ -36,6 +37,10 @@ class DuplicateBillingMonthError(Exception):
 
 class BillingMonthOutsideTenancyError(Exception):
     """No day of the billing month falls within the occupancy."""
+
+
+class PeriodNotOwedError(Exception):
+    """The month is marked as not owed, so it can't have a bill."""
 
 
 class EntryNotFoundError(Exception):
@@ -310,7 +315,9 @@ def create_rent_entry(
 
     validated_data: billing_month (first of the month), electricity_units, water_amount,
     and optionally rent_amount (defaults to the tenancy's rent) and notes. The electricity
-    rate always comes from the tenancy.
+    rate always comes from the tenancy. The bill belongs to its month's rental period, created
+    now if it doesn't exist yet (periods.period_for_bill): the bill is due when the period is,
+    however late it's prepared.
 
     creation_key: the request's Idempotency-Key (required with an initial payment). A retry
     with the same key and request returns the bill it created; the initial payment is recorded
@@ -347,6 +354,10 @@ def create_rent_entry(
                 .exists()
             ):
                 raise DuplicateBillingMonthError()
+
+            # Under the tenancy's lock, like the bill, so the month gets one period.
+            if period_for_bill(locked, billing_month).not_owed_at is not None:
+                raise PeriodNotOwedError()
 
             rent_amount = validated_data.get("rent_amount")
             entry = RentEntry.objects.create(
@@ -775,9 +786,9 @@ def correct_rent_entry(
     happen or neither, so a replacement that fails leaves the original active.
 
     validated_data: rent_amount, electricity_units, water_amount and optionally notes, the
-    replacement's charges (the app starts from the original's). The tenancy, month and
-    electricity rate are the original's: they're historical values, never today's tenancy
-    defaults. At least one must differ from the original (NothingToCorrectError).
+    replacement's charges (the app starts from the original's). The tenancy, month (and so its
+    rental period and due date) and electricity rate are the original's: they're historical
+    values, never today's tenancy defaults. At least one must differ from the original (NothingToCorrectError).
 
     idempotency_key: the request's Idempotency-Key, saved as the replacement's creation key. A
     retry with the same key and request returns the correction it made.

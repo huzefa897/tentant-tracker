@@ -25,7 +25,8 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { EntrySaveError, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
-import { formatMonthValue } from '@/utils/date'
+import { formatDateValue, formatMonthValue } from '@/utils/date'
+import { formatPaymentTiming } from '@/utils/rentCalculations'
 
 // From the route (`props: true`), so the entry always belongs to the tenant in the URL.
 const props = defineProps<{
@@ -87,6 +88,11 @@ const savedSummary = computed(() => {
   return {
     entry,
     month: formatMonthValue(entry.billingMonth),
+    // From the backend, which works it out from the property's timing and the tenant's due day.
+    due:
+      entry.dueDate && entry.paymentTiming
+        ? `${formatDateValue(entry.dueDate)} · ${formatPaymentTiming(entry.paymentTiming)}`
+        : null,
     rentChanged: previewedRent.value !== null && previewedRent.value !== entry.rentAmount,
     rateChanged: previewedRate.value !== null && previewedRate.value !== entry.electricityRate,
     charges: [
@@ -234,6 +240,10 @@ function handleDialogOpenChange(open: boolean) {
           <div class="flex justify-between gap-4">
             <dt class="text-muted-foreground">Billing month</dt>
             <dd class="font-medium">{{ savedSummary.month }}</dd>
+          </div>
+          <div v-if="savedSummary.due" class="flex justify-between gap-4" data-testid="saved-due">
+            <dt class="text-muted-foreground">Due date</dt>
+            <dd class="font-medium">{{ savedSummary.due }}</dd>
           </div>
           <div
             v-for="item in savedSummary.charges"

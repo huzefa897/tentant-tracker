@@ -58,7 +58,8 @@ class RentEntryApiTestCase(TestCase):
 
 class CreateRentEntryTests(RentEntryApiTestCase):
     def test_creates_a_bill_and_returns_the_calculated_contract(self):
-        response = self.create()
+        with mock.patch("billing.serializers.business_date", return_value=date(2026, 10, 15)):
+            response = self.create()
 
         self.assertEqual(response.status_code, 201)
         entry = RentEntry.objects.get()
@@ -78,6 +79,10 @@ class CreateRentEntryTests(RentEntryApiTestCase):
                 "totalPaid": "0.00",
                 "outstandingAmount": "15750.00",
                 "paymentStatus": "unpaid",
+                # The property is postpaid (the default) and the tenancy's due day is the 11th.
+                "paymentTiming": "postpaid",
+                "dueDate": "2026-11-11",
+                "dueStatus": "upcoming",
                 "notes": "October charges",
                 "status": "active",
                 "voidedAt": None,

@@ -36,6 +36,9 @@ const dto = {
   totalPaid: '0.00',
   outstandingAmount: '15750.00',
   paymentStatus: 'unpaid',
+  paymentTiming: 'postpaid',
+  dueDate: '2026-11-11',
+  dueStatus: 'upcoming',
   notes: 'October charges',
   createdAt: '2026-10-05T12:30:00+05:30',
   status: 'active',
@@ -53,6 +56,7 @@ const voidDto = {
   ...dto,
   outstandingAmount: '0.00',
   paymentStatus: null,
+  dueStatus: null,
   status: 'void',
   voidedAt: '2026-10-08T10:00:00+05:30',
   voidedByName: 'Huzefa',
@@ -118,6 +122,9 @@ describe('toRentEntry', () => {
       totalPaid: 0,
       outstanding: 15750,
       status: 'unpaid',
+      paymentTiming: 'postpaid',
+      dueDate: '2026-11-11',
+      dueStatus: 'upcoming',
       notes: 'October charges',
       createdAt: '2026-10-05T12:30:00+05:30',
       billStatus: 'active',
@@ -160,8 +167,34 @@ describe('parseRentEntry', () => {
     ['a void bill without its reason', { ...voidDto, voidReason: '' }],
     ['a void bill without who voided it', { ...voidDto, voidedByName: null }],
     ['an empty replacement id', { replacesEntryId: '' }],
+    ['a due date that isn’t a date', { dueDate: '2026-11' }],
+    ['a due date without its timing', { paymentTiming: null }],
+    ['an unknown timing', { paymentTiming: 'monthly' }],
+    ['a due status without a due date', { paymentTiming: null, dueDate: null }],
+    ['an unknown due status', { dueStatus: 'late' }],
+    ['an active bill with a due date but no due status', { dueStatus: null }],
+    ['a void bill with a due status', { ...voidDto, dueStatus: 'overdue' }],
   ])('rejects %s', (_, change) => {
     expect(() => parseRentEntry({ ...dto, ...change })).toThrow(ApiError)
+  })
+})
+
+describe('parseRentEntry due dates', () => {
+  it('accepts a bill from before due dates, with none of the three', () => {
+    const before = { ...dto, paymentTiming: null, dueDate: null, dueStatus: null }
+
+    expect(toRentEntry(parseRentEntry(before))).toMatchObject({
+      paymentTiming: null,
+      dueDate: null,
+      dueStatus: null,
+    })
+  })
+
+  it('accepts a void bill with its due date and no due status', () => {
+    expect(toRentEntry(parseRentEntry(voidDto))).toMatchObject({
+      dueDate: '2026-11-11',
+      dueStatus: null,
+    })
   })
 })
 

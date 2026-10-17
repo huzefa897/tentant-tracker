@@ -128,6 +128,7 @@ describe('NewRentEntryView', () => {
       expect.any(String),
     )
     expect(savedSummary()).toMatchObject({
+      'Due date': '11 Oct 2026 · Postpaid',
       'Total paid': '₹10,000',
       Outstanding: '₹5,750',
       Status: 'Partially paid',
@@ -189,6 +190,8 @@ describe('NewRentEntryView', () => {
     expect(app!.text()).toContain('September 2026 for Shaik Zahid Ali, Flat 202')
     expect(savedSummary()).toEqual({
       'Billing month': 'September 2026',
+      // The backend's: the property's timing and the tenant's due day.
+      'Due date': '11 Oct 2026 · Postpaid',
       Rent: '₹15,000',
       'Electricity (75 units × ₹6)': '₹450',
       Water: '₹300',
