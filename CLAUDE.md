@@ -11,6 +11,7 @@ Stack: Vue Router, Pinia (setup stores), Tailwind v4, shadcn-vue (reka-ui), Axio
 - `npm run lint:check` — same, no fixes (use for verification/CI)
 - `npm run format` — Prettier over `src/` (`npm run format:check` to check only)
 - `npm test` — Vitest, single run (`npm run test:watch` to watch)
+- `npm run test:layout` — layout tests in headless Chromium (`*.layout.spec.ts`; run `npx playwright install chromium` once). Run it when a change affects layout ([docs/testing.md](docs/testing.md#layout-tests))
 - `npm run check:conflicts` — dry-run merges of the current branch into `dev` (`--base origin/main` for another base) and every other open PR's branch (`scripts/check-merge-conflicts.sh`, `--strict` to fail on PR-vs-PR conflicts). Textual conflicts only: a clean merge can still break the build.
 
 Before calling work done: `npm run format && npm run lint:check && npm test && npm run build`. CI (`.github/workflows/ci.yml`) runs the same checks on every PR and push to `dev` and `main`, plus the conflict check on PRs (fails only on conflicts with the PR's base; conflicts with other PRs are warnings).

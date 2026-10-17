@@ -59,3 +59,4 @@ ledger*.json
 
 # Which release is deployed (scripts/deploy.sh), on the server only.
 deploy/releases.log
+.vitest/
