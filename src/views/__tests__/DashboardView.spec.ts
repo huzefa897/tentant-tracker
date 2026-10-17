@@ -42,8 +42,8 @@ vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 let view: VueWrapper | undefined
 const body = new DOMWrapper(document.body)
-// Where the dashboard opens: overdue bills, unless a describe chooses rent due.
-const RENT_DUE = '/dashboard?view=rent-due'
+// Where the dashboard opens: rent due, unless a describe chooses overdue bills.
+const OVERDUE = '/dashboard?view=overdue'
 let openAt = '/dashboard'
 
 // beforeOpen runs with the fresh pinia active, before navigating to the dashboard.
@@ -75,11 +75,15 @@ afterEach(() => {
 })
 
 describe('DashboardView', () => {
-  it('loads tenants but opens on overdue bills until one is selected', async () => {
+  it('loads tenants but opens on rent due until one is selected', async () => {
     await mountView()
 
     expect(useTenantStore().results).toHaveLength(3)
-    expect(view!.get('h1').text()).toBe('Overdue bills')
+    expect(view!.get('h1').text()).toBe('Rent due')
+    expect(view!.findAll('[data-testid^="dashboard-tab-"]').map((tab) => tab.text())).toEqual([
+      'Rent due',
+      'Overdue bills',
+    ])
     expect(view!.find('#tenant-name').exists()).toBe(false)
   })
 
@@ -420,10 +424,6 @@ describe('DashboardView', () => {
   })
 
   describe('property', () => {
-    beforeEach(() => {
-      openAt = RENT_DUE
-    })
-
     const annex = {
       id: '6f1c2a4e-0000-4000-8000-000000000002',
       name: 'Annex',
@@ -498,10 +498,6 @@ describe('DashboardView', () => {
   })
 
   describe('rent due', () => {
-    beforeEach(() => {
-      openAt = RENT_DUE
-    })
-
     function shownMonths() {
       return view!
         .findAll('[data-testid="period-row"]')
@@ -699,6 +695,10 @@ describe('DashboardView', () => {
     })
   })
   describe('overdue bills', () => {
+    beforeEach(() => {
+      openAt = OVERDUE
+    })
+
     const annex = {
       id: '6f1c2a4e-0000-4000-8000-000000000002',
       name: 'Annex',
@@ -912,13 +912,14 @@ describe('DashboardView', () => {
       await view!.get('[data-testid="dashboard-tab-rent-due"]').trigger('click')
       await flushPromises()
 
-      expect(router.currentRoute.value.query).toEqual({ view: 'rent-due' })
+      expect(router.currentRoute.value.query).toEqual({})
       expect(view!.get('h1').text()).toBe('Rent due')
       expect(dashboardService.getSummary).toHaveBeenCalledTimes(1)
 
       await view!.get('[data-testid="dashboard-tab-overdue"]').trigger('click')
       await flushPromises()
 
+      expect(router.currentRoute.value.query).toEqual({ view: 'overdue' })
       expect(view!.get('h1').text()).toBe('Overdue bills')
       expect(dashboardService.getOverdueBills).toHaveBeenCalledTimes(2)
     })

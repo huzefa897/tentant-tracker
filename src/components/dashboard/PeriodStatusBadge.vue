@@ -31,7 +31,7 @@ const tone = computed(() => {
 
 <template>
   <span
-    class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-sm font-medium whitespace-nowrap"
+    class="inline-flex items-center gap-1.5 rounded-full border px-2 text-sm font-medium whitespace-nowrap"
     :class="tone"
     data-testid="period-status"
   >

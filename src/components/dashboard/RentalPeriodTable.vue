@@ -57,52 +57,52 @@ const rows = computed(() =>
         </caption>
         <thead class="bg-muted/40 text-left whitespace-nowrap text-muted-foreground">
           <tr>
-            <th scope="col" class="px-5 py-3 font-medium">Tenant</th>
-            <th scope="col" class="px-3 py-3 font-medium">Flat</th>
-            <th scope="col" class="px-3 py-3 font-medium">Month</th>
-            <th scope="col" class="px-3 py-3 font-medium">Due date</th>
-            <th scope="col" class="px-3 py-3 text-right font-medium">Amount due</th>
-            <th scope="col" class="px-3 py-3 text-right font-medium">Outstanding</th>
-            <th scope="col" class="px-3 py-3 font-medium">Status</th>
-            <th scope="col" class="px-5 py-3"><span class="sr-only">Actions</span></th>
+            <th scope="col" class="px-4 py-2 font-medium">Tenant</th>
+            <th scope="col" class="px-3 py-2 font-medium">Flat</th>
+            <th scope="col" class="px-3 py-2 font-medium">Month</th>
+            <th scope="col" class="px-3 py-2 font-medium">Due date</th>
+            <th scope="col" class="px-3 py-2 text-right font-medium">Amount due</th>
+            <th scope="col" class="px-3 py-2 text-right font-medium">Outstanding</th>
+            <th scope="col" class="px-3 py-2 font-medium">Status</th>
+            <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.period.id" class="border-t" data-testid="period-row">
-            <th scope="row" class="min-w-32 px-5 py-3 text-left font-medium">
+            <th scope="row" class="min-w-32 px-4 py-2 text-left font-medium">
               {{ row.period.name }}
               <span v-if="row.ended" class="block text-sm font-normal text-muted-foreground"
                 >Ended tenancy</span
               >
             </th>
-            <td class="px-3 py-3 whitespace-nowrap">{{ row.period.flatNumber }}</td>
-            <td class="px-3 py-3 whitespace-nowrap">{{ row.month }}</td>
-            <td class="px-3 py-3 whitespace-nowrap">{{ row.due }}</td>
+            <td class="px-3 py-2 whitespace-nowrap">{{ row.period.flatNumber }}</td>
+            <td class="px-3 py-2 whitespace-nowrap">{{ row.month }}</td>
+            <td class="px-3 py-2 whitespace-nowrap">{{ row.due }}</td>
             <template v-if="row.prepared">
-              <td class="px-3 py-3 text-right whitespace-nowrap tabular-nums">
+              <td class="px-3 py-2 text-right whitespace-nowrap tabular-nums">
                 {{ formatINR(row.period.totalDue!) }}
               </td>
-              <td class="px-3 py-3 text-right font-semibold whitespace-nowrap tabular-nums">
+              <td class="px-3 py-2 text-right font-semibold whitespace-nowrap tabular-nums">
                 {{ formatINR(row.period.outstanding!) }}
               </td>
             </template>
             <td
               v-else
               colspan="2"
-              class="px-3 py-3 text-right whitespace-nowrap text-muted-foreground"
+              class="px-3 py-2 text-right whitespace-nowrap text-muted-foreground"
               data-testid="awaiting-bill"
             >
               Bill not prepared
             </td>
-            <td class="px-3 py-3">
+            <td class="px-3 py-2">
               <PeriodStatusBadge :period="row.period" :as-of-date="asOfDate" />
             </td>
-            <td class="px-5 py-2">
+            <td class="px-4 py-1.5">
               <div class="flex justify-end gap-1">
                 <Button
                   v-if="row.can('prepare_bill')"
                   variant="outline"
-                  class="h-10"
+                  class="h-9"
                   :aria-label="`Prepare bill: ${row.subject}`"
                   @click="emit('prepare', row.period)"
                 >
@@ -111,7 +111,7 @@ const rows = computed(() =>
                 <Button
                   v-if="row.can('mark_not_owed')"
                   variant="ghost"
-                  class="h-10"
+                  class="h-9"
                   :aria-label="`Mark not owed: ${row.subject}`"
                   @click="emit('notOwed', row.period)"
                 >
@@ -120,7 +120,7 @@ const rows = computed(() =>
                 <Button
                   v-if="row.can('record_payment')"
                   variant="outline"
-                  class="h-10"
+                  class="h-9"
                   :aria-label="`Record payment: ${row.subject}`"
                   @click="emit('record', row.period)"
                 >
@@ -129,7 +129,7 @@ const rows = computed(() =>
                 <Button
                   v-if="row.can('view_bill')"
                   variant="ghost"
-                  class="h-10"
+                  class="h-9"
                   :aria-label="`View bill: ${row.subject}`"
                   @click="emit('view', row.period)"
                 >
@@ -144,7 +144,12 @@ const rows = computed(() =>
 
     <!-- Phones and tablets -->
     <ul class="divide-y lg:hidden" :aria-label="caption">
-      <li v-for="row in rows" :key="row.period.id" class="p-4 sm:px-5" data-testid="period-card">
+      <li
+        v-for="row in rows"
+        :key="row.period.id"
+        class="px-3 py-3 sm:px-4"
+        data-testid="period-card"
+      >
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <h3 class="font-semibold">{{ row.period.name }}</h3>
@@ -154,7 +159,7 @@ const rows = computed(() =>
           </div>
           <PeriodStatusBadge :period="row.period" :as-of-date="asOfDate" />
         </div>
-        <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+        <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
           <div>
             <dt class="text-muted-foreground">Month</dt>
             <dd>{{ row.month }}</dd>
@@ -182,11 +187,11 @@ const rows = computed(() =>
         </dl>
         <div
           v-if="row.period.actions.length"
-          class="mt-4 grid gap-2 min-[420px]:grid-cols-2 sm:flex sm:flex-wrap"
+          class="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"
         >
           <Button
             v-if="row.can('prepare_bill')"
-            class="h-11"
+            class="h-10"
             :aria-label="`Prepare bill: ${row.subject}`"
             @click="emit('prepare', row.period)"
           >
@@ -195,7 +200,7 @@ const rows = computed(() =>
           <Button
             v-if="row.can('mark_not_owed')"
             variant="outline"
-            class="h-11"
+            class="h-10"
             :aria-label="`Mark not owed: ${row.subject}`"
             @click="emit('notOwed', row.period)"
           >
@@ -203,7 +208,7 @@ const rows = computed(() =>
           </Button>
           <Button
             v-if="row.can('record_payment')"
-            class="h-11"
+            class="h-10"
             :aria-label="`Record payment: ${row.subject}`"
             @click="emit('record', row.period)"
           >
@@ -212,7 +217,7 @@ const rows = computed(() =>
           <Button
             v-if="row.can('view_bill')"
             variant="outline"
-            class="h-11"
+            class="h-10"
             :aria-label="`View bill: ${row.subject}`"
             @click="emit('view', row.period)"
           >

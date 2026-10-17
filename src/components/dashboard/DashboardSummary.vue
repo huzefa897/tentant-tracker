@@ -79,26 +79,26 @@ const VALUE_TONES: Record<Tone, string> = {
 <template>
   <section aria-labelledby="summary-heading" data-testid="dashboard-summary">
     <h2 id="summary-heading" class="sr-only">Summary</h2>
-    <dl class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <dl class="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
       <div
         v-for="tile in tiles"
         :key="tile.id"
-        class="flex flex-col gap-1 rounded-2xl border bg-card p-4 sm:p-5"
+        class="flex flex-col gap-0.5 rounded-xl border bg-card px-3 py-2.5 sm:px-4 sm:py-3"
         :data-testid="`summary-${tile.id}`"
       >
-        <dt class="flex items-center gap-2.5 text-sm font-medium text-muted-foreground">
+        <dt class="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           <span
-            class="flex size-8 shrink-0 items-center justify-center rounded-lg"
+            class="flex size-6 shrink-0 items-center justify-center rounded-md"
             :class="ICON_TONES[tile.tone]"
             aria-hidden="true"
           >
-            <component :is="tile.icon" class="size-4" />
+            <component :is="tile.icon" class="size-3.5" />
           </span>
           {{ tile.label }}
         </dt>
-        <dd class="mt-1">
+        <dd>
           <span
-            class="text-3xl font-bold tracking-tight tabular-nums"
+            class="text-2xl font-bold tracking-tight tabular-nums"
             :class="VALUE_TONES[tile.tone]"
             data-testid="summary-value"
             >{{ tile.count }}</span
@@ -110,20 +110,20 @@ const VALUE_TONES: Record<Tone, string> = {
       </div>
 
       <div
-        class="flex flex-col gap-1 rounded-2xl border bg-card p-4 sm:p-5"
+        class="flex flex-col gap-0.5 rounded-xl border bg-card px-3 py-2.5 sm:px-4 sm:py-3"
         data-testid="summary-total"
       >
-        <dt class="flex items-center gap-2.5 text-sm font-medium text-muted-foreground">
+        <dt class="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           <span
-            class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground"
+            class="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
             aria-hidden="true"
           >
-            <Wallet class="size-4" />
+            <Wallet class="size-3.5" />
           </span>
           Total outstanding
         </dt>
         <dd
-          class="mt-1 text-2xl font-bold tracking-tight tabular-nums sm:text-3xl"
+          class="text-xl leading-8 font-bold tracking-tight tabular-nums sm:text-2xl"
           data-testid="summary-known-outstanding"
         >
           {{ formatINR(summary.knownOutstanding) }}
@@ -137,7 +137,7 @@ const VALUE_TONES: Record<Tone, string> = {
         </dd>
       </div>
     </dl>
-    <p class="mt-3 max-w-prose text-sm text-muted-foreground" data-testid="summary-excluded">
+    <p class="mt-2 max-w-prose text-sm text-muted-foreground" data-testid="summary-excluded">
       {{ excluded }}
     </p>
   </section>

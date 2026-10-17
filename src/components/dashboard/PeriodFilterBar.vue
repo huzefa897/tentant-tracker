@@ -81,14 +81,14 @@ function choose(id: string, event: Event) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
-    <div class="flex flex-col gap-3 px-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
+  <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-2 px-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
       <slot name="heading" />
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div
           v-for="select in selects"
           :key="select.id"
-          class="relative flex h-11 min-w-0 items-center gap-3 rounded-lg border border-input bg-background px-3 text-sm transition-colors hover:bg-muted/50 has-[select:focus-visible]:border-ring has-[select:focus-visible]:ring-3 has-[select:focus-visible]:ring-ring/50 has-[select:disabled]:opacity-50 sm:w-56"
+          class="relative flex h-10 min-w-0 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm transition-colors hover:bg-muted/50 has-[select:focus-visible]:border-ring has-[select:focus-visible]:ring-3 has-[select:focus-visible]:ring-ring/50 has-[select:disabled]:opacity-50 sm:w-48"
         >
           <component
             :is="select.icon"
@@ -117,7 +117,7 @@ function choose(id: string, event: Event) {
         <Button
           v-if="narrowed"
           variant="ghost"
-          class="h-11 w-fit"
+          class="h-10 w-fit"
           :disabled="disabled"
           @click="emit('clear')"
         >
@@ -128,13 +128,13 @@ function choose(id: string, event: Event) {
     </div>
 
     <!-- Wraps on narrow phones rather than scrolling sideways, so every option stays in view. -->
-    <div class="border-b px-2 sm:px-3" role="group" aria-label="Due">
+    <div class="border-b px-1.5 sm:px-2.5" role="group" aria-label="Due">
       <div class="flex flex-wrap gap-x-1">
         <button
           v-for="option in timings"
           :key="option.value"
           type="button"
-          class="-mb-px flex h-11 items-center gap-2 rounded-t-md border-b-2 border-transparent px-3 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary aria-pressed:text-foreground"
+          class="-mb-px flex h-10 items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary aria-pressed:text-foreground"
           :aria-pressed="timing === option.value"
           :disabled="disabled"
           :data-testid="`timing-filter-${option.value}`"

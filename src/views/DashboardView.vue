@@ -52,17 +52,17 @@ const overdueStore = useOverdueStore()
 const route = useRoute()
 const router = useRouter()
 
-// Two lists: overdue bills (the default), and rent due (?view=rent-due): every month due or
-// overdue, bill or no bill, where a month without a bill gets one prepared.
+// Two lists: rent due (the default): every month due or overdue, bill or no bill, where a month
+// without a bill gets one prepared; and overdue bills (?view=overdue).
 type DashboardTab = 'overdue' | 'rent-due'
-const tab = computed<DashboardTab>(() => (route.query.view === 'rent-due' ? 'rent-due' : 'overdue'))
+const tab = computed<DashboardTab>(() => (route.query.view === 'overdue' ? 'overdue' : 'rent-due'))
 const tabs: { value: DashboardTab; label: string }[] = [
-  { value: 'overdue', label: 'Overdue bills' },
   { value: 'rent-due', label: 'Rent due' },
+  { value: 'overdue', label: 'Overdue bills' },
 ]
 
 function showTab(next: DashboardTab) {
-  if (next !== tab.value) router.replace({ query: next === 'rent-due' ? { view: next } : {} })
+  if (next !== tab.value) router.replace({ query: next === 'overdue' ? { view: next } : {} })
 }
 
 onMounted(() => {
@@ -423,7 +423,7 @@ function openHistory() {
         </button>
       </div>
 
-      <!-- Overdue bills: the default. -->
+      <!-- Overdue bills. -->
       <div v-if="tab === 'overdue'" data-testid="overdue-bills">
         <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -528,7 +528,7 @@ function openHistory() {
 
       <!-- Rent due: every month due or overdue, bill or no bill. -->
       <div v-else data-testid="pending-payments">
-        <header class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <header class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p
               v-if="accessStore.selectedProperty"
@@ -574,7 +574,7 @@ function openHistory() {
           <DashboardSummary v-if="dashboardStore.summary" :summary="dashboardStore.summary" />
 
           <section
-            class="mt-6 overflow-hidden rounded-2xl border bg-card pt-4 sm:pt-5"
+            class="mt-4 overflow-hidden rounded-xl border bg-card pt-3 sm:pt-4"
             aria-labelledby="periods-heading"
           >
             <PeriodFilterBar
@@ -586,7 +586,7 @@ function openHistory() {
               @clear="dashboardStore.setFilters({ preparation: 'all', month: null })"
             >
               <template #heading>
-                <h2 id="periods-heading" class="text-xl font-semibold">Rental months</h2>
+                <h2 id="periods-heading" class="text-lg font-semibold">Rental months</h2>
               </template>
             </PeriodFilterBar>
 
