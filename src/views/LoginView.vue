@@ -31,7 +31,7 @@ async function handleSubmit(phoneNumber: string) {
   <AuthLayout>
     <header class="mb-8 text-center">
       <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Welcome back</h1>
-      <p class="mt-2 text-muted-foreground">Manage your rental properties and rent entries</p>
+      <p class="mt-2 text-muted-foreground">Manage your rental properties and rent bills</p>
     </header>
 
     <p

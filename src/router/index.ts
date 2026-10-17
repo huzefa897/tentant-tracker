@@ -68,7 +68,7 @@ const router = createRouter({
       component: () => import('@/views/RentEntryDetailsView.vue'),
       // ?from=dashboard sends the back button to the dashboard; anything else, to the history.
       // ?corrected=1: it's the replacement just made by correcting a bill.
-      // ?pay=1 opens Record Payment once the bill has loaded (the dashboard's Record payment).
+      // ?pay=1 opens Record payment once the bill has loaded (the dashboard's Record payment).
       props: (route) => ({
         ...route.params,
         from: route.query.from === 'dashboard' ? 'dashboard' : 'history',

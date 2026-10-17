@@ -36,7 +36,8 @@ describe('DashboardSummary', () => {
     expect(wrapper.get('[data-testid="summary-due-today"]').text()).toBe(
       'Due today1 month · ₹18,500',
     )
-    expect(wrapper.get('[data-testid="summary-upcoming"]').text()).toBe('Next 7 days1 month · ₹0')
+    // Its one month is awaiting its bill: no amount, never ₹0.
+    expect(wrapper.get('[data-testid="summary-upcoming"]').text()).toBe('Next 7 days1 month')
   })
 
   it('shows no amount when nothing is due, and says when nobody owes', () => {

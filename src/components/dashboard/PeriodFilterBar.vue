@@ -84,7 +84,7 @@ function choose(id: string, event: Event) {
   <div class="flex flex-col gap-3">
     <div class="flex flex-col gap-2 px-3 sm:px-4 lg:flex-row lg:items-center lg:justify-between">
       <slot name="heading" />
-      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div class="grid grid-cols-2 gap-2 sm:flex sm:items-center">
         <div
           v-for="select in selects"
           :key="select.id"
@@ -117,7 +117,7 @@ function choose(id: string, event: Event) {
         <Button
           v-if="narrowed"
           variant="ghost"
-          class="h-10 w-fit"
+          class="col-span-2 h-10 w-fit"
           :disabled="disabled"
           @click="emit('clear')"
         >
@@ -128,13 +128,13 @@ function choose(id: string, event: Event) {
     </div>
 
     <!-- Wraps on narrow phones rather than scrolling sideways, so every option stays in view. -->
-    <div class="border-b px-1.5 sm:px-2.5" role="group" aria-label="Due">
-      <div class="flex flex-wrap gap-x-1">
+    <div class="border-b px-1 sm:px-2.5" role="group" aria-label="Due">
+      <div class="flex flex-wrap sm:gap-x-1">
         <button
           v-for="option in timings"
           :key="option.value"
           type="button"
-          class="-mb-px flex h-10 items-center gap-1.5 rounded-t-md border-b-2 border-transparent px-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary aria-pressed:text-foreground"
+          class="-mb-px flex h-10 items-center gap-1 rounded-t-md border-b-2 border-transparent px-1.5 text-sm sm:gap-1.5 sm:px-2.5 font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 aria-pressed:border-primary aria-pressed:text-foreground"
           :aria-pressed="timing === option.value"
           :disabled="disabled"
           :data-testid="`timing-filter-${option.value}`"

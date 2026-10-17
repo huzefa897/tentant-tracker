@@ -310,7 +310,7 @@ function openEntry(entryId: string) {
   const tenant = tenantStore.selectedTenant
   if (!tenant) return
 
-  // The summary's back button then returns here rather than to Previous Entries.
+  // The summary's back button then returns here rather than to Bills.
   router.push({
     name: 'rent-entry-details',
     params: { tenantId: tenant.id, entryId },
@@ -353,7 +353,7 @@ function openHistory() {
         <ArrowLeft aria-hidden="true" />
         {{ tab === 'overdue' ? 'Overdue bills' : 'Rent due' }}
       </Button>
-      <header class="mb-8">
+      <header class="mb-6">
         <p
           v-if="accessStore.selectedProperty"
           class="mb-1 text-sm font-semibold text-primary"
@@ -361,10 +361,7 @@ function openHistory() {
         >
           {{ accessStore.selectedProperty.name }}
         </p>
-        <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Tenant Overview</h1>
-        <p class="mt-2 text-muted-foreground">
-          View tenant details, rent information and manage entries.
-        </p>
+        <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">Tenant overview</h1>
       </header>
     </template>
 
@@ -379,7 +376,7 @@ function openHistory() {
       @view-entries="openHistory"
     >
       <template v-if="summaryLoading" #latest-entry>
-        <LoadingRegion label="Loading the latest entry…" data-testid="latest-entry-loading">
+        <LoadingRegion label="Loading the latest bill…" data-testid="latest-entry-loading">
           <div class="rounded-xl border bg-card p-4 sm:p-5">
             <SkeletonLines heading :lines="4" />
           </div>

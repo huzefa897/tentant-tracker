@@ -45,33 +45,46 @@ function reversedBy(payment: Payment): string {
 
 <template>
   <p v-if="payments.length === 0" class="text-sm text-muted-foreground">
-    No payments recorded for this entry.
+    No payments recorded for this bill.
   </p>
 
+  <!-- A table from sm up; on phones each payment reflows into a short block (date and amount,
+       then notes, then its buttons). The roles keep it a table for screen readers either way. -->
   <div v-else>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead class="text-left text-muted-foreground">
-          <tr>
-            <th scope="col" class="py-2 pr-4 font-medium">Paid date</th>
-            <th scope="col" class="py-2 pr-4 text-right font-medium">Amount</th>
-            <th scope="col" class="w-full py-2 pr-4 font-medium">Notes</th>
-            <th v-if="hasActions" scope="col" class="py-2 text-right font-medium">
+    <div class="sm:overflow-x-auto">
+      <table class="w-full text-sm max-sm:block" role="table">
+        <thead class="text-left text-muted-foreground max-sm:sr-only" role="rowgroup">
+          <tr role="row">
+            <th scope="col" class="py-2 pr-4 font-medium" role="columnheader">Paid date</th>
+            <th scope="col" class="py-2 pr-4 text-right font-medium" role="columnheader">Amount</th>
+            <th scope="col" class="w-full py-2 pr-4 font-medium" role="columnheader">Notes</th>
+            <th
+              v-if="hasActions"
+              scope="col"
+              class="py-2 text-right font-medium"
+              role="columnheader"
+            >
               {{ canReverse ? 'Actions' : 'Receipt' }}
             </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody class="max-sm:block" role="rowgroup">
           <tr
             v-for="payment in payments"
             :key="payment.id"
-            class="border-t align-top"
+            class="border-t align-top max-sm:grid max-sm:grid-cols-[1fr_auto] max-sm:gap-x-4 max-sm:py-3 max-sm:first:border-t-0 max-sm:first:pt-0"
+            role="row"
             :class="{ 'text-muted-foreground': payment.status === 'reversed' }"
             :data-status="payment.status"
             data-testid="payment-row"
           >
-            <td class="py-2.5 pr-4 whitespace-nowrap">{{ formatDateValue(payment.paidDate) }}</td>
-            <td class="py-2.5 pr-4 text-right font-medium whitespace-nowrap tabular-nums">
+            <td class="py-2.5 pr-4 whitespace-nowrap max-sm:py-0" role="cell">
+              {{ formatDateValue(payment.paidDate) }}
+            </td>
+            <td
+              class="py-2.5 pr-4 text-right font-medium whitespace-nowrap tabular-nums max-sm:py-0 max-sm:pr-0"
+              role="cell"
+            >
               <span :class="{ 'line-through': payment.status === 'reversed' }">
                 {{ formatINR(payment.amount) }}
               </span>
@@ -84,7 +97,10 @@ function reversedBy(payment: Payment): string {
               </span>
             </td>
             <!-- Text interpolation, never v-html: notes and reasons are user input. -->
-            <td class="py-2.5 pr-4 break-words whitespace-pre-wrap text-muted-foreground">
+            <td
+              class="py-2.5 pr-4 break-words whitespace-pre-wrap text-muted-foreground max-sm:col-span-2 max-sm:py-1 max-sm:pr-0"
+              role="cell"
+            >
               {{ payment.notes.trim() ? payment.notes : '—' }}
               <p
                 v-if="payment.reversal"
@@ -95,8 +111,12 @@ function reversedBy(payment: Payment): string {
                 {{ payment.reversal.reason }}
               </p>
             </td>
-            <td v-if="hasActions" class="py-1.5 text-right whitespace-nowrap">
-              <div class="flex justify-end gap-2">
+            <td
+              v-if="hasActions"
+              class="py-1.5 text-right whitespace-nowrap max-sm:col-span-2 max-sm:pt-2 max-sm:pb-0"
+              role="cell"
+            >
+              <div class="flex flex-wrap justify-end gap-2 max-sm:justify-start">
                 <!-- A reversed payment never gets a new receipt; one it had stays downloadable, void. -->
                 <Button
                   v-if="receipts && (payment.status === 'recorded' || payment.receipt)"

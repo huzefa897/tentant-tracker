@@ -28,14 +28,15 @@ const excluded = computed(() => {
 
 type Tone = 'late' | 'soon' | 'quiet'
 
-// Each tile is two lines: the label, then "3 months · ₹68,000" (the amount only when there are
-// some; the line below the tiles says it's from prepared bills).
+// Each tile is two lines: the label, then "3 months · ₹68,000". The amount shows only when
+// prepared bills give one: months that are all awaiting their bill have no amount, never ₹0
+// (the line below the tiles says what's left out).
 const tiles = computed(() => {
   const s = props.summary
   const months = (count: number, amount: number) => ({
     count,
     unit: count === 1 ? 'month' : 'months',
-    note: count > 0 ? formatINR(amount) : null,
+    note: count > 0 && amount > 0 ? formatINR(amount) : null,
   })
   return [
     {
@@ -110,12 +111,15 @@ const VALUE_TONES: Record<Tone, string> = { ...ICON_TONES, quiet: 'text-foregrou
             class="text-lg leading-7 font-bold tracking-tight text-foreground tabular-nums sm:text-xl"
             data-testid="summary-known-outstanding"
             >{{ formatINR(summary.knownOutstanding) }}</span
-          >{{ ' · '
-          }}<span class="whitespace-nowrap" data-testid="summary-owing-tenants">{{
-            summary.owingTenancyCount > 0
-              ? formatTenantCount(summary.owingTenancyCount)
-              : 'nobody owes'
-          }}</span>
+          >{{ ' '
+          }}<span class="whitespace-nowrap max-sm:block"
+            ><span class="max-sm:hidden">· </span
+            ><span data-testid="summary-owing-tenants">{{
+              summary.owingTenancyCount > 0
+                ? formatTenantCount(summary.owingTenancyCount)
+                : 'nobody owes'
+            }}</span></span
+          >
         </dd>
       </div>
     </dl>

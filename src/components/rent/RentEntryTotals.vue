@@ -15,18 +15,25 @@ defineProps<{
     <h2 id="entry-totals-heading" class="mb-3 text-sm font-medium text-muted-foreground">
       Totals for this page
     </h2>
-    <dl class="grid gap-3 sm:grid-cols-3">
-      <div class="rounded-xl border bg-muted/40 p-4">
-        <dt class="text-xs text-muted-foreground">Total billed</dt>
-        <dd class="mt-1 text-lg font-semibold tabular-nums">{{ formatINR(totals.totalBilled) }}</dd>
+    <!-- One strip of three figures, side by side even on a phone. -->
+    <dl class="grid grid-cols-3 divide-x rounded-xl border">
+      <div class="min-w-0 px-3 py-2.5 sm:px-4 sm:py-3">
+        <dt class="text-xs text-muted-foreground sm:text-sm">Total billed</dt>
+        <dd class="mt-0.5 font-semibold tabular-nums sm:text-lg">
+          {{ formatINR(totals.totalBilled) }}
+        </dd>
       </div>
-      <div class="rounded-xl border bg-muted/40 p-4">
-        <dt class="text-xs text-muted-foreground">Total paid</dt>
-        <dd class="mt-1 text-lg font-semibold tabular-nums">{{ formatINR(totals.totalPaid) }}</dd>
+      <div class="min-w-0 px-3 py-2.5 sm:px-4 sm:py-3">
+        <dt class="text-xs text-muted-foreground sm:text-sm">Total paid</dt>
+        <dd class="mt-0.5 font-semibold tabular-nums sm:text-lg">
+          {{ formatINR(totals.totalPaid) }}
+        </dd>
       </div>
-      <div class="rounded-xl border bg-muted/40 p-4">
-        <dt class="text-xs text-muted-foreground">Outstanding</dt>
-        <dd class="mt-1 text-lg font-semibold tabular-nums">{{ formatINR(totals.outstanding) }}</dd>
+      <div class="min-w-0 px-3 py-2.5 sm:px-4 sm:py-3">
+        <dt class="text-xs text-muted-foreground sm:text-sm">Outstanding</dt>
+        <dd class="mt-0.5 font-semibold tabular-nums sm:text-lg">
+          {{ formatINR(totals.outstanding) }}
+        </dd>
       </div>
     </dl>
     <p v-if="voidCount" class="mt-2 text-xs text-muted-foreground" data-testid="void-not-counted">

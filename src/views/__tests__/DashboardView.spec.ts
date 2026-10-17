@@ -105,7 +105,7 @@ describe('DashboardView', () => {
     useTenantStore().selectTenant('tenant-002')
     await flushPromises()
 
-    const addEntry = view!.findAll('button').find((button) => button.text() === 'Add New Entry')
+    const addEntry = view!.findAll('button').find((button) => button.text() === 'New bill')
     await addEntry!.trigger('click')
 
     // The entry page is lazy loaded, so navigation finishes after its chunk is imported.
@@ -120,7 +120,7 @@ describe('DashboardView', () => {
 
     const previousEntries = view!
       .findAll('button')
-      .find((button) => button.text().startsWith('Previous Entries'))
+      .find((button) => button.text().startsWith('Bills'))
     await previousEntries!.trigger('click')
 
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
@@ -207,7 +207,7 @@ describe('DashboardView', () => {
     function previousEntriesText() {
       return view!
         .findAll('button')
-        .find((b) => b.text().startsWith('Previous Entries'))!
+        .find((b) => b.text().startsWith('Bills'))!
         .text()
     }
 
@@ -227,11 +227,11 @@ describe('DashboardView', () => {
         testProperty.id,
         'tenant-001',
       )
-      expect(previousEntriesText()).toBe('Previous Entries (2)')
+      expect(previousEntriesText()).toBe('Bills (2)')
 
       useTenantStore().selectTenant('tenant-002')
       await flushPromises()
-      expect(previousEntriesText()).toBe('Previous Entries (0)')
+      expect(previousEntriesText()).toBe('Bills (0)')
     })
 
     it('shows a skeleton instead of a count or latest entry on error, then auto-retries', async () => {
@@ -244,13 +244,13 @@ describe('DashboardView', () => {
         await flushPromises()
 
         expect(view!.find('[data-testid="entries-error"]').exists()).toBe(false)
-        expect(previousEntriesText()).toBe('Previous Entries')
+        expect(previousEntriesText()).toBe('Bills')
         expect(view!.find('[data-testid="latest-entry-loading"]').exists()).toBe(true)
 
         vi.advanceTimersByTime(5000)
         await flushPromises()
 
-        expect(previousEntriesText()).toBe('Previous Entries (1)')
+        expect(previousEntriesText()).toBe('Bills (1)')
         expect(view!.find('[data-testid="latest-entry-loading"]').exists()).toBe(false)
       } finally {
         vi.useRealTimers()
@@ -361,7 +361,7 @@ describe('DashboardView', () => {
       await flushPromises()
 
       expect(view!.get('[data-testid="latest-entry-loading"]').text()).toBe(
-        'Loading the latest entry…',
+        'Loading the latest bill…',
       )
       expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
     })
@@ -373,7 +373,7 @@ describe('DashboardView', () => {
       await flushPromises()
 
       expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
-      expect(previousEntriesText()).toBe('Previous Entries (0)')
+      expect(previousEntriesText()).toBe('Bills (0)')
     })
 
     it('reloads the latest entry when returning with a tenant selected', async () => {
@@ -748,7 +748,7 @@ describe('DashboardView', () => {
           .get('[data-testid="overdue-bill"]')
           .findAll('td')
           .map((td) => td.text()),
-      ).toEqual(['11 Oct 2026 4 days overdue', '₹15,750', '₹10,000', '₹5,750', 'View bill'])
+      ).toEqual(['11 Oct 2026 Overdue 4 days', '₹15,750', '₹10,000', '₹5,750', 'View bill'])
       expect(view!.get('[data-testid="updated-at"]').text()).toBe('Updated just now')
     })
 

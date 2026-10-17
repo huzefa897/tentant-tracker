@@ -1,16 +1,6 @@
 <script setup lang="ts">
-import { computed, type Component } from 'vue'
-import {
-  Building2,
-  CalendarDays,
-  History,
-  Phone,
-  Plus,
-  ShieldCheck,
-  User,
-  Wallet,
-  Zap,
-} from '@lucide/vue'
+import { computed } from 'vue'
+import { History, Plus, User } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import type { Tenant } from '@/types/tenant'
@@ -20,7 +10,7 @@ import { formatIndianPhoneNumberNational } from '@/utils/phone'
 
 const props = defineProps<{
   tenant: Tenant
-  // Saved entries for this tenant; null while unknown (not loaded, or loading failed).
+  // Saved bills for this tenant; null while unknown (not loaded, or loading failed).
   entryCount?: number | null
 }>()
 
@@ -29,64 +19,30 @@ const emit = defineEmits<{
   viewEntries: []
 }>()
 
-interface DetailItem {
-  label: string
-  value: string
-  icon: Component
-  // lg layout: first row has 3 tiles, second row 4
-  span: string
-}
-
-const details = computed<DetailItem[]>(() => [
-  { label: 'Name of Tenant', value: props.tenant.name, icon: User, span: 'lg:col-span-4' },
+// The tenancy's terms as one quiet list; the name and flat are the heading, never repeated.
+// The mobile number is a tel: link, so it rings from a phone.
+const details = computed(() => [
+  { label: 'Rent', value: formatINR(props.tenant.rentAmount) },
+  { label: 'Due each month', value: formatOrdinal(props.tenant.rentDueDay) },
+  { label: 'Electricity', value: `${formatINR(props.tenant.electricityRate)} / unit` },
+  { label: 'Deposit', value: formatINR(props.tenant.depositAmount) },
   {
-    label: 'Rent Amount',
-    value: formatINR(props.tenant.rentAmount),
-    icon: Wallet,
-    span: 'lg:col-span-4',
-  },
-  {
-    label: 'Flat Number',
-    value: props.tenant.flatNumber,
-    icon: Building2,
-    span: 'lg:col-span-4',
-  },
-  {
-    label: 'Rent Due Day (of month)',
-    value: formatOrdinal(props.tenant.rentDueDay),
-    icon: CalendarDays,
-    span: 'lg:col-span-3',
-  },
-  {
-    label: 'Electricity Per Unit',
-    value: `${formatINR(props.tenant.electricityRate)} / unit`,
-    icon: Zap,
-    span: 'lg:col-span-3',
-  },
-  {
-    label: 'Mobile Number',
+    label: 'Mobile',
     value: formatIndianPhoneNumberNational(props.tenant.mobileNumber),
-    icon: Phone,
-    span: 'lg:col-span-3',
-  },
-  {
-    label: 'Deposit Amount',
-    value: formatINR(props.tenant.depositAmount),
-    icon: ShieldCheck,
-    span: 'lg:col-span-3',
+    href: `tel:${props.tenant.mobileNumber}`,
   },
 ])
 </script>
 
 <template>
   <section aria-labelledby="tenant-name">
-    <div class="rounded-2xl border bg-muted/40 p-4 sm:p-6">
-      <div class="mb-6 flex items-center gap-4">
+    <div class="rounded-xl border bg-card p-4 sm:p-6">
+      <div class="flex items-center gap-4">
         <div
-          class="flex size-14 shrink-0 items-center justify-center rounded-full bg-secondary text-primary sm:size-16"
+          class="flex size-12 shrink-0 items-center justify-center rounded-full bg-secondary text-primary"
           aria-hidden="true"
         >
-          <User class="size-7 fill-current sm:size-8" />
+          <User class="size-6" />
         </div>
         <div class="min-w-0">
           <h2 id="tenant-name" class="truncate text-xl font-semibold sm:text-2xl">
@@ -96,45 +52,36 @@ const details = computed<DetailItem[]>(() => [
         </div>
       </div>
 
-      <!-- Below the name: the page fills it (the dashboard shows the latest entry). -->
-      <div v-if="$slots['latest-entry']" class="mb-6">
+      <!-- Below the name: the page fills it (the dashboard shows the latest bill). -->
+      <div v-if="$slots['latest-entry']" class="mt-5">
         <slot name="latest-entry" />
       </div>
 
-      <dl class="grid gap-3 sm:grid-cols-2 lg:grid-cols-12">
-        <div
-          v-for="item in details"
-          :key="item.label"
-          class="flex items-center gap-4 rounded-xl border bg-card p-4"
-          :class="item.span"
-        >
-          <div
-            class="flex size-11 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary"
-            aria-hidden="true"
-          >
-            <component :is="item.icon" class="size-5" />
-          </div>
-          <div class="min-w-0">
-            <dt class="text-xs text-muted-foreground">{{ item.label }}</dt>
-            <dd class="mt-0.5 truncate text-base font-semibold">{{ item.value }}</dd>
-          </div>
+      <dl class="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 border-t pt-5 sm:grid-cols-3 lg:grid-cols-5">
+        <div v-for="item in details" :key="item.label" class="min-w-0">
+          <dt class="text-sm text-muted-foreground">{{ item.label }}</dt>
+          <dd class="mt-0.5 truncate font-semibold tabular-nums">
+            <a
+              v-if="item.href"
+              :href="item.href"
+              class="rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+              >{{ item.value }}</a
+            >
+            <template v-else>{{ item.value }}</template>
+          </dd>
         </div>
       </dl>
-    </div>
 
-    <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
-      <Button class="h-12 px-8 text-base sm:min-w-64" @click="emit('addEntry')">
-        <Plus aria-hidden="true" />
-        Add New Entry
-      </Button>
-      <Button
-        variant="secondary"
-        class="h-12 px-8 text-base sm:min-w-52"
-        @click="emit('viewEntries')"
-      >
-        <History aria-hidden="true" />
-        Previous Entries<template v-if="entryCount != null"> ({{ entryCount }})</template>
-      </Button>
+      <div class="mt-6 flex flex-col gap-3 sm:flex-row">
+        <Button class="h-11 px-6" @click="emit('addEntry')">
+          <Plus aria-hidden="true" />
+          New bill
+        </Button>
+        <Button variant="outline" class="h-11 px-6" @click="emit('viewEntries')">
+          <History aria-hidden="true" />
+          Bills<template v-if="entryCount != null"> ({{ entryCount }})</template>
+        </Button>
+      </div>
     </div>
   </section>
 </template>

@@ -230,7 +230,7 @@ const inputClass = 'h-11 bg-background'
 
     <div class="grid gap-3 sm:grid-cols-2">
       <Button type="submit" class="h-11 sm:order-last" :disabled="saving">
-        {{ saving ? 'Saving…' : 'Save Payment' }}
+        {{ saving ? 'Saving…' : 'Save payment' }}
       </Button>
       <Button
         type="button"

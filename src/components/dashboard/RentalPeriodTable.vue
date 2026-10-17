@@ -69,7 +69,7 @@ const rows = computed(() =>
         </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.period.id" class="border-t" data-testid="period-row">
-            <th scope="row" class="min-w-32 px-4 py-2 text-left font-medium">
+            <th scope="row" class="px-4 py-2 text-left font-medium whitespace-nowrap">
               {{ row.period.name }}
               <span v-if="row.ended" class="block text-sm font-normal text-muted-foreground"
                 >Ended tenancy</span

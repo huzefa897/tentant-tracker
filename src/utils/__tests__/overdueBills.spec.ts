@@ -13,8 +13,8 @@ describe('formatOverdueBillCount', () => {
 
 describe('formatDaysOverdue', () => {
   it.each([
-    [1, '1 day overdue'],
-    [34, '34 days overdue'],
+    [1, 'Overdue 1 day'],
+    [34, 'Overdue 34 days'],
   ])('%i → %s', (days, text) => {
     expect(formatDaysOverdue(days)).toBe(text)
   })

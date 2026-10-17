@@ -81,13 +81,22 @@ const groups = computed(() =>
           </div>
         </header>
 
-        <!-- Tablets and up: one row per month. -->
-        <table class="hidden w-full text-sm sm:table">
+        <!-- Tablets and up: one row per month. Fixed column widths, so the columns line up from
+             one tenant's card to the next. -->
+        <table class="hidden w-full table-fixed text-sm sm:table">
           <caption class="sr-only">
             {{
               `Overdue bills of ${group.tenant.name}`
             }}
           </caption>
+          <colgroup>
+            <col class="w-[22%]" />
+            <col class="w-[22%]" />
+            <col />
+            <col />
+            <col />
+            <col class="w-32" />
+          </colgroup>
           <thead class="text-left text-muted-foreground">
             <tr>
               <th scope="col" class="px-5 pt-3 pb-2 font-medium">Month</th>

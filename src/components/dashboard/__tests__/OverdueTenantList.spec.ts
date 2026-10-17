@@ -41,8 +41,8 @@ describe('OverdueTenantList', () => {
         .findAll('[data-testid="overdue-bill"]')
         .map((row) => [row.get('th'), ...row.findAll('td').slice(0, 4)].map((cell) => cell.text())),
     ).toEqual([
-      ['August 2026', '10 Sept 2026 35 days overdue', '₹15,750', '₹0', '₹15,750'],
-      ['September 2026', '11 Oct 2026 1 day overdue', '₹15,750', '₹10,000', '₹5,750'],
+      ['August 2026', '10 Sept 2026 Overdue 35 days', '₹15,750', '₹0', '₹15,750'],
+      ['September 2026', '11 Oct 2026 Overdue 1 day', '₹15,750', '₹10,000', '₹5,750'],
     ])
     // The same months for phones.
     expect(tenant.findAll('[data-testid="overdue-bill-item"]')).toHaveLength(2)

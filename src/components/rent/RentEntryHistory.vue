@@ -45,7 +45,7 @@ const rows = computed(() =>
     <!-- Desktop -->
     <div class="hidden overflow-x-auto rounded-xl border md:block">
       <table class="w-full text-sm">
-        <thead class="bg-muted/40 text-left text-muted-foreground">
+        <thead class="bg-muted/40 text-left whitespace-nowrap text-muted-foreground">
           <tr>
             <th scope="col" class="px-4 py-3 font-medium">Billing month</th>
             <th scope="col" class="px-4 py-3 font-medium">Due date</th>
@@ -64,7 +64,9 @@ const rows = computed(() =>
             :class="{ 'bg-muted/30 text-muted-foreground': row.isVoid }"
             data-testid="history-row"
           >
-            <th scope="row" class="px-4 py-3 text-left font-medium">{{ row.month }}</th>
+            <th scope="row" class="px-4 py-3 text-left font-medium whitespace-nowrap">
+              {{ row.month }}
+            </th>
             <td class="px-4 py-3 whitespace-nowrap" data-testid="history-due">{{ row.due }}</td>
             <td class="px-4 py-3 text-right tabular-nums" :class="{ 'line-through': row.isVoid }">
               {{ formatINR(row.totalDue) }}
@@ -98,10 +100,10 @@ const rows = computed(() =>
                 <Button
                   variant="ghost"
                   class="h-10"
-                  :aria-label="`View summary for ${row.month}`"
+                  :aria-label="`View bill for ${row.month}`"
                   @click="emit('view', row.id)"
                 >
-                  View Summary
+                  View bill
                 </Button>
               </div>
             </td>
@@ -141,11 +143,11 @@ const rows = computed(() =>
             <dd class="tabular-nums">{{ formatINR(row.outstanding) }}</dd>
           </div>
         </dl>
-        <div class="mt-4 grid gap-2">
+        <div class="mt-4 flex gap-2">
           <Button
             v-if="row.totalPaid > 0"
             variant="outline"
-            class="h-11 w-full"
+            class="h-11 min-w-0 flex-1 px-2"
             :disabled="!!downloadingEntryId"
             :aria-label="`Download the latest receipt for ${row.month}`"
             data-testid="download-entry-receipt"
@@ -156,11 +158,11 @@ const rows = computed(() =>
           </Button>
           <Button
             variant="outline"
-            class="h-11 w-full"
-            :aria-label="`View summary for ${row.month}`"
+            class="h-11 min-w-0 flex-1 px-2"
+            :aria-label="`View bill for ${row.month}`"
             @click="emit('view', row.id)"
           >
-            View Summary
+            View bill
             <ChevronRight aria-hidden="true" />
           </Button>
         </div>

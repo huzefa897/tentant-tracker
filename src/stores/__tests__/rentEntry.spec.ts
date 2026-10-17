@@ -318,7 +318,7 @@ describe('loadSummary', () => {
     expect(store.summaries['tenant-001']).toMatchObject({
       status: 'error',
       latest: null,
-      error: 'Rent entries are unavailable right now. Please try again shortly.',
+      error: 'Bills are unavailable right now. Please try again shortly.',
     })
   })
 
@@ -423,7 +423,7 @@ describe('addEntry', () => {
       { ...withInitialPayment(10000), initialPayment: { amount: 100, paidDate: '', notes: '' } },
     ]) {
       const error = await saveError(store.addEntry(invalid, KEY))
-      expect(error.message).toBe('This entry is not valid. Check the form and try again.')
+      expect(error.message).toBe('This bill is not valid. Check the form and try again.')
     }
     expect(createEntry).not.toHaveBeenCalled()
   })
@@ -523,7 +523,7 @@ describe('addEntry', () => {
 
     const error = await saveError(store.addEntry(submission(), KEY))
 
-    expect(error.message).toBe("You don't have permission to add entries for this property.")
+    expect(error.message).toBe("You don't have permission to add bills for this property.")
   })
 
   it('needs a selected property', async () => {
@@ -939,7 +939,7 @@ describe('receipts', () => {
 
     const error = await receiptError(store.getLatestReceipt('tenant-001', 'oct'))
 
-    expect(error.message).toBe('No payments have been recorded for this entry yet.')
+    expect(error.message).toBe('No payments have been recorded for this bill yet.')
     expect(issueReceipt).not.toHaveBeenCalled()
   })
 
@@ -959,7 +959,7 @@ describe('receipts', () => {
 
     const error = await receiptError(store.getLatestReceipt('tenant-001', 'sep'))
 
-    expect(error.message).toBe("This entry can't be found. It may no longer be available.")
+    expect(error.message).toBe("This bill can't be found. It may no longer be available.")
   })
 
   it('forgets loaded receipts when the property changes', async () => {
@@ -1122,7 +1122,7 @@ describe('reversing payments', () => {
     await store.reversePayment('tenant-001', store.payments.sep!.payments[0]!, REASON)
 
     await expect(store.getLatestReceipt('tenant-001', 'sep')).rejects.toThrow(
-      'No payments have been recorded for this entry yet.',
+      'No payments have been recorded for this bill yet.',
     )
   })
 
