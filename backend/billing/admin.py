@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .calculations import entry_amounts
-from .models import LegacyRecord, Payment, PaymentReversal, Receipt, RentalPeriod, RentEntry
+from .models import LegacyRecord, MeterReading, Payment, PaymentReversal, Receipt, RentalPeriod, RentEntry
 
 
 class ViewOnlyAdminMixin:
@@ -62,6 +62,33 @@ class RentalPeriodAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
         "not_owed_at",
         "not_owed_by",
         "not_owed_reason",
+    )
+    readonly_fields = fields
+
+
+@admin.register(MeterReading)
+class MeterReadingAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
+    """Readings are recorded, voided and corrected in the app (billing/meter.py), which checks
+    their order. The baseline is the tenancy's (Tenancies)."""
+
+    list_display = ("tenancy", "read_on", "reading", "status", "created_by", "created_at")
+    list_filter = ("tenancy__property", "status")
+    list_select_related = ("tenancy", "created_by")
+    search_fields = ("tenancy__name", "tenancy__flat_number")
+    date_hierarchy = "read_on"
+    fields = (
+        "id",
+        "tenancy",
+        "reading",
+        "read_on",
+        "notes",
+        "created_by",
+        "created_at",
+        "status",
+        "voided_at",
+        "voided_by",
+        "void_reason",
+        "replaces_reading",
     )
     readonly_fields = fields
 

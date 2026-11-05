@@ -7,7 +7,7 @@ from rest_framework import serializers
 from properties.models import business_date
 
 from .calculations import due_status, entry_amounts
-from .models import Payment, PaymentReversal, Receipt, RentalPeriod, RentEntry
+from .models import MeterReading, Payment, PaymentReversal, Receipt, RentalPeriod, RentEntry
 
 MONTH_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -222,6 +222,19 @@ def money(value) -> str:
     return f"{value:.2f}"
 
 
+def reading_text(value: Decimal) -> str:
+    return f"{value:.3f}"
+
+
+def meter_point(reading, read_on, reading_id=None) -> dict | None:
+    if reading is None:
+        return None
+    point = {"reading": reading_text(reading), "readOn": read_on.isoformat()}
+    if reading_id is not False:
+        point["id"] = None if reading_id is None else str(reading_id)
+    return point
+
+
 class ReceiptSerializer(serializers.BaseSerializer):
     """An issued receipt, entirely from its saved snapshot: never today's tenancy, property,
     bill or payment details. Money is a decimal string. status: "issued", or "void" once its
@@ -324,6 +337,81 @@ class EntryCorrectionSerializer(EntryVoidSerializer):
         trim_whitespace=True,
         error_messages={"max_length": "Notes must be 500 characters or fewer."},
     )
+
+
+class MeterReadingCreateSerializer(serializers.Serializer):
+    """One meter reading: the units on the meter and the day it was read. The tenancy comes from
+    the URL; the order checks against its other readings are the server's (billing/meter.py)."""
+
+    reading = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        min_value=Decimal("0"),
+        error_messages={
+            "min_value": "A meter reading can't be negative.",
+            "invalid": "Enter the reading as a number, e.g. 2920.",
+            "max_decimal_places": "A reading can have at most three decimal places.",
+        },
+    )
+    readOn = serializers.DateField(source="read_on")
+    notes = serializers.CharField(
+        max_length=500,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+        error_messages={"max_length": "Notes must be 500 characters or fewer."},
+    )
+
+    def to_internal_value(self, data):
+        refuse_unknown_fields(self, data)
+        return super().to_internal_value(data)
+
+
+class MeterReadingVoidSerializer(serializers.Serializer):
+    reason = serializers.CharField(
+        max_length=500,
+        trim_whitespace=True,
+        error_messages={
+            "required": "Say why this reading is being voided.",
+            "blank": "Say why this reading is being voided.",
+            "max_length": "The reason must be 500 characters or fewer.",
+        },
+    )
+
+    def to_internal_value(self, data):
+        refuse_unknown_fields(self, data)
+        return super().to_internal_value(data)
+
+
+class MeterReadingCorrectionSerializer(MeterReadingVoidSerializer, MeterReadingCreateSerializer):
+    """The replacement's reading, date and notes, and why the original is corrected."""
+
+
+def meter_reading_data(reading: MeterReading, consumption=None) -> dict:
+    """A reading as the API shows it. consumption: units since the active reading before it
+    (or the baseline), null for a void one."""
+    try:
+        replaced_by = str(reading.replaced_by.pk)
+    except MeterReading.DoesNotExist:
+        replaced_by = None
+    return {
+        "id": str(reading.pk),
+        "reading": reading_text(reading.reading),
+        "readOn": reading.read_on.isoformat(),
+        "notes": reading.notes,
+        "status": reading.status,
+        "consumption": None if consumption is None else reading_text(consumption),
+        "createdAt": serializers.DateTimeField().to_representation(reading.created_at),
+        "voidedAt": None
+        if reading.voided_at is None
+        else serializers.DateTimeField().to_representation(reading.voided_at),
+        "voidedByName": None if reading.voided_by is None else person_name(reading.voided_by),
+        "voidReason": reading.void_reason,
+        "replacesReadingId": None
+        if reading.replaces_reading_id is None
+        else str(reading.replaces_reading_id),
+        "replacedByReadingId": replaced_by,
+    }
 
 
 class RentEntryCreateSerializer(serializers.Serializer):
