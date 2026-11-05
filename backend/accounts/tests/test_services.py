@@ -3,139 +3,143 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from accounts.firebase import FirebasePhoneNumberTakenError, FirebaseUnavailableError
-from accounts.services import (
-    PhoneNumberInUseError,
-    check_firebase_identity,
-    link_firebase_identity,
-)
+from accounts.firebase import FirebaseUnavailableError
+from accounts.services import NotRegisteredError, get_registered_user, unlink_if_email_changed
 
-NUMBER = "+919000000001"
+EMAIL = "owner@example.com"
+
+
+def google_claims(uid="uid-1", email=EMAIL, **extra):
+    """Verified claims of a Google sign-in through Firebase."""
+    return {
+        "uid": uid,
+        "email": email,
+        "email_verified": True,
+        "firebase": {"sign_in_provider": "google.com"},
+        **extra,
+    }
+
+
+class GetRegisteredUserTests(TestCase):
+    def setUp(self):
+        self.User = get_user_model()
+
+    def invite(self, email=EMAIL, **fields):
+        return self.User.objects.create_user(username=f"p-{email}", email=email, **fields)
+
+    def test_first_google_sign_in_links_the_invited_person(self):
+        person = self.invite()
+
+        with self.assertLogs("accounts.services", "INFO"):
+            self.assertEqual(get_registered_user(google_claims()), person)
+
+        person.refresh_from_db()
+        self.assertEqual(person.firebase_uid, "uid-1")
+
+    def test_a_linked_person_is_found_by_uid_alone(self):
+        person = self.invite(firebase_uid="uid-1")
+
+        # Even if the Google account's email has since changed.
+        self.assertEqual(get_registered_user(google_claims(email="new@example.com")), person)
+
+    def test_matches_the_email_ignoring_case(self):
+        person = self.invite()
+
+        with self.assertLogs("accounts.services", "INFO"):
+            self.assertEqual(get_registered_user(google_claims(email="Owner@Example.COM")), person)
+
+    def test_an_email_nobody_added_is_refused_and_creates_nothing(self):
+        self.invite()
+
+        with self.assertRaises(NotRegisteredError):
+            get_registered_user(google_claims(email="stranger@example.com"))
+
+        self.assertEqual(self.User.objects.count(), 1)
+        self.assertFalse(self.User.objects.filter(firebase_uid="uid-1").exists())
+
+    def test_never_links_an_unverified_email(self):
+        self.invite()
+
+        for claims in [
+            google_claims(email_verified=False),
+            {**google_claims(), "email_verified": "true"},  # only a real True counts
+            {k: v for k, v in google_claims().items() if k != "email_verified"},
+        ]:
+            with self.subTest(claims=claims), self.assertRaises(NotRegisteredError):
+                get_registered_user(claims)
+
+        self.assertIsNone(self.User.objects.get().firebase_uid)
+
+    def test_never_links_a_sign_in_other_than_google(self):
+        self.invite()
+
+        for provider in ["password", "phone", "emailLink", None]:
+            claims = google_claims(firebase={"sign_in_provider": provider})
+            with self.subTest(provider=provider), self.assertRaises(NotRegisteredError):
+                get_registered_user(claims)
+
+        self.assertIsNone(self.User.objects.get().firebase_uid)
+
+    def test_never_relinks_a_person_linked_to_another_identity(self):
+        self.invite(firebase_uid="uid-original")
+
+        with self.assertRaises(NotRegisteredError):
+            get_registered_user(google_claims(uid="uid-other"))
+
+        self.assertEqual(self.User.objects.get().firebase_uid, "uid-original")
+
+    def test_a_person_without_an_email_is_refused_even_when_linked(self):
+        # Removing the email in admin ends access, even for an older token.
+        self.User.objects.create_user(username="p", firebase_uid="uid-1")
+
+        with self.assertRaises(NotRegisteredError):
+            get_registered_user(google_claims())
+
+    def test_claims_without_an_email_are_refused(self):
+        self.invite()
+
+        with self.assertRaises(NotRegisteredError):
+            get_registered_user(google_claims(email=None))
 
 
 @mock.patch("accounts.services.revoke_firebase_sessions")
-@mock.patch("accounts.services.set_firebase_phone_number")
-@mock.patch("accounts.services.get_or_create_firebase_uid", return_value="uid-1")
-class LinkFirebaseIdentityTests(TestCase):
+class UnlinkIfEmailChangedTests(TestCase):
     def setUp(self):
         self.User = get_user_model()
 
-    def test_links_a_new_person_to_their_numbers_identity(self, get_uid, set_phone, revoke):
-        user = self.User(username="new", phone_number=NUMBER)
+    def test_a_changed_email_unlinks_and_signs_the_person_out(self, revoke):
+        user = self.User(username="p", firebase_uid="uid-1", email="new@example.com")
 
-        link_firebase_identity(user, previous_phone_number="")
+        unlink_if_email_changed(user, previous_email=EMAIL)
 
-        get_uid.assert_called_once_with(NUMBER)
+        revoke.assert_called_once_with("uid-1")
+        self.assertIsNone(user.firebase_uid)
+
+    def test_a_removed_email_unlinks_and_signs_the_person_out(self, revoke):
+        user = self.User(username="p", firebase_uid="uid-1", email="")
+
+        unlink_if_email_changed(user, previous_email=EMAIL)
+
+        revoke.assert_called_once_with("uid-1")
+        self.assertIsNone(user.firebase_uid)
+
+    def test_an_unchanged_email_changes_nothing(self, revoke):
+        user = self.User(username="p", firebase_uid="uid-1", email="Owner@Example.com")
+
+        unlink_if_email_changed(user, previous_email=EMAIL)
+
+        revoke.assert_not_called()
         self.assertEqual(user.firebase_uid, "uid-1")
-        set_phone.assert_not_called()
+
+    def test_a_person_never_linked_needs_no_firebase_call(self, revoke):
+        unlink_if_email_changed(self.User(username="p", email="new@example.com"), EMAIL)
+
         revoke.assert_not_called()
 
-    def test_leaves_a_person_without_a_number_unlinked(self, get_uid, set_phone, revoke):
-        user = self.User(username="admin")
-
-        link_firebase_identity(user, previous_phone_number="")
-
-        get_uid.assert_not_called()
-        self.assertIsNone(user.firebase_uid)
-
-    def test_refuses_an_identity_that_belongs_to_someone_else(self, get_uid, set_phone, revoke):
-        self.User.objects.create_user(username="taken", firebase_uid="uid-1")
-        user = self.User(username="new", phone_number=NUMBER)
-
-        with self.assertRaises(PhoneNumberInUseError):
-            link_firebase_identity(user, previous_phone_number="")
-        self.assertIsNone(user.firebase_uid)
-
-    def test_moves_a_linked_identity_to_a_changed_number(self, get_uid, set_phone, revoke):
-        user = self.User(username="p", firebase_uid="uid-1", phone_number="+919000000002")
-
-        link_firebase_identity(user, previous_phone_number=NUMBER)
-
-        set_phone.assert_called_once_with("uid-1", "+919000000002")
-        get_uid.assert_not_called()
-        # Whoever is signed in with the old number has to sign in again.
-        revoke.assert_called_once_with("uid-1")
-
-    def test_removing_the_number_stops_phone_sign_in(self, get_uid, set_phone, revoke):
-        user = self.User(username="p", firebase_uid="uid-1", phone_number="")
-
-        link_firebase_identity(user, previous_phone_number=NUMBER)
-
-        set_phone.assert_called_once_with("uid-1", None)
-        # Sessions that are already signed in end too, not just new sign-ins.
-        revoke.assert_called_once_with("uid-1")
-
-    def test_does_nothing_when_a_linked_number_is_unchanged(self, get_uid, set_phone, revoke):
-        user = self.User(username="p", firebase_uid="uid-1", phone_number=NUMBER)
-
-        link_firebase_identity(user, previous_phone_number=NUMBER)
-
-        set_phone.assert_not_called()
-        get_uid.assert_not_called()
-        revoke.assert_not_called()
-
-    def test_a_number_taken_in_firebase_is_in_use(self, get_uid, set_phone, revoke):
-        set_phone.side_effect = FirebasePhoneNumberTakenError("taken")
-        user = self.User(username="p", firebase_uid="uid-1", phone_number="+919000000002")
-
-        with self.assertRaises(PhoneNumberInUseError):
-            link_firebase_identity(user, previous_phone_number=NUMBER)
-        revoke.assert_not_called()
-
-    def test_a_failed_revocation_propagates(self, get_uid, set_phone, revoke):
+    def test_outages_propagate_and_keep_the_link(self, revoke):
         revoke.side_effect = FirebaseUnavailableError("down")
-        user = self.User(username="p", firebase_uid="uid-1", phone_number="")
+        user = self.User(username="p", firebase_uid="uid-1", email="")
 
         with self.assertRaises(FirebaseUnavailableError):
-            link_firebase_identity(user, previous_phone_number=NUMBER)
-
-    def test_firebase_outages_propagate(self, get_uid, set_phone, revoke):
-        get_uid.side_effect = FirebaseUnavailableError("down")
-
-        with self.assertRaises(FirebaseUnavailableError):
-            link_firebase_identity(self.User(username="n", phone_number=NUMBER), "")
-
-
-@mock.patch("accounts.services.find_firebase_uid", return_value=None)
-class CheckFirebaseIdentityTests(TestCase):
-    """Read-only: never creates or changes Firebase identities."""
-
-    def setUp(self):
-        self.User = get_user_model()
-
-    def test_a_new_number_is_fine(self, find):
-        check_firebase_identity(self.User(username="n", phone_number=NUMBER), "")
-
-        find.assert_called_once_with(NUMBER)
-
-    def test_reusing_an_unclaimed_identity_is_fine(self, find):
-        find.return_value = "uid-free"
-
-        check_firebase_identity(self.User(username="n", phone_number=NUMBER), "")
-
-    def test_an_identity_claimed_by_someone_else_is_in_use(self, find):
-        self.User.objects.create_user(username="taken", firebase_uid="uid-taken")
-        find.return_value = "uid-taken"
-
-        with self.assertRaises(PhoneNumberInUseError):
-            check_firebase_identity(self.User(username="n", phone_number=NUMBER), "")
-
-    def test_moving_to_a_number_another_identity_has_is_in_use(self, find):
-        find.return_value = "uid-other"
-        user = self.User(username="p", firebase_uid="uid-1", phone_number="+919000000002")
-
-        with self.assertRaises(PhoneNumberInUseError):
-            check_firebase_identity(user, NUMBER)
-
-    def test_skips_the_lookup_when_nothing_would_change(self, find):
-        check_firebase_identity(self.User(username="p", firebase_uid="u", phone_number=NUMBER), NUMBER)
-        check_firebase_identity(self.User(username="admin"), "")
-        check_firebase_identity(self.User(username="p", firebase_uid="u"), NUMBER)  # removal
-
-        find.assert_not_called()
-
-    def test_outages_propagate(self, find):
-        find.side_effect = FirebaseUnavailableError("down")
-
-        with self.assertRaises(FirebaseUnavailableError):
-            check_firebase_identity(self.User(username="n", phone_number=NUMBER), "")
+            unlink_if_email_changed(user, EMAIL)
+        self.assertEqual(user.firebase_uid, "uid-1")

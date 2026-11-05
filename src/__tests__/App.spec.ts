@@ -55,7 +55,7 @@ describe('App', () => {
   it('clears the previous user’s state when another account signs in', async () => {
     const app = await openDashboard()
 
-    notify({ id: 'someone-else', phoneNumber: '+61412345678' })
+    notify({ id: 'someone-else', email: 'someone@example.com' })
     await flushPromises()
 
     expect(useAccessStore().identity).toBeNull()

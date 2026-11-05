@@ -6,7 +6,7 @@ import type { AuthUser } from '@/types/auth'
 //   vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 // and call resetAuthService() in beforeEach. Nothing here touches Firebase.
 
-export const testUser: AuthUser = { id: 'firebase-uid-1', phoneNumber: '+918341413827' }
+export const testUser: AuthUser = { id: 'firebase-uid-1', email: 'owner@example.com' }
 
 let restoredUser: AuthUser | null = null
 
@@ -17,8 +17,7 @@ export function signInAs(user: AuthUser | null = testUser) {
 
 export const authService = {
   onAuthStateChanged: vi.fn(),
-  sendOtp: vi.fn(),
-  verifyOtp: vi.fn(),
+  signInWithGoogle: vi.fn(),
   getIdToken: vi.fn(),
   logout: vi.fn(),
 }
@@ -29,8 +28,7 @@ export function resetAuthService() {
     listener(restoredUser)
     return () => {}
   })
-  authService.sendOtp.mockReset().mockResolvedValue(undefined)
-  authService.verifyOtp.mockReset().mockResolvedValue(testUser)
+  authService.signInWithGoogle.mockReset().mockResolvedValue(testUser)
   authService.getIdToken.mockReset().mockResolvedValue('test-id-token')
   authService.logout.mockReset().mockResolvedValue(undefined)
 }

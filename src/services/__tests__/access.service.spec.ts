@@ -9,6 +9,7 @@ vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 const me = {
   id: 7,
   name: 'Test Owner',
+  email: 'owner@example.com',
   phoneNumber: '+918341413827',
   properties: [{ id: 'property-1', name: 'Test Towers', role: 'owner' }],
 }
@@ -30,7 +31,8 @@ describe('parseAppIdentity', () => {
     ['not an object', null],
     ['a missing properties list', { id: 7, phoneNumber: '' }],
     ['a string id', { ...me, id: '7' }],
-    ['a missing name', { id: 7, phoneNumber: '', properties: [] }],
+    ['a missing name', { id: 7, email: '', phoneNumber: '', properties: [] }],
+    ['a missing email', { ...me, email: undefined }],
     ['an unknown role', { ...me, properties: [{ id: 'p', name: 'P', role: 'tenant' }] }],
     ['a property without a name', { ...me, properties: [{ id: 'p', role: 'owner' }] }],
   ])('rejects %s instead of treating it as no access', (_label, data) => {

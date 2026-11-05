@@ -16,7 +16,15 @@ Stack: Vue Router, Pinia (setup stores), Tailwind v4, shadcn-vue (reka-ui), Axio
 
 Before calling work done: `npm run format && npm run lint:check && npm test && npm run build`. CI (`.github/workflows/ci.yml`) runs the same checks on every PR and push to `dev` and `main`, plus the conflict check on PRs (fails only on conflicts with the PR's base; conflicts with other PRs are warnings).
 
-**Branches:** branch from `dev` and open PRs against `dev`. `main` is production and deploys on every passing commit; a "Release: dev → main" PR opens by itself, and merging it (with a merge commit, not squash) is the deploy ([docs/deployment.md](docs/deployment.md)).
+## Pull requests
+
+`main` is production: every passing commit on it deploys. Work lands on `dev` and reaches `main` only through the release PR ([docs/deployment.md](docs/deployment.md#branches-and-releases)).
+
+- **Base everything on `dev`.** Fetch, then branch from `origin/dev` (`git switch -c feature/<name> origin/dev`), never from `main` or the branch you happen to be on.
+- **Open PRs against `dev`:** `gh pr create --base dev`. Never against `main`.
+- **Never merge to `main` yourself**, not even a hotfix, unless the user explicitly asks for that hotfix. The "Release: dev → main" PR opens by itself; merging it (with a merge commit, not squash) is the deploy, and it's the user's call.
+- **Before opening:** run the checks above (and the backend's, for backend changes) and `npm run check:conflicts`. The description says what changed and why, any migration and what rolling back would need, and anything not verified (e.g. not tried in a browser).
+- **Opened against the wrong base?** Move it, don't open another: `git rebase --onto origin/dev <old-base> <branch>`, `git push --force-with-lease`, then `gh pr edit <number> --base dev`.
 
 ## Backend
 
@@ -37,7 +45,7 @@ The details of each part of the app live in `docs/`, one file per area. **Before
 | Doc                                                                    | Covers                                                                                                                                                                                                                                                            |
 | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [docs/backend.md](docs/backend.md)                                     | Backend setup and conventions: env, apps, camelCase API, auth by default, `properties_for_user` scoping, roles; how the app calls it (`services/api.ts`, `ApiError`)                                                                                              |
-| [docs/auth-and-access.md](docs/auth-and-access.md)                     | Firebase phone sign-in, invite-only people, property memberships and selection, `/me`, route guards, logout                                                                                                                                                       |
+| [docs/auth-and-access.md](docs/auth-and-access.md)                     | Google sign-in (Firebase), invite-only people, property memberships and selection, `/me`, route guards, logout                                                                                                                                                    |
 | [docs/tenants.md](docs/tenants.md)                                     | Tenancies (model, overlap and property rules, API), the tenant store and selector, the dashboard                                                                                                                                                                  |
 | [docs/rent-entries.md](docs/rent-entries.md)                           | Bills: model, calculations, create/list API, the store, saving, history and details pages, the old local ledger                                                                                                                                                   |
 | [docs/payments-and-receipts.md](docs/payments-and-receipts.md)         | Payments (model, `record_payment`, API, store, recording), idempotent retries, and receipts (Django snapshots, issuance, PDF download)                                                                                                                            |
@@ -88,7 +96,7 @@ Skills are task guides in `.claude/skills/<name>/SKILL.md`. Claude Code loads th
 
 - Import via `@/` alias, not relative `../../`.
 - Use theme tokens (`bg-background`, `text-muted-foreground`, `text-destructive`) rather than raw colours.
-- Phone numbers are stored as E.164 (`+918341413827`); format for display only (`utils/phone.ts`). Countries live in `utils/phoneCountries.ts` ([docs/auth-and-access.md](docs/auth-and-access.md)).
+- Phone numbers are stored as E.164 (`+918341413827`); format for display only (`utils/phone.ts`). Countries live in `utils/phoneCountries.ts`, mirrored by `backend/accounts/phone.py`.
 - Format money with `utils/currency.ts` (`formatINR`) and days with `utils/date.ts` (`formatOrdinal`).
 - Errors are shown inline (`role="alert"`), never `alert()`.
 - Loading states are skeletons in the content's place, never a "Loading…" line or a spinner that the content then pushes aside: shadcn-vue's `Skeleton`, arranged with `components/common/SkeletonLines.vue` (label/value lines, optionally a card), `SkeletonRows.vue` (list and table rows) and `components/tenant/TenantChipSkeleton.vue`, inside `LoadingRegion.vue` (announces a label to screen readers, hides the shapes). A reload of content already shown keeps the controls (e.g. filters) and replaces only what's reloading. Skeletons don't pulse under `prefers-reduced-motion` (`style.css`).

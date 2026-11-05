@@ -86,14 +86,14 @@ describe('access store', () => {
     let notify: (user: AuthUser | null) => void = () => {}
     vi.mocked(authService.onAuthStateChanged).mockImplementation((listener) => {
       notify = listener
-      listener({ id: 'first', phoneNumber: '+918341413827' })
+      listener({ id: 'first', email: 'first@example.com' })
       return () => {}
     })
     await useAuthStore().init()
     const store = useAccessStore()
     await store.load()
 
-    notify({ id: 'second', phoneNumber: '+61412345678' })
+    notify({ id: 'second', email: 'second@example.com' })
     await store.load()
 
     expect(accessService.getMe).toHaveBeenCalledTimes(2)
@@ -101,8 +101,8 @@ describe('access store', () => {
 
   describe('when the account changes while /me is pending', () => {
     let notify: (user: AuthUser | null) => void = () => {}
-    const first = { id: 'first', phoneNumber: '+918341413827' }
-    const second = { id: 'second', phoneNumber: '+61412345678' }
+    const first = { id: 'first', email: 'first@example.com' }
+    const second = { id: 'second', email: 'second@example.com' }
     const firstProperty = { ...testProperty, id: 'first-property', name: 'First Towers' }
     const secondProperty = { ...testProperty, id: 'second-property', name: 'Second Towers' }
 

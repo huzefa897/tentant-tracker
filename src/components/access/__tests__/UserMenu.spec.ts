@@ -11,7 +11,7 @@ afterEach(() => {
   wrapper = null
 })
 
-function mountMenu(props: { name: string; phoneNumber: string; canSwitchProperty?: boolean }) {
+function mountMenu(props: { name: string; email: string; canSwitchProperty?: boolean }) {
   wrapper = mount(UserMenu, { props, attachTo: document.body })
   return wrapper
 }
@@ -21,23 +21,23 @@ const body = () => new DOMWrapper(document.body)
 
 describe('UserMenu', () => {
   it('shows the name and its initials', () => {
-    const menu = mountMenu({ name: 'Test Owner', phoneNumber: '+918341413827' })
+    const menu = mountMenu({ name: 'Test Owner', email: 'owner@example.com' })
 
     expect(menu.get('[data-testid="user-menu-name"]').text()).toBe('Test Owner')
     expect(menu.get('[data-testid="user-menu-trigger"]').text()).toContain('TO')
   })
 
-  it('falls back to the phone number when no name is set', () => {
-    const menu = mountMenu({ name: '  ', phoneNumber: '+918341413827' })
+  it('falls back to the email when no name is set', () => {
+    const menu = mountMenu({ name: '  ', email: 'owner@example.com' })
 
-    expect(menu.get('[data-testid="user-menu-name"]').text()).toBe('+91 83414 13827')
+    expect(menu.get('[data-testid="user-menu-name"]').text()).toBe('owner@example.com')
   })
 
   it('emits logout from the menu', async () => {
-    const menu = mountMenu({ name: 'Test Owner', phoneNumber: '+918341413827' })
+    const menu = mountMenu({ name: 'Test Owner', email: 'owner@example.com' })
 
     await openUserMenu()
-    expect(body().text()).toContain('+91 83414 13827')
+    expect(body().text()).toContain('owner@example.com')
     await body().get('[data-testid="user-menu-logout"]').trigger('click')
     await flushPromises()
 
@@ -45,7 +45,7 @@ describe('UserMenu', () => {
   })
 
   it('offers switching property only when allowed', async () => {
-    const menu = mountMenu({ name: 'Test Owner', phoneNumber: '+918341413827' })
+    const menu = mountMenu({ name: 'Test Owner', email: 'owner@example.com' })
     await openUserMenu()
     expect(body().find('[data-testid="user-menu-switch-property"]').exists()).toBe(false)
 

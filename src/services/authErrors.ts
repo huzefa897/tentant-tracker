@@ -1,12 +1,12 @@
 // App-level sign-in failures. The auth service maps Firebase errors to these so nothing above
 // services/ depends on Firebase error codes.
 export type AuthErrorCode =
-  | 'invalid-phone-number'
-  | 'invalid-code'
-  | 'code-expired'
-  | 'session-missing'
+  // The person closed Google's popup: not a failure to report.
+  | 'cancelled'
+  | 'popup-blocked'
+  // The email already signed in to this Firebase project another way (e.g. a password).
+  | 'account-exists'
   | 'too-many-requests'
-  | 'captcha-failed'
   | 'network'
   | 'user-disabled'
   | 'not-configured'
