@@ -85,6 +85,13 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresProperty: true },
     },
     {
+      path: '/tenants/:tenantId/meter',
+      name: 'meter-readings',
+      component: () => import('@/views/MeterReadingsView.vue'),
+      props: true,
+      meta: { requiresAuth: true, requiresProperty: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'login' },
     },

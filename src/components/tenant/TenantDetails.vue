@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { History, Plus, User } from '@lucide/vue'
+import { Gauge, History, Plus, User } from '@lucide/vue'
 
 import { Button } from '@/components/ui/button'
 import type { Tenant } from '@/types/tenant'
 import { formatINR } from '@/utils/currency'
-import { formatOrdinal } from '@/utils/date'
+import { formatDateValue, formatOrdinal } from '@/utils/date'
+import { formatReading } from '@/utils/electricity'
 import { formatIndianPhoneNumberNational } from '@/utils/phone'
 
 const props = defineProps<{
@@ -17,6 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   addEntry: []
   viewEntries: []
+  viewMeter: []
 }>()
 
 // The tenancy's terms as one quiet list; the name and flat are the heading, never repeated.
@@ -26,6 +28,16 @@ const details = computed(() => [
   { label: 'Due each month', value: formatOrdinal(props.tenant.rentDueDay) },
   { label: 'Electricity', value: `${formatINR(props.tenant.electricityRate)} / unit` },
   { label: 'Deposit', value: formatINR(props.tenant.depositAmount) },
+  // The meter is set up in admin, with the reading it starts from.
+  {
+    label: 'Meter',
+    value: props.tenant.meterBaseline
+      ? `From ${formatReading(props.tenant.meterBaseline.reading)}`
+      : 'Not set up',
+    title: props.tenant.meterBaseline
+      ? `Starting reading, ${formatDateValue(props.tenant.meterBaseline.readOn)}`
+      : 'Set its starting reading in admin',
+  },
   {
     label: 'Mobile',
     value: formatIndianPhoneNumberNational(props.tenant.mobileNumber),
@@ -57,10 +69,10 @@ const details = computed(() => [
         <slot name="latest-entry" />
       </div>
 
-      <dl class="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 border-t pt-5 sm:grid-cols-3 lg:grid-cols-5">
+      <dl class="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 border-t pt-5 sm:grid-cols-3 lg:grid-cols-6">
         <div v-for="item in details" :key="item.label" class="min-w-0">
           <dt class="text-sm text-muted-foreground">{{ item.label }}</dt>
-          <dd class="mt-0.5 truncate font-semibold tabular-nums">
+          <dd class="mt-0.5 truncate font-semibold tabular-nums" :title="item.title">
             <a
               v-if="item.href"
               :href="item.href"
@@ -80,6 +92,15 @@ const details = computed(() => [
         <Button variant="outline" class="h-11 px-6" @click="emit('viewEntries')">
           <History aria-hidden="true" />
           Bills<template v-if="entryCount != null"> ({{ entryCount }})</template>
+        </Button>
+        <Button
+          v-if="tenant.meterBaseline"
+          variant="outline"
+          class="h-11 px-6"
+          @click="emit('viewMeter')"
+        >
+          <Gauge aria-hidden="true" />
+          Meter readings
         </Button>
       </div>
     </div>
