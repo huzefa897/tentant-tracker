@@ -205,6 +205,16 @@ class TenancyHasBillsError(ValidationError):
     """A tenancy with bills was saved with another property (two admins at once)."""
 
 
+TENANCY_BASELINE_LOCKED_MESSAGE = (
+    "This tenancy has meter readings, so its meter baseline can't change: they're measured "
+    "from it. Void the readings in the app first."
+)
+
+
+class TenancyHasReadingsError(ValidationError):
+    """A tenancy with meter readings was saved with another baseline (two admins at once)."""
+
+
 class Tenancy(models.Model):
     """One occupancy of a flat: a flat has a new tenancy (and id) for each occupant, and
     bills will belong to the tenancy. Tenants don't sign in; this only describes them."""
@@ -264,6 +274,23 @@ class Tenancy(models.Model):
         blank=True,
         help_text="Last day of the occupancy. Leave empty while it continues.",
     )
+    # The electricity meter's reading when tracking started for this tenancy: the move-in
+    # reading, or for an existing tenancy the latest known one. Empty means the meter isn't set
+    # up (never assumed to be zero): its bills take typed units, as before. Fixed once the
+    # tenancy has meter readings (billing.MeterReading), which are measured from it.
+    meter_baseline_reading = models.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Meter reading when tracking started (units). Leave empty to type units on bills.",
+    )
+    meter_baseline_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="The day the baseline reading was taken, within the occupancy.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -298,6 +325,19 @@ class Tenancy(models.Model):
                 condition=Q(end_date__isnull=True) | Q(end_date__gte=models.F("start_date")),
                 name="tenancy_end_date_not_before_start_date",
                 violation_error_message="The end date can't be before the start date.",
+            ),
+            # A baseline is a reading and its date, or neither (the meter isn't set up).
+            models.CheckConstraint(
+                condition=Q(meter_baseline_reading__isnull=True, meter_baseline_date__isnull=True)
+                | Q(
+                    meter_baseline_reading__gte=0,
+                    meter_baseline_date__isnull=False,
+                    meter_baseline_date__gte=models.F("start_date"),
+                ),
+                name="tenancy_meter_baseline_complete",
+                violation_error_message=(
+                    "Enter both the baseline reading and its date (not before the start date)."
+                ),
             ),
             # Needs the btree_gist extension (migration 0004) for the = comparisons.
             ExclusionConstraint(
@@ -353,6 +393,21 @@ class Tenancy(models.Model):
         self._check_no_overlap()
         if self.moves_property_with_bills():
             raise ValidationError({"property": TENANCY_PROPERTY_LOCKED_MESSAGE})
+        self._check_meter_baseline()
+        if self.changes_baseline_with_readings():
+            raise ValidationError({"meter_baseline_reading": TENANCY_BASELINE_LOCKED_MESSAGE})
+
+    def _check_meter_baseline(self):
+        reading, read_on = self.meter_baseline_reading, self.meter_baseline_date
+        if (reading is None) != (read_on is None):
+            missing = "meter_baseline_date" if read_on is None else "meter_baseline_reading"
+            raise ValidationError({missing: "Enter both the baseline reading and its date."})
+        if read_on is None or self.start_date is None:
+            return
+        if read_on < self.start_date or (self.end_date and read_on > self.end_date):
+            raise ValidationError(
+                {"meter_baseline_date": "The baseline date must be within the occupancy."}
+            )
 
     def save(self, *args, **kwargs):
         # Bills are scoped through their tenancy's property, so moving a tenancy that has bills
@@ -363,7 +418,27 @@ class Tenancy(models.Model):
         with transaction.atomic():
             if self.moves_property_with_bills(lock=True):
                 raise TenancyHasBillsError({"property": TENANCY_PROPERTY_LOCKED_MESSAGE})
+            # Under the same lock as recording a reading, so one can't be added in between.
+            if self.changes_baseline_with_readings():
+                raise TenancyHasReadingsError(
+                    {"meter_baseline_reading": TENANCY_BASELINE_LOCKED_MESSAGE}
+                )
             super().save(*args, **kwargs)
+
+    def changes_baseline_with_readings(self) -> bool:
+        """Whether this saved tenancy has active meter readings and a different baseline now.
+        Readings and meter bills are measured from the baseline, so it's fixed once they
+        exist. Callers that need it to hold lock the row first (save() does)."""
+        if self._state.adding:
+            return False
+        stored = (
+            Tenancy.objects.filter(pk=self.pk)
+            .values_list("meter_baseline_reading", "meter_baseline_date")
+            .first()
+        )
+        if stored is None or stored == (self.meter_baseline_reading, self.meter_baseline_date):
+            return False
+        return self.meter_readings.filter(status="active").exists()
 
     def moves_property_with_bills(self, *, lock=False) -> bool:
         """Whether this saved tenancy has bills and now names another property."""

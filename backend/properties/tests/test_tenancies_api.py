@@ -143,6 +143,7 @@ class TenancyApiTests(TestCase):
                 "startDate": "2026-01-01",
                 "endDate": None,
                 "status": "current",
+                "meterBaseline": None,
             },
         )
 

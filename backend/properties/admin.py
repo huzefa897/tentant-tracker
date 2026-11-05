@@ -11,6 +11,7 @@ from .models import (
     PropertyMembership,
     Tenancy,
     TenancyHasBillsError,
+    TenancyHasReadingsError,
     business_date,
 )
 
@@ -162,6 +163,18 @@ class TenancyAdmin(admin.ModelAdmin):
         (None, {"fields": ("property", "name", "flat_number", "mobile_number")}),
         ("Rent", {"fields": ("rent_amount", "rent_due_day", "electricity_rate", "deposit_amount")}),
         (
+            "Electricity meter",
+            {
+                "fields": ("meter_baseline_reading", "meter_baseline_date"),
+                "description": (
+                    "The meter reading when tracking starts: the move-in reading, or the latest "
+                    "known one for an existing tenancy. Leave both empty to keep typing units on "
+                    "bills. Readings after it are recorded in the app; once there are any, the "
+                    "baseline is fixed."
+                ),
+            },
+        ),
+        (
             "Occupancy",
             {
                 "fields": ("start_date", "end_date", "status"),
@@ -172,10 +185,14 @@ class TenancyAdmin(admin.ModelAdmin):
     )
 
     def get_readonly_fields(self, request, obj=None):
+        fields = self.readonly_fields
         # A tenancy with bills keeps its property (Tenancy.save refuses the move).
         if obj is not None and obj.rent_entries.exists():
-            return ("property", *self.readonly_fields)
-        return self.readonly_fields
+            fields = ("property", *fields)
+        # Readings are measured from the baseline (Tenancy.save refuses a change).
+        if obj is not None and obj.meter_readings.filter(status="active").exists():
+            fields = ("meter_baseline_reading", "meter_baseline_date", *fields)
+        return fields
 
     def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
         try:
@@ -185,6 +202,14 @@ class TenancyAdmin(admin.ModelAdmin):
             self.message_user(
                 request,
                 "Not saved: this tenancy now has bills, so its property can't change.",
+                messages.ERROR,
+            )
+            return HttpResponseRedirect(request.get_full_path())
+        except TenancyHasReadingsError:
+            # A reading was recorded after this form loaded with the baseline still editable.
+            self.message_user(
+                request,
+                "Not saved: this tenancy now has meter readings, so its baseline can't change.",
                 messages.ERROR,
             )
             return HttpResponseRedirect(request.get_full_path())
