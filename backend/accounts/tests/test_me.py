@@ -25,7 +25,13 @@ class MeTests(TestCase):
     def test_returns_only_explicit_fields(self):
         data = self.client.get(ME_URL).json()
 
-        self.assertEqual(data, {"id": self.user.id, "name": "", "phoneNumber": "+910000000001", "properties": []})
+        self.assertEqual(data, {
+                "id": self.user.id,
+                "name": "",
+                "email": "u@example.com",
+                "phoneNumber": "+910000000001",
+                "properties": [],
+            })
 
     def test_returns_the_name_for_the_header(self):
         self.user.name = "Test Owner"

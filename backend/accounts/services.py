@@ -1,108 +1,81 @@
 import logging
 
-from .firebase import (
-    FirebasePhoneNumberTakenError,
-    find_firebase_uid,
-    get_or_create_firebase_uid,
-    revoke_firebase_sessions,
-    set_firebase_phone_number,
-)
-from .models import User
+from django.db import IntegrityError, transaction
+
+from .firebase import revoke_firebase_sessions
+from .models import User, normalize_email
 
 logger = logging.getLogger(__name__)
 
+GOOGLE_PROVIDER = "google.com"
+
 
 class NotRegisteredError(Exception):
-    """A verified Firebase identity that no person in the app is linked to."""
-
-
-class PhoneNumberInUseError(Exception):
-    """The number's Firebase identity already belongs to another person."""
+    """A verified Firebase identity that no person in the app is linked to or invited as."""
 
 
 def get_registered_user(claims: dict) -> User:
-    """The person linked to verified Firebase claims. Never creates one: sign-in is
-    invite-only (see link_firebase_identity).
+    """The person behind verified Firebase claims. Never creates one: sign-in is
+    invite-only (an admin adds the person with their Google email).
 
-    Like the admin's "can sign in", the person needs a mobile number as well as the
-    link: one whose number was removed gets NotRegisteredError, and a claim never puts
-    a number back. Otherwise the stored number follows the verified claim, so a number
-    changed (or removed) in Firebase replaces the stored one; a clash with another
-    person's number is logged and skipped.
+    A person already linked is found by UID only. Otherwise the claims link an invited
+    person: one with this email who isn't linked yet, when Google has verified the
+    email (see _link_invited_person).
+
+    Like the admin's "can sign in", the person needs an email as well as the link: one
+    whose email was removed gets NotRegisteredError.
     """
-    try:
-        user = User.objects.get(firebase_uid=claims["uid"])
-    except User.DoesNotExist:
-        raise NotRegisteredError(claims["uid"]) from None
-
-    phone_number = claims.get("phone_number") or ""
-    if user.phone_number and user.phone_number != phone_number:
-        if phone_number and User.objects.filter(phone_number=phone_number).exclude(pk=user.pk).exists():
-            logger.warning("Not syncing phone number for user %s: another person has it", user.pk)
-        else:
-            user.phone_number = phone_number
-            user.save(update_fields=["phone_number"])
-
-    if not user.phone_number:
-        raise NotRegisteredError(claims["uid"])
-
+    uid = claims["uid"]
+    user = User.objects.filter(firebase_uid=uid).first() or _link_invited_person(claims)
+    if user is None or not user.email:
+        raise NotRegisteredError(uid)
     return user
 
 
-def check_firebase_identity(user: User, previous_phone_number: str) -> None:
-    """Read-only: would link_firebase_identity succeed? For form validation, so a clash
-    shows on the form and Firebase isn't changed until everything else is valid.
+def _link_invited_person(claims: dict) -> User | None:
+    """Link the claims' identity to the invited person with their email, or None.
 
-    Raises PhoneNumberInUseError or FirebaseUnavailableError.
+    Only a Google sign-in counts, and only with an email Google has verified, so
+    nobody can claim an invite with an address they don't control. People already
+    linked to another identity are never relinked.
     """
-    phone_number = user.phone_number
-    if not phone_number or (user.firebase_uid and phone_number == previous_phone_number):
-        return
+    provider = (claims.get("firebase") or {}).get("sign_in_provider")
+    email = normalize_email(claims.get("email") or "")
+    if provider != GOOGLE_PROVIDER or claims.get("email_verified") is not True or not email:
+        return None
 
-    uid = find_firebase_uid(phone_number)
-    if uid is None:
-        return
+    uid = claims["uid"]
+    try:
+        with transaction.atomic():
+            user = (
+                User.objects.select_for_update()
+                .filter(email__iexact=email, firebase_uid__isnull=True)
+                .first()
+            )
+            if user is None:
+                # Perhaps a concurrent request for the same sign-in linked them first.
+                return User.objects.filter(firebase_uid=uid).first()
+            user.firebase_uid = uid
+            user.save(update_fields=["firebase_uid"])
+    except IntegrityError:
+        # The other request's link won the unique constraint.
+        return User.objects.filter(firebase_uid=uid).first()
 
-    if user.firebase_uid:
-        # Moving to a number another Firebase identity already has.
-        if uid != user.firebase_uid:
-            raise PhoneNumberInUseError(phone_number)
-    elif User.objects.filter(firebase_uid=uid).exclude(pk=user.pk).exists():
-        raise PhoneNumberInUseError(phone_number)
+    logger.info("Linked a Google sign-in to user %s", user.pk)
+    return user
 
 
-def link_firebase_identity(user: User, previous_phone_number: str) -> None:
-    """Make the person's Firebase identity match user.phone_number. Changes Firebase, so
-    call it as the last step of a save, after all validation (the admin does this inside
-    its transaction, so a failure here rolls the database back). Sets user.firebase_uid
-    on a new link; the caller saves it.
+def unlink_if_email_changed(user: User, previous_email: str) -> None:
+    """When a linked person's email changes or is removed, unlink their Google identity
+    and end its sessions, so whoever is signed in has to sign in again with the
+    current email (or can't, if it was removed). Call it as the last step of a save,
+    after all validation (the admin does this inside its transaction, so a Firebase
+    failure rolls the database back); the caller saves user.firebase_uid.
 
-    - Not linked yet, with a number: register (or reuse) that number's Firebase
-      identity and link it, so the person can sign in.
-    - Linked, number changed: move the identity to the new number.
-    - Linked, number removed: remove the identity's number, so it can't sign in.
-
-    Either change also ends the identity's existing sessions, so whoever is signed in
-    (perhaps on a lost phone) has to sign in again with the current number.
-
-    Raises PhoneNumberInUseError if the identity belongs to someone else, and
-    FirebaseUnavailableError if Firebase can't be reached (nothing is saved then).
+    Raises FirebaseUnavailableError if Firebase can't be reached.
     """
-    phone_number = user.phone_number
-
-    if user.firebase_uid:
-        if phone_number != previous_phone_number:
-            try:
-                set_firebase_phone_number(user.firebase_uid, phone_number or None)
-            except FirebasePhoneNumberTakenError:
-                raise PhoneNumberInUseError(phone_number) from None
-            revoke_firebase_sessions(user.firebase_uid)
+    if not user.firebase_uid or normalize_email(user.email) == normalize_email(previous_email):
         return
 
-    if not phone_number:
-        return
-
-    uid = get_or_create_firebase_uid(phone_number)
-    if User.objects.filter(firebase_uid=uid).exclude(pk=user.pk).exists():
-        raise PhoneNumberInUseError(phone_number)
-    user.firebase_uid = uid
+    revoke_firebase_sessions(user.firebase_uid)
+    user.firebase_uid = None
