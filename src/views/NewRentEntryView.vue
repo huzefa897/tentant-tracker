@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import { ArrowLeft, ChevronRight, CircleCheck, User } from '@lucide/vue'
 
@@ -22,9 +22,11 @@ import TenantChipSkeleton from '@/components/tenant/TenantChipSkeleton.vue'
 import { Button } from '@/components/ui/button'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
+import { useMeterReadingStore } from '@/stores/meterReading'
 import { EntrySaveError, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
+import { electricityLabel, electricityValue } from '@/utils/electricity'
 import { formatDateValue, formatMonthValue, isValidMonthValue } from '@/utils/date'
 import { formatPaymentTiming } from '@/utils/rentCalculations'
 
@@ -34,6 +36,7 @@ const props = defineProps<{
 }>()
 
 const rentEntryStore = useRentEntryStore()
+const meterStore = useMeterReadingStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -49,6 +52,18 @@ const {
   error: tenantError,
   retryable: tenantRetryable,
 } = useRouteTenant(() => props.tenantId)
+
+// A tenant whose meter is set up: the form needs the last billed reading, always loaded afresh
+// (a bill saved elsewhere moves it).
+const hasMeter = computed(() => tenant.value?.meterBaseline != null)
+watch(
+  () => (hasMeter.value ? tenant.value!.id : null),
+  (tenantId) => {
+    if (tenantId) meterStore.loadMeter(tenantId)
+  },
+  { immediate: true },
+)
+const meterState = computed(() => (tenant.value ? meterStore.meterFor(tenant.value.id) : null))
 
 const saving = ref(false)
 const savedEntry = ref<RentEntry | null>(null)
@@ -78,6 +93,8 @@ async function handleSave(submission: NewRentEntrySubmission) {
 
   try {
     savedEntry.value = await rentEntryStore.addEntry(submission, creationKey)
+    // Its reading, if any, is the meter's newest, and a meter bill moves the last billed one.
+    if (submission.entry.closingReading) meterStore.forgetMeter(submission.entry.tenantId)
   } catch (error) {
     if (!(error instanceof EntrySaveError && error.uncertain)) creationKey = null
     saveError.value = error instanceof Error ? error.message : SAVE_ERROR_MESSAGE
@@ -104,10 +121,7 @@ const savedSummary = computed(() => {
     rateChanged: previewedRate.value !== null && previewedRate.value !== entry.electricityRate,
     charges: [
       { label: 'Rent', value: formatINR(entry.rentAmount) },
-      {
-        label: `Electricity (${entry.electricityUnits} units × ${formatINR(entry.electricityRate)})`,
-        value: formatINR(entry.electricityAmount),
-      },
+      { label: electricityLabel(entry), value: electricityValue(entry) },
       { label: 'Water', value: formatINR(entry.waterAmount) },
     ],
   }
@@ -331,6 +345,10 @@ function handleDialogOpenChange(open: boolean) {
           :month="presetMonth"
           :save-error="saveError"
           :saving="saving"
+          :last-billed="meterState?.meter?.lastBilled ?? null"
+          :meter-loading="meterState?.status === 'loading'"
+          :meter-error="meterState?.error ?? null"
+          @retry-meter="meterStore.loadMeter(tenant.id)"
           @save="handleSave"
           @cancel="goToDashboard"
           @dirty-change="isDirty = $event"
