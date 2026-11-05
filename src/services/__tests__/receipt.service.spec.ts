@@ -146,6 +146,24 @@ describe('parseReceipt', () => {
     })
   })
 
+  it('maps a meter receipt whose opening reading is where tracking started (no date)', () => {
+    const charges = {
+      ...receiptDto.charges,
+      electricityUnits: '134.000',
+      electricityAmount: '804.00',
+      electricityMode: 'meter',
+      openingReading: { reading: '567.000', readOn: null },
+      closingReading: { reading: '701.000', readOn: '2026-11-05' },
+    }
+
+    expect(toReceipt(parseReceipt({ ...receiptDto, charges })).charges).toMatchObject({
+      electricityMode: 'meter',
+      electricityUnits: 134,
+      openingReading: { reading: 567, readOn: null },
+      closingReading: { reading: 701, readOn: '2026-11-05' },
+    })
+  })
+
   it.each([
     ['a missing reference', { reference: '' }],
     ['an amount as a number', { paymentAmount: 3000 }],
