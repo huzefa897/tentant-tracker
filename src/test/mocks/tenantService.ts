@@ -20,6 +20,7 @@ export const testTenants: Tenant[] = [
     depositAmount: 90000,
     startDate: '2025-04-01',
     endDate: null,
+    meterBaseline: null,
   },
   {
     id: 'tenant-002',
@@ -32,6 +33,7 @@ export const testTenants: Tenant[] = [
     depositAmount: 100000,
     startDate: '2026-02-15',
     endDate: null,
+    meterBaseline: null,
   },
   {
     id: 'tenant-003',
@@ -44,6 +46,7 @@ export const testTenants: Tenant[] = [
     depositAmount: 80000,
     startDate: '2024-06-01',
     endDate: null,
+    meterBaseline: null,
   },
 ]
 
