@@ -39,3 +39,29 @@ class GoogleSignInMigrationTests(TransactionTestCase):
         User = self.migrate(BEFORE).get_model("accounts", "User")
         self.assertEqual(User.objects.get(username="owner").firebase_uid, "phone-uid")
         self.assertIsNone(User.objects.get(username="admin").firebase_uid)
+
+    def test_people_sharing_an_email_stop_it_before_anything_changes(self):
+        User = self.migrate(BEFORE).get_model("accounts", "User")
+        first = User.objects.create(username="first", firebase_uid="uid-1", email="Owner@example.com")
+        second = User.objects.create(username="second", email="owner@example.com ")
+        twin_a = User.objects.create(username="twin-a", email="same@example.com")
+        twin_b = User.objects.create(username="twin-b", email="same@example.com")
+        User.objects.create(username="admin-one")  # no email: never a clash
+        User.objects.create(username="admin-two")
+
+        with self.assertRaises(RuntimeError) as raised:
+            self.migrate(AFTER)
+
+        message = str(raised.exception)
+        self.assertIn(f"{first.pk}, {second.pk}", message)
+        self.assertIn(f"{twin_a.pk}, {twin_b.pk}", message)
+        self.assertNotIn("example.com", message)  # deploy logs never get emails
+        # Still at 0004, untouched: the phone link and the email as they were.
+        User = self.migrate(BEFORE).get_model("accounts", "User")
+        kept = User.objects.get(pk=first.pk)
+        self.assertEqual((kept.firebase_uid, kept.email), ("uid-1", "Owner@example.com"))
+
+        # Once admin has fixed them, it runs.
+        User.objects.filter(pk__in=[second.pk, twin_b.pk]).update(email="")
+        User = self.migrate(AFTER).get_model("accounts", "User")
+        self.assertEqual(User.objects.get(pk=first.pk).email, "owner@example.com")

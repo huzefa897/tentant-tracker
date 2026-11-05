@@ -5,11 +5,34 @@ import django.db.models.functions.text
 from django.db import migrations, models
 
 
+def find_email_clashes(User) -> list[list[int]]:
+    """Ids of people whose emails are the same once trimmed and lowercased, one list per
+    shared email. Emails weren't unique before this migration."""
+    people_by_email = {}
+    for pk, email in User.objects.exclude(email="").values_list("pk", "email").order_by("pk"):
+        people_by_email.setdefault(email.strip().lower(), []).append(pk)
+    return [pks for pks in people_by_email.values() if len(pks) > 1]
+
+
 def move_to_google_sign_in(apps, schema_editor):
     """Phone sign-in identities never sign in again: set each one aside (so this can be
     reversed) and unlink it, so the person's first Google sign-in links them by email.
-    Emails are lowercased first, for the case-insensitive unique constraint."""
+    Emails are lowercased first, for the case-insensitive unique constraint.
+
+    People sharing an email (ignoring case) would break that constraint, and which of
+    them should keep it is a person's call, so the migration stops before changing
+    anything and names them by admin id (never by email: this ends up in deploy logs).
+    """
     User = apps.get_model("accounts", "User")
+    clashes = find_email_clashes(User)
+    if clashes:
+        groups = "; ".join(", ".join(str(pk) for pk in pks) for pks in clashes)
+        raise RuntimeError(
+            "Some people share an email (ignoring case), which Google sign-in needs to be "
+            f"unique. People (admin ids) sharing one: {groups}. In admin, give each a "
+            "different email or clear the extra ones, then migrate again. Nothing was changed."
+        )
+
     for user in User.objects.all():
         user.email = (user.email or "").strip().lower()
         user.legacy_phone_firebase_uid = user.firebase_uid
