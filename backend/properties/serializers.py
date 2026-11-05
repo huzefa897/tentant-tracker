@@ -32,6 +32,8 @@ class TenancySerializer(serializers.ModelSerializer):
     startDate = serializers.DateField(source="start_date")
     endDate = serializers.DateField(source="end_date", allow_null=True)
     status = serializers.SerializerMethodField()
+    # {reading, readOn} once the meter is set up (in admin), else null: bills then take units.
+    meterBaseline = serializers.SerializerMethodField()
 
     class Meta:
         model = Tenancy
@@ -48,8 +50,17 @@ class TenancySerializer(serializers.ModelSerializer):
             "startDate",
             "endDate",
             "status",
+            "meterBaseline",
         )
         read_only_fields = fields
+
+    def get_meterBaseline(self, tenancy) -> dict | None:
+        if tenancy.meter_baseline_reading is None:
+            return None
+        return {
+            "reading": f"{tenancy.meter_baseline_reading:.3f}",
+            "readOn": tenancy.meter_baseline_date.isoformat(),
+        }
 
     def get_status(self, tenancy) -> str:
         # One date per request (from the view), so a list never mixes two days.
