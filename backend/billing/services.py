@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -14,6 +15,9 @@ from properties.roles import Capability, role_can
 
 from .calculations import ZERO, entry_amounts, to_paise
 from .models import (
+    METER_CLOSING_CONSTRAINT,
+    METER_FROM_BASELINE_CONSTRAINT,
+    METER_OPENING_CONSTRAINT,
     Payment,
     PaymentReversal,
     Receipt,
@@ -22,9 +26,20 @@ from .models import (
     receipt_reference,
     tenancy_covers_month,
 )
+from .meter import (
+    ElectricityCharge,
+    ReadingAlreadyBilledError,
+    check_meter_bill_can_be_voided,
+    electricity_for_new_bill,
+)
 from .periods import period_for_bill
 
 UNIQUE_MONTH_CONSTRAINT = "unique_active_tenancy_billing_month"
+METER_CHAIN_CONSTRAINTS = {
+    METER_CLOSING_CONSTRAINT,
+    METER_OPENING_CONSTRAINT,
+    METER_FROM_BASELINE_CONSTRAINT,
+}
 PAYMENT_KEY_CONSTRAINT = "unique_payment_idempotency_key"
 CREATION_KEY_CONSTRAINT = "unique_rent_entry_creation_key"
 # The unique columns behind Receipt.payment and PaymentReversal.payment (PostgreSQL's names).
@@ -119,6 +134,11 @@ class UnreversedPaymentsError(Exception):
 
 class NothingToCorrectError(Exception):
     """The replacement has the same charges and notes as the bill it corrects."""
+
+
+class ElectricityNotCorrectableError(Exception):
+    """A meter or not-charged bill's electricity can't change in a correction: void the bill
+    and create a new one (after correcting the reading, if that was wrong)."""
 
 
 class PaymentExceedsOutstandingError(Exception):
@@ -297,9 +317,18 @@ def _creation_fingerprint(validated_data: dict, initial_payment: dict | None) ->
     request = {
         "billing_month": validated_data["billing_month"].isoformat(),
         "rent_amount": text(validated_data.get("rent_amount")),
-        "electricity_units": text(validated_data["electricity_units"]),
+        "electricity_units": text(validated_data.get("electricity_units")),
         "water_amount": text(validated_data["water_amount"]),
         "notes": validated_data.get("notes", ""),
+        "include_electricity": validated_data.get("include_electricity", True),
+        "closing_reading": None
+        if validated_data.get("closing_reading") is None
+        else {
+            "reading": text(validated_data["closing_reading"]["reading"]),
+            "read_on": validated_data["closing_reading"]["read_on"].isoformat(),
+            "notes": validated_data["closing_reading"].get("notes", ""),
+        },
+        "closing_reading_id": text(validated_data.get("closing_reading_id")),
         "initial_payment": None
         if initial_payment is None
         else {
@@ -309,6 +338,19 @@ def _creation_fingerprint(validated_data: dict, initial_payment: dict | None) ->
         },
     }
     return hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+
+
+def _meter_fields(charge: ElectricityCharge) -> dict:
+    """A new bill's electricity columns besides its units."""
+    if charge.mode != RentEntry.ElectricityMode.METER:
+        return {"electricity_mode": charge.mode}
+    return {
+        "electricity_mode": charge.mode,
+        "opening_reading_id": charge.opening.reading_id,
+        "closing_reading": charge.closing,
+        "meter_opening": charge.opening.reading,
+        "meter_opening_date": charge.opening.read_on,
+    }
 
 
 def _replay_entry(*, creation_key, tenancy_id, actor, fingerprint) -> CreatedEntry:
@@ -333,8 +375,10 @@ def create_rent_entry(
     """Creates a bill with the tenancy's current charges copied onto it, and optionally the
     payment received with it, together or not at all.
 
-    validated_data: billing_month (first of the month), electricity_units, water_amount,
-    and optionally rent_amount (defaults to the tenancy's rent) and notes. The electricity
+    validated_data: billing_month (first of the month), water_amount, and optionally
+    rent_amount (defaults to the tenancy's rent) and notes, and the electricity:
+    include_electricity, electricity_units, closing_reading or closing_reading_id
+    (billing/meter.py electricity_for_new_bill decides the mode and units). The electricity
     rate always comes from the tenancy. The bill belongs to its month's rental period, created
     now if it doesn't exist yet (periods.period_for_bill): the bill is due when the period is,
     however late it's prepared.
@@ -379,13 +423,22 @@ def create_rent_entry(
             if period_for_bill(locked, billing_month).not_owed_at is not None:
                 raise PeriodNotOwedError()
 
+            # Under the tenancy's lock, so two bills can't both charge the same readings. A
+            # reading recorded with the bill is rolled back with it if anything fails.
+            charge = electricity_for_new_bill(
+                locked,
+                actor=actor,
+                validated_data=validated_data,
+                reading_key=creation_key or uuid.uuid4(),
+            )
             rent_amount = validated_data.get("rent_amount")
             entry = RentEntry.objects.create(
                 tenancy=locked,
                 billing_month=billing_month,
                 rent_amount=locked.rent_amount if rent_amount is None else rent_amount,
-                electricity_units=validated_data["electricity_units"],
+                electricity_units=charge.units,
                 electricity_rate=locked.electricity_rate,
+                **_meter_fields(charge),
                 water_amount=validated_data["water_amount"],
                 notes=validated_data.get("notes", ""),
                 created_by=actor,
@@ -412,6 +465,9 @@ def create_rent_entry(
         constraint = _violated_constraint(error)
         if constraint == UNIQUE_MONTH_CONSTRAINT:
             raise DuplicateBillingMonthError() from error
+        if constraint in METER_CHAIN_CONSTRAINTS:
+            # The last guard behind the tenancy's lock: these readings are already billed.
+            raise ReadingAlreadyBilledError(None) from error
         if constraint == CREATION_KEY_CONSTRAINT:
             # The same key, simultaneously, for another tenancy (which holds another lock).
             return _replay_entry(
@@ -469,6 +525,21 @@ def receipt_problem(payment: Payment, tenancy: Tenancy, prop: Property) -> str |
     return None
 
 
+def _receipt_meter_fields(entry: RentEntry) -> dict:
+    """The bill's electricity mode and, for a meter bill, the readings it was measured between,
+    as the bill saved them (readings are never edited)."""
+    fields = {"electricity_mode": entry.electricity_mode}
+    if entry.electricity_mode == RentEntry.ElectricityMode.METER:
+        closing = entry.closing_reading
+        fields.update(
+            opening_reading=entry.meter_opening,
+            opening_read_on=entry.meter_opening_date,
+            closing_reading=closing.reading,
+            closing_read_on=closing.read_on,
+        )
+    return fields
+
+
 def receipt_snapshot(
     payment: Payment,
     entry: RentEntry,
@@ -514,6 +585,7 @@ def receipt_snapshot(
         "electricity_units": entry.electricity_units,
         "electricity_rate": entry.electricity_rate,
         "electricity_amount": amounts.electricity_amount,
+        **_receipt_meter_fields(entry),
         "water_amount": entry.water_amount,
         "total_due": amounts.total_due,
         "total_paid": amounts.total_paid,
@@ -763,6 +835,11 @@ def void_rent_entry(*, entry_id, actor, reason: str) -> VoidedEntry:
             created = False
         else:
             _check_no_payments_count(entry)
+            if entry.electricity_mode == RentEntry.ElectricityMode.METER:
+                # As a correction locks it: no meter bill is created while this one is
+                # checked and voided.
+                Tenancy.objects.select_for_update(no_key=True).get(pk=entry.tenancy_id)
+                check_meter_bill_can_be_voided(entry)
             _void(entry, actor=actor, reason=reason)
             created = True
         return VoidedEntry(entry=RentEntry.objects.with_amounts().get(pk=entry.pk), created=created)
@@ -838,6 +915,11 @@ def correct_rent_entry(
                 raise EntryVoidError()
             _check_no_payments_count(original)
             if (
+                original.electricity_mode != RentEntry.ElectricityMode.MANUAL
+                and original.electricity_units != validated_data["electricity_units"]
+            ):
+                raise ElectricityNotCorrectableError()
+            if (
                 original.rent_amount == validated_data["rent_amount"]
                 and original.electricity_units == validated_data["electricity_units"]
                 and original.water_amount == validated_data["water_amount"]
@@ -864,6 +946,12 @@ def correct_rent_entry(
                 rent_amount=validated_data["rent_amount"],
                 electricity_units=validated_data["electricity_units"],
                 electricity_rate=original.electricity_rate,
+                # The original's readings: its electricity stays as it was billed.
+                electricity_mode=original.electricity_mode,
+                opening_reading_id=original.opening_reading_id,
+                closing_reading_id=original.closing_reading_id,
+                meter_opening=original.meter_opening,
+                meter_opening_date=original.meter_opening_date,
                 water_amount=validated_data["water_amount"],
                 notes=notes,
                 created_by=actor,

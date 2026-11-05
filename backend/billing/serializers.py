@@ -7,7 +7,7 @@ from rest_framework import serializers
 from properties.models import business_date
 
 from .calculations import due_status, entry_amounts
-from .models import Payment, PaymentReversal, Receipt, RentalPeriod, RentEntry
+from .models import MeterReading, Payment, PaymentReversal, Receipt, RentalPeriod, RentEntry
 
 MONTH_PATTERN = re.compile(r"^(\d{4})-(\d{2})$")
 
@@ -34,6 +34,9 @@ SERVER_ASSIGNED_FIELDS = {
     "replacedByEntryId",
     "paymentTiming",
     "dueDate",
+    "electricityMode",
+    "openingReading",
+    "meterOpening",
 }
 # Derived from the charges and payments, never typed in.
 DERIVED_FIELDS = {
@@ -222,6 +225,19 @@ def money(value) -> str:
     return f"{value:.2f}"
 
 
+def reading_text(value: Decimal) -> str:
+    return f"{value:.3f}"
+
+
+def meter_point(reading, read_on, reading_id=None) -> dict | None:
+    if reading is None:
+        return None
+    point = {"reading": reading_text(reading), "readOn": read_on.isoformat()}
+    if reading_id is not False:
+        point["id"] = None if reading_id is None else str(reading_id)
+    return point
+
+
 class ReceiptSerializer(serializers.BaseSerializer):
     """An issued receipt, entirely from its saved snapshot: never today's tenancy, property,
     bill or payment details. Money is a decimal string. status: "issued", or "void" once its
@@ -255,6 +271,14 @@ class ReceiptSerializer(serializers.BaseSerializer):
                 "electricityUnits": f"{receipt.electricity_units:.3f}",
                 "electricityRate": money(receipt.electricity_rate),
                 "electricityAmount": money(receipt.electricity_amount),
+                "electricityMode": receipt.electricity_mode,
+                # The readings a meter bill was measured between, as saved; else null.
+                "openingReading": meter_point(
+                    receipt.opening_reading, receipt.opening_read_on, reading_id=False
+                ),
+                "closingReading": meter_point(
+                    receipt.closing_reading, receipt.closing_read_on, reading_id=False
+                ),
                 "waterAmount": money(receipt.water_amount),
             },
             "totalDue": money(receipt.total_due),
@@ -326,6 +350,82 @@ class EntryCorrectionSerializer(EntryVoidSerializer):
     )
 
 
+class MeterReadingCreateSerializer(serializers.Serializer):
+    """One meter reading: the units on the meter and the day it was read. The tenancy comes from
+    the URL; the order checks against its other readings are the server's (billing/meter.py)."""
+
+    reading = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        min_value=Decimal("0"),
+        error_messages={
+            "min_value": "A meter reading can't be negative.",
+            "invalid": "Enter the reading as a number, e.g. 2920.",
+            "max_decimal_places": "A reading can have at most three decimal places.",
+        },
+    )
+    readOn = serializers.DateField(source="read_on")
+    notes = serializers.CharField(
+        max_length=500,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+        error_messages={"max_length": "Notes must be 500 characters or fewer."},
+    )
+
+    def to_internal_value(self, data):
+        refuse_unknown_fields(self, data)
+        return super().to_internal_value(data)
+
+
+class MeterReadingVoidSerializer(serializers.Serializer):
+    reason = serializers.CharField(
+        max_length=500,
+        trim_whitespace=True,
+        error_messages={
+            "required": "Say why this reading is being voided.",
+            "blank": "Say why this reading is being voided.",
+            "max_length": "The reason must be 500 characters or fewer.",
+        },
+    )
+
+    def to_internal_value(self, data):
+        refuse_unknown_fields(self, data)
+        return super().to_internal_value(data)
+
+
+class MeterReadingCorrectionSerializer(MeterReadingVoidSerializer, MeterReadingCreateSerializer):
+    """The replacement's reading, date and notes, and why the original is corrected."""
+
+
+def meter_reading_data(reading: MeterReading, consumption=None, billed_by=None) -> dict:
+    """A reading as the API shows it. consumption: units since the active reading before it
+    (or the baseline), null for a void one; billedBy: the active bill it closes, if any."""
+    try:
+        replaced_by = str(reading.replaced_by.pk)
+    except MeterReading.DoesNotExist:
+        replaced_by = None
+    return {
+        "id": str(reading.pk),
+        "reading": reading_text(reading.reading),
+        "readOn": reading.read_on.isoformat(),
+        "notes": reading.notes,
+        "status": reading.status,
+        "consumption": None if consumption is None else reading_text(consumption),
+        "billedBy": billed_by,
+        "createdAt": serializers.DateTimeField().to_representation(reading.created_at),
+        "voidedAt": None
+        if reading.voided_at is None
+        else serializers.DateTimeField().to_representation(reading.voided_at),
+        "voidedByName": None if reading.voided_by is None else person_name(reading.voided_by),
+        "voidReason": reading.void_reason,
+        "replacesReadingId": None
+        if reading.replaces_reading_id is None
+        else str(reading.replaces_reading_id),
+        "replacedByReadingId": replaced_by,
+    }
+
+
 class RentEntryCreateSerializer(serializers.Serializer):
     """What the app may send for a new bill. The tenancy, electricity rate, creator, id and
     timestamps are assigned on the server (billing/services.py)."""
@@ -340,13 +440,22 @@ class RentEntryCreateSerializer(serializers.Serializer):
         required=False,
         error_messages={"min_value": "Rent must be more than zero."},
     )
+    # Typed units, for a tenancy whose meter isn't set up. With a meter baseline the units come
+    # from the readings (closingReading or closingReadingId) and typed ones are refused.
     electricityUnits = serializers.DecimalField(
         source="electricity_units",
         max_digits=10,
         decimal_places=3,
         min_value=Decimal("0"),
+        required=False,
         error_messages={"min_value": "Electricity units can't be negative."},
     )
+    # False leaves electricity off this bill (0 units); its readings wait for a later bill.
+    includeElectricity = serializers.BooleanField(source="include_electricity", required=False)
+    # A reading taken now, recorded with the bill (and charged, unless electricity is left off).
+    closingReading = MeterReadingCreateSerializer(source="closing_reading", required=False)
+    # Or a reading already recorded, not yet billed.
+    closingReadingId = serializers.UUIDField(source="closing_reading_id", required=False)
     waterAmount = serializers.DecimalField(
         source="water_amount",
         max_digits=10,
@@ -367,6 +476,17 @@ class RentEntryCreateSerializer(serializers.Serializer):
     def to_internal_value(self, data):
         refuse_unknown_fields(self, data)
         return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        if "closing_reading" in attrs and "closing_reading_id" in attrs:
+            raise serializers.ValidationError(
+                {"closingReading": ["Send a new closing reading or an existing one, not both."]}
+            )
+        if attrs.get("include_electricity") is False and "electricity_units" in attrs:
+            raise serializers.ValidationError(
+                {"electricityUnits": ["Electricity is left off this bill: send no units."]}
+            )
+        return attrs
 
 
 def _period_due(entry: RentEntry):
@@ -437,6 +557,7 @@ class RentEntrySerializer(serializers.ModelSerializer):
             "electricityUnits": data["electricityUnits"],
             "electricityRate": data["electricityRate"],
             "electricityAmount": str(amounts.electricity_amount),
+            **entry_meter_data(instance),
             "waterAmount": data["waterAmount"],
             "totalDue": str(amounts.total_due),
             "totalPaid": str(amounts.total_paid),
@@ -460,6 +581,22 @@ class RentEntrySerializer(serializers.ModelSerializer):
             else str(instance.replaces_entry_id),
             "replacedByEntryId": replaced_by_id(instance),
         }
+
+
+def entry_meter_data(entry: RentEntry) -> dict:
+    """electricityMode ("manual" typed units, "meter", "not_charged") and, for a meter bill,
+    openingReading and closingReading ({id, reading, readOn}; the opening's id is null when it's
+    the tenancy's baseline). Lists load the closing reading in the same query."""
+    if entry.electricity_mode != RentEntry.ElectricityMode.METER:
+        return {"electricityMode": entry.electricity_mode, "openingReading": None, "closingReading": None}
+    closing = entry.closing_reading
+    return {
+        "electricityMode": entry.electricity_mode,
+        "openingReading": meter_point(
+            entry.meter_opening, entry.meter_opening_date, entry.opening_reading_id
+        ),
+        "closingReading": meter_point(closing.reading, closing.read_on, closing.pk),
+    }
 
 
 def replaced_by_id(entry: RentEntry) -> str | None:
