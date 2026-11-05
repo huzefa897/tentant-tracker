@@ -23,8 +23,19 @@ from .serializers import (
     RentEntryCreateSerializer,
     RentEntrySerializer,
 )
+from .meter import (
+    ClosingReadingRequiredError,
+    DuplicateReadingDayError,
+    InvalidReadingError,
+    LaterMeterBillError,
+    MeterNotSetUpError,
+    ReadingAlreadyBilledError,
+    ReadingVoidError,
+)
+from .serializers import format_month
 from .services import (
     BillCorrectionNotAllowedError,
+    ElectricityNotCorrectableError,
     BillingMonthOutsideTenancyError,
     DuplicateBillingMonthError,
     EntryNotFoundError,
@@ -145,6 +156,23 @@ class UnreversedPayments(exceptions.APIException):
         )
 
 
+class LaterMeterBill(exceptions.APIException):
+    """With the later bill, so the app can link to it."""
+
+    status_code = status.HTTP_409_CONFLICT
+    default_code = "later_meter_bill"
+
+    def __init__(self, entry):
+        super().__init__(
+            {
+                "code": "later_meter_bill",
+                "detail": f"The {entry.billing_month:%B %Y} bill's electricity is measured from "
+                "this one: void that bill first.",
+                "entry": {"id": str(entry.pk), "billingMonth": format_month(entry.billing_month)},
+            }
+        )
+
+
 class ReceiptConfigurationIncomplete(exceptions.APIException):
     status_code = status.HTTP_400_BAD_REQUEST
     default_code = "receipt_configuration_incomplete"
@@ -218,7 +246,7 @@ def entry_with_details(entry_id) -> RentEntry:
     return (
         RentEntry.objects.with_amounts()
         .with_due()
-        .select_related("voided_by", "replaced_by")
+        .select_related("voided_by", "replaced_by", "closing_reading")
         .get(pk=entry_id)
     )
 
@@ -259,7 +287,7 @@ class RentEntryViewSet(
             RentEntry.objects.filter(tenancy=self.get_tenancy())
             .with_amounts()
             .with_due()
-            .select_related("voided_by", "replaced_by")
+            .select_related("voided_by", "replaced_by", "closing_reading")
             .order_by("-billing_month", "-created_at")
         )
 
@@ -341,6 +369,45 @@ class RentEntryViewSet(
         except PaymentExceedsOutstandingError as error:
             # The initial payment is more than the bill (whose rate the server sets).
             raise PaymentExceedsOutstanding(error.outstanding) from None
+        except MeterNotSetUpError:
+            raise exceptions.ValidationError(
+                {
+                    "closingReading": [
+                        "This tenancy's meter isn't set up: send electricityUnits instead."
+                    ]
+                }
+            ) from None
+        except InvalidReadingError as error:
+            field = "closingReading" if error.field in ("reading", "readOn") else error.field
+            raise exceptions.ValidationError({field: [error.detail]}) from None
+        except DuplicateReadingDayError:
+            raise exceptions.ValidationError(
+                {
+                    "closingReading": [
+                        "There's already a reading on that day: choose it instead."
+                    ]
+                }
+            ) from None
+        except ClosingReadingRequiredError:
+            raise exceptions.ValidationError(
+                {"closingReading": ["Enter the closing meter reading to charge electricity."]}
+            ) from None
+        except ReadingVoidError:
+            raise exceptions.ValidationError(
+                {"closingReadingId": ["That reading is void."]}
+            ) from None
+        except ReadingAlreadyBilledError as error:
+            last = error.last
+            raise exceptions.ValidationError(
+                {
+                    "closingReading": [
+                        "These readings are already billed."
+                        if last is None
+                        else f"Electricity is already billed up to {last.reading.normalize()} "
+                        f"({last.read_on:%d %b %Y}): the closing reading must be later."
+                    ],
+                }
+            ) from None
 
         # A retry returns the bill as it is now, with any later payments.
         entry = self.get_queryset().get(pk=result.entry.pk)
@@ -536,6 +603,8 @@ class EntryVoidViewSet(ScopedLookupMixin, viewsets.GenericViewSet):
             raise VoidConflict() from None
         except UnreversedPaymentsError as error:
             raise UnreversedPayments(error.count) from None
+        except LaterMeterBillError as error:
+            raise LaterMeterBill(error.entry) from None
 
         return Response(
             RentEntrySerializer(entry_with_details(result.entry.pk)).data,
@@ -586,6 +655,15 @@ class EntryCorrectionViewSet(ScopedLookupMixin, viewsets.GenericViewSet):
         except NothingToCorrectError:
             raise exceptions.ValidationError(
                 {"nonFieldErrors": ["Change at least one charge or the notes."]}
+            ) from None
+        except ElectricityNotCorrectableError:
+            raise exceptions.ValidationError(
+                {
+                    "electricityUnits": [
+                        "This bill's electricity comes from its meter readings (or was left "
+                        "off): void the bill and create a new one to change it."
+                    ]
+                }
             ) from None
         except IdempotencyConflictError:
             raise IdempotencyConflict() from None

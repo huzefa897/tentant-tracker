@@ -14,21 +14,24 @@ from .meter import (
     MeterNotSetUpError,
     NothingToCorrectReadingError,
     ReadingIdempotencyConflictError,
+    ReadingInUseError,
     ReadingNotAllowedError,
     ReadingNotFoundError,
     ReadingVoidConflictError,
     ReadingVoidError,
     baseline,
     correct_meter_reading,
+    last_billed,
     meter_readings_with_consumption,
     record_meter_reading,
     void_meter_reading,
 )
-from .models import MeterReading
+from .models import MeterReading, RentEntry
 from .serializers import (
     MeterReadingCorrectionSerializer,
     MeterReadingCreateSerializer,
     MeterReadingVoidSerializer,
+    format_month,
     meter_point,
     meter_reading_data,
 )
@@ -58,14 +61,35 @@ def duplicate_day() -> Conflict:
     return Conflict("duplicate_reading_day", "This tenancy already has a reading on that day.")
 
 
+def reading_in_use(error: ReadingInUseError) -> Conflict:
+    return Conflict(
+        "reading_in_use",
+        "Bills are measured from this reading: void them first, newest first.",
+        entries=[
+            {"id": str(entry.pk), "billingMonth": format_month(entry.billing_month)}
+            for entry in error.entries
+        ],
+    )
+
+
 def readings_response(tenancy) -> dict:
-    """{baseline, readings}: the meter's start and every reading newest first (void ones too,
-    marked), with its consumption."""
+    """{baseline, lastBilled, readings}: the meter's start, where the next meter bill starts,
+    and every reading newest first (void ones too, marked), with its consumption."""
+    billed_by = {
+        reading_id: {"id": str(entry_id), "billingMonth": format_month(month)}
+        for reading_id, entry_id, month in RentEntry.objects.active()
+        .filter(tenancy=tenancy, closing_reading__isnull=False)
+        .values_list("closing_reading_id", "pk", "billing_month")
+    }
     start = baseline(tenancy)
+    last = last_billed(tenancy)
     return {
         "baseline": None if start is None else meter_point(start.reading, start.read_on, False),
+        "lastBilled": None
+        if last is None
+        else meter_point(last.reading, last.read_on, last.reading_id),
         "readings": [
-            meter_reading_data(reading, consumption)
+            meter_reading_data(reading, consumption, billed_by.get(reading.pk))
             for reading, consumption in meter_readings_with_consumption(tenancy)
         ],
     }
@@ -129,7 +153,8 @@ class ReadingLookupMixin(ScopedLookupMixin):
 
 class MeterReadingVoidViewSet(ReadingLookupMixin, viewsets.GenericViewSet):
     """POST {reason}: voids a reading recorded by mistake (201 with the meter; 200 for a retry
-    with the same reason). 409 reading_void_conflict."""
+    with the same reason). 409 reading_in_use (with the bills measured from it),
+    reading_void_conflict."""
 
     pagination_class = None
 
@@ -149,6 +174,8 @@ class MeterReadingVoidViewSet(ReadingLookupMixin, viewsets.GenericViewSet):
             raise exceptions.NotFound() from None
         except ReadingNotAllowedError:
             raise exceptions.PermissionDenied(READINGS_FORBIDDEN) from None
+        except ReadingInUseError as error:
+            raise reading_in_use(error) from None
         except ReadingVoidConflictError:
             raise Conflict(
                 "reading_void_conflict", "This reading was already voided with another reason."
@@ -163,7 +190,7 @@ class MeterReadingCorrectionViewSet(ReadingLookupMixin, viewsets.GenericViewSet)
     """POST {reason, reading, readOn, notes?} with an Idempotency-Key header: voids the reading
     and records its replacement together (201 with the replacement's id and the meter; 200 for
     a retry). 400 when the replacement doesn't fit the other readings or changes nothing; 409
-    reading_void, duplicate_reading_day, idempotency_conflict."""
+    reading_in_use, reading_void, duplicate_reading_day, idempotency_conflict."""
 
     pagination_class = None
 
@@ -188,6 +215,8 @@ class MeterReadingCorrectionViewSet(ReadingLookupMixin, viewsets.GenericViewSet)
             raise exceptions.NotFound() from None
         except ReadingNotAllowedError:
             raise exceptions.PermissionDenied(READINGS_FORBIDDEN) from None
+        except ReadingInUseError as error:
+            raise reading_in_use(error) from None
         except ReadingVoidError:
             raise Conflict("reading_void", "This reading is void: it can't be corrected.") from None
         except NothingToCorrectReadingError:

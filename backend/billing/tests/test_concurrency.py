@@ -9,8 +9,8 @@ from django.db import connection, transaction
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
 from billing.calculations import entry_amounts
-from billing.meter import DuplicateReadingDayError, record_meter_reading
-from billing.models import MeterReading, Payment, PaymentReversal, Receipt, RentEntry
+from billing.meter import ReadingAlreadyBilledError, record_meter_reading
+from billing.models import Payment, PaymentReversal, Receipt, RentEntry
 from billing.services import (
     DuplicateBillingMonthError,
     EntryVoidError,
@@ -653,8 +653,8 @@ class ConcurrentBillCorrectionTests(TransactionTestCase):
 
 
 @skipUnlessDBFeature("has_select_for_update")
-class ConcurrentMeterReadingTests(TransactionTestCase):
-    """Two readings of one tenancy's meter for the same day, at once: one is recorded."""
+class ConcurrentMeterBillTests(TransactionTestCase):
+    """TC-18: bills created at once never charge the same meter units twice."""
 
     def setUp(self):
         self.user = make_user()
@@ -666,25 +666,34 @@ class ConcurrentMeterReadingTests(TransactionTestCase):
         patcher = mock.patch("billing.meter.business_date", return_value=date(2027, 1, 20))
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.reading = record_meter_reading(
+            tenancy_id=self.tenancy.pk,
+            actor=self.user,
+            validated_data={"reading": Decimal("2563"), "read_on": date(2026, 10, 31)},
+            idempotency_key=uuid.uuid4(),
+        ).reading
 
-    def test_two_readings_on_one_day_make_one(self):
-        values = [Decimal("2563"), Decimal("2570")]
-        barrier = threading.Barrier(len(values))
+    def test_two_bills_closing_on_one_reading_make_one(self):
+        months = [date(2026, 10, 1), date(2026, 11, 1)]
+        barrier = threading.Barrier(len(months))
         outcomes = []
         lock = threading.Lock()
 
-        def record(value):
+        def create(month):
             try:
                 barrier.wait()
-                record_meter_reading(
-                    tenancy_id=self.tenancy.pk,
+                create_rent_entry(
+                    tenancy=self.tenancy,
                     actor=self.user,
-                    validated_data={"reading": value, "read_on": date(2026, 10, 31)},
-                    idempotency_key=uuid.uuid4(),
+                    validated_data={
+                        "billing_month": month,
+                        "water_amount": Decimal("0"),
+                        "closing_reading_id": self.reading.pk,
+                    },
                 )
                 outcome = "created"
-            except DuplicateReadingDayError:
-                outcome = "duplicate_day"
+            except ReadingAlreadyBilledError:
+                outcome = "already_billed"
             except Exception as error:  # noqa: BLE001 - reported by the assertion below
                 outcome = repr(error)
             finally:
@@ -692,11 +701,13 @@ class ConcurrentMeterReadingTests(TransactionTestCase):
             with lock:
                 outcomes.append(outcome)
 
-        threads = [threading.Thread(target=record, args=(value,)) for value in values]
+        threads = [threading.Thread(target=create, args=(month,)) for month in months]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join(timeout=30)
 
-        self.assertEqual(sorted(outcomes), ["created", "duplicate_day"])
-        self.assertEqual(MeterReading.objects.filter(tenancy=self.tenancy).count(), 1)
+        self.assertEqual(sorted(outcomes), ["already_billed", "created"])
+        self.assertEqual(
+            RentEntry.objects.filter(closing_reading=self.reading, status="active").count(), 1
+        )
