@@ -230,9 +230,13 @@ def reading_text(value: Decimal) -> str:
 
 
 def meter_point(reading, read_on, reading_id=None) -> dict | None:
+    """{reading, readOn, id?}; readOn is null only on a receipt opening on the baseline."""
     if reading is None:
         return None
-    point = {"reading": reading_text(reading), "readOn": read_on.isoformat()}
+    point = {
+        "reading": reading_text(reading),
+        "readOn": None if read_on is None else read_on.isoformat(),
+    }
     if reading_id is not False:
         point["id"] = None if reading_id is None else str(reading_id)
     return point

@@ -82,7 +82,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='receipt',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('closing_read_on__isnull', False), ('closing_reading__isnull', False), ('electricity_mode', 'meter'), ('opening_read_on__isnull', False), ('opening_reading__isnull', False)), models.Q(models.Q(('electricity_mode', 'meter'), _negated=True), ('closing_read_on__isnull', True), ('closing_reading__isnull', True), ('opening_read_on__isnull', True), ('opening_reading__isnull', True)), _connector='OR'), name='receipt_meter_readings_with_meter_mode'),
+            constraint=models.CheckConstraint(condition=models.Q(models.Q(('closing_read_on__isnull', False), ('closing_reading__isnull', False), ('electricity_mode', 'meter'), ('opening_reading__isnull', False)), models.Q(models.Q(('electricity_mode', 'meter'), _negated=True), ('closing_read_on__isnull', True), ('closing_reading__isnull', True), ('opening_read_on__isnull', True), ('opening_reading__isnull', True)), _connector='OR'), name='receipt_meter_readings_with_meter_mode'),
         ),
         migrations.AddConstraint(
             model_name='rententry',

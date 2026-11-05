@@ -527,13 +527,15 @@ def receipt_problem(payment: Payment, tenancy: Tenancy, prop: Property) -> str |
 
 def _receipt_meter_fields(entry: RentEntry) -> dict:
     """The bill's electricity mode and, for a meter bill, the readings it was measured between,
-    as the bill saved them (readings are never edited)."""
+    as the bill saved them (readings are never edited). An opening on the baseline has no date:
+    the day tracking was switched on isn't printed."""
     fields = {"electricity_mode": entry.electricity_mode}
     if entry.electricity_mode == RentEntry.ElectricityMode.METER:
         closing = entry.closing_reading
+        from_baseline = entry.opening_reading_id is None
         fields.update(
             opening_reading=entry.meter_opening,
-            opening_read_on=entry.meter_opening_date,
+            opening_read_on=None if from_baseline else entry.meter_opening_date,
             closing_reading=closing.reading,
             closing_read_on=closing.read_on,
         )

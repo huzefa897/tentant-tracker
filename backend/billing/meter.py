@@ -526,7 +526,14 @@ def electricity_for_new_bill(
         raise ClosingReadingRequiredError()
 
     opening = last_billed(tenancy)
-    if closing.read_on <= opening.read_on or closing.pk == opening.reading_id:
+    # A reading can be taken the day tracking starts (the baseline's day), never the same day
+    # as another reading.
+    from_baseline = opening.reading_id is None
+    if (
+        closing.pk == opening.reading_id
+        or closing.read_on < opening.read_on
+        or (closing.read_on == opening.read_on and not from_baseline)
+    ):
         raise ReadingAlreadyBilledError(opening)
     # The order checks make this non-negative; checked again rather than trusted.
     units = closing.reading - opening.reading

@@ -668,12 +668,12 @@ class Receipt(models.Model):
                 condition=Q(billing_month__day=1),
                 name="receipt_billing_month_first_day",
             ),
-            # Readings exactly on a meter bill's receipt.
+            # Readings exactly on a meter bill's receipt. The opening's date is left out when it's
+            # the baseline (the day tracking started isn't printed).
             models.CheckConstraint(
                 condition=Q(
                     electricity_mode="meter",
                     opening_reading__isnull=False,
-                    opening_read_on__isnull=False,
                     closing_reading__isnull=False,
                     closing_read_on__isnull=False,
                 )

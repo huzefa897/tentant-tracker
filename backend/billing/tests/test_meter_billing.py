@@ -33,7 +33,7 @@ from billing.services import (
     void_rent_entry,
 )
 
-from .factories import make_tenancy
+from .factories import make_tenancy, recorded_on
 from .test_meter_readings import MeterTestCase, readings_url
 
 OCTOBER, NOVEMBER, DECEMBER = date(2026, 10, 1), date(2026, 11, 1), date(2026, 12, 1)
@@ -64,7 +64,7 @@ class BaselineBillingTests(MeterBillTestCase):
             flat_number="301",
             electricity_rate=Decimal("8.00"),
             meter_baseline_reading=Decimal("2804"),
-            meter_baseline_date=date(2026, 1, 1),
+            meter_baseline_recorded_at=recorded_on(date(2026, 1, 1)),
         )
         entry = self.bill(date(2026, 2, 1), ("2920", date(2026, 2, 28)), tenancy=tenancy)
         self.assertEqual(entry.electricity_mode, RentEntry.ElectricityMode.METER)
@@ -185,6 +185,10 @@ class BillingTests(MeterBillTestCase):
                 meter_opening_date=date(2026, 9, 30),
             )
 
+    def test_the_first_bill_can_close_on_the_day_tracking_started(self):
+        entry = self.bill(OCTOBER, ("2410", date(2026, 9, 30)))
+        self.assertEqual(entry.electricity_units, Decimal("10"))
+
     def test_charging_the_meter_needs_a_closing_reading_and_no_typed_units(self):
         with self.assertRaises(ClosingReadingRequiredError):
             self.bill(OCTOBER)
@@ -227,7 +231,7 @@ class BillingTests(MeterBillTestCase):
             flat_number="301",
             electricity_rate=Decimal("8.00"),
             meter_baseline_reading=Decimal("2563"),
-            meter_baseline_date=date(2026, 10, 31),
+            meter_baseline_recorded_at=recorded_on(date(2026, 10, 31)),
         )
         entry = self.bill(NOVEMBER, ("2700", date(2026, 11, 30)), tenancy=later)
         self.assertEqual(entry.electricity_units, Decimal("137"))
@@ -282,6 +286,16 @@ class ReceiptTests(MeterBillTestCase):
             validated_data={"amount": Decimal("1000.00"), "paid_date": date(2027, 1, 2)},
         ).payment
         return issue_payment_receipt(payment_id=payment.pk, actor=self.owner).receipt
+
+    def test_a_receipt_leaves_out_the_day_tracking_started(self):
+        october = self.bill(OCTOBER, ("2563", date(2026, 10, 31)))
+        receipt = self.receipt_for(october)
+        self.assertEqual(receipt.opening_reading, Decimal("2400"))
+        self.assertIsNone(receipt.opening_read_on)
+        self.assertEqual(receipt.closing_read_on, date(2026, 10, 31))
+
+        december = self.bill(DECEMBER, ("2985", date(2026, 12, 31)))
+        self.assertEqual(self.receipt_for(december).opening_read_on, date(2026, 10, 31))
 
     def test_tc13_tc17_a_meter_receipt_keeps_its_readings(self):
         self.bill(OCTOBER, ("2563", date(2026, 10, 31)))
