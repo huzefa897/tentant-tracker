@@ -14,13 +14,15 @@ import { makeEntry, openPage } from '@/test/rentEntries'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
 import { fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
-import { resetTenantService } from '@/test/mocks/tenantService'
+import { resetMeterReadingService, setFakeMeter } from '@/test/mocks/meterReadingService'
+import { fakeTenancies, resetTenantService, testTenants } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
 vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
+vi.mock('@/services/meterReading.service', () => import('@/test/mocks/meterReadingService'))
 
 const createEntry = vi.mocked(rentEntryService.createEntry)
 
@@ -80,6 +82,7 @@ beforeEach(() => {
   resetAuthService()
   resetAccessService()
   resetRentEntryService()
+  resetMeterReadingService()
   localStorage.clear()
   sessionStorage.clear()
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -94,6 +97,45 @@ afterEach(() => {
 })
 
 describe('NewRentEntryView', () => {
+  describe('with the meter set up', () => {
+    const lastBilled = { id: 'r-aug', reading: 2563, readOn: '2026-09-30' }
+
+    beforeEach(() => {
+      fakeTenancies.tenants = testTenants.map((tenant) =>
+        tenant.id === 'tenant-001'
+          ? { ...tenant, meterBaseline: { reading: 2400, readOn: '2026-04-01' } }
+          : tenant,
+      )
+      setFakeMeter('tenant-001', { reading: 2400, readOn: '2026-04-01' }, [], lastBilled)
+      fakeEntries.meterOpening = lastBilled
+    })
+
+    it('bills from the last billed reading to the closing one, with the backend’s units', async () => {
+      await openEntryPage()
+      expect(app!.get('[data-testid="opening-reading"]').text()).toContain('2,563')
+
+      await fill({ billingMonth: '2026-09', closingReading: '2985', waterAmount: '300' })
+      await save()
+
+      expect(createEntry.mock.calls[0]![2].entry).toMatchObject({
+        includeElectricity: true,
+        closingReading: { reading: 2985, readOn: '2026-10-03' },
+      })
+      expect(savedSummary()['Electricity (2,563 → 2,985: 422 units × ₹6)']).toBe('₹2,532')
+    })
+
+    it('leaves electricity off, showing "Not charged" rather than ₹0', async () => {
+      await openEntryPage()
+      await app!.get('#includeElectricity').trigger('click')
+      await fill({ billingMonth: '2026-09', waterAmount: '300' })
+      await save()
+
+      expect(createEntry.mock.calls[0]![2].entry).toMatchObject({ includeElectricity: false })
+      expect(savedSummary().Electricity).toBe('Not charged')
+      expect(savedSummary()['Total due']).toBe('₹15,300')
+    })
+  })
+
   it('holds the form’s shape with a skeleton while the tenant loads', async () => {
     app = await openPage('/tenants/tenant-001/entries/new', () => {
       vi.mocked(tenantService.getTenant).mockReturnValueOnce(new Promise(() => {}))
@@ -193,6 +235,8 @@ describe('NewRentEntryView', () => {
           waterAmount: 300,
           notes: 'September charges',
           useTenancyRent: true,
+          includeElectricity: true,
+          closingReading: null,
         },
         initialPayment: null,
       },
