@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 
 import { ApiError } from '@/services/apiError'
 import { makeEntry } from '@/test/rentEntryFixtures'
+import type { MeterPoint } from '@/types/meterReading'
 import type { Payment } from '@/types/payment'
 import type {
   EntryCorrectionInput,
@@ -32,6 +33,9 @@ export const fakeEntries = {
   entryKeys: new Map<string, { entryId: string; request: string }>(),
   paymentKeys: new Map<string, { paymentId: string; request: string }>(),
   correctionKeys: new Map<string, { entryId: string; request: string }>(),
+  // Where a meter bill starts (the "last billed reading"): a bill sent with a closing reading is
+  // measured from it, as the backend measures from the tenancy's.
+  meterOpening: { id: null, reading: 0, readOn: '2026-08-31' } as MeterPoint,
 }
 
 let nextId = 1
@@ -160,6 +164,7 @@ export function resetRentEntryService() {
   fakeEntries.entryKeys = new Map()
   fakeEntries.paymentKeys = new Map()
   fakeEntries.correctionKeys = new Map()
+  fakeEntries.meterOpening = { id: null, reading: 0, readOn: '2026-08-31' }
   nextId = 1
   for (const hook of resetHooks) hook()
 
@@ -194,13 +199,25 @@ export function resetRentEntryService() {
           throw new ApiError('conflict', 'Conflict', 'duplicate_billing_month')
         }
 
+        // Electricity as the backend works it out: left off (0 units), from the meter (the
+        // closing reading less the last billed one), or the typed units.
+        const included = input.includeElectricity ?? true
+        const closing = input.closingReading ?? null
+        const meter = included && closing !== null
         const entry = makeEntry({
           id: nextFakeId('saved'),
           tenantId: tenancyId,
           billingMonth: input.billingMonth,
           rentAmount:
             input.useTenancyRent && fakeEntries.rent !== null ? fakeEntries.rent : input.rentAmount,
-          electricityUnits: input.electricityUnits,
+          electricityUnits: !included
+            ? 0
+            : meter
+              ? closing.reading - fakeEntries.meterOpening.reading
+              : input.electricityUnits,
+          electricityMode: !included ? 'not_charged' : meter ? 'meter' : 'manual',
+          openingReading: meter ? { ...fakeEntries.meterOpening } : null,
+          closingReading: meter ? { id: nextFakeId('reading'), ...closing } : null,
           electricityRate: fakeEntries.rate ?? input.electricityRate,
           waterAmount: input.waterAmount,
           notes: input.notes,

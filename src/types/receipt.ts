@@ -1,3 +1,5 @@
+import type { ElectricityMode, MeterPoint } from '@/types/meterReading'
+
 // Who issued a receipt, copied when it was issued: the property, the person who recorded the
 // payment (received the money) and the person who issued the receipt (authorized it).
 export interface ReceiptIssuer {
@@ -44,6 +46,10 @@ export interface PaymentReceipt {
     electricityUnits: number
     electricityRate: number
     electricityAmount: number
+    // How the bill charged electricity, and a meter bill's readings as saved.
+    electricityMode: ElectricityMode
+    openingReading: MeterPoint | null
+    closingReading: MeterPoint | null
     waterAmount: number
   }
   totalDue: number

@@ -1,3 +1,5 @@
+import type { MeterPoint } from '@/types/meterReading'
+
 // Frontend domain model: one tenancy (an occupant of a flat) from the backend, mapped by
 // services/tenant.service.ts. `id` is the backend tenancy id.
 export interface Tenant {
@@ -16,6 +18,9 @@ export interface Tenant {
   // months it overlaps.
   startDate: string
   endDate: string | null
+  // Where the electricity meter is measured from, set in admin; null while it isn't set up (its
+  // bills then take typed units).
+  meterBaseline: MeterPoint | null
 }
 
 // Whether the occupancy has started, continues or has ended, on today's date at the property.

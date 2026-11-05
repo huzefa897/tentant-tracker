@@ -1,6 +1,8 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
+import { parseElectricity, toMeterPoint, type MeterPointDto } from '@/services/meterReading.service'
 import { paymentsUrl } from '@/services/payment.service'
+import type { ElectricityMode } from '@/types/meterReading'
 import type { IssuedReceipt, PaymentReceipt } from '@/types/receipt'
 
 // A receipt as the backend returns it (.../payments/{paymentId}/receipt/): its saved snapshot,
@@ -27,6 +29,9 @@ export interface ReceiptDto {
     electricityUnits: string // three places, "75.000"
     electricityRate: string
     electricityAmount: string
+    electricityMode: ElectricityMode
+    openingReading: MeterPointDto | null
+    closingReading: MeterPointDto | null
     waterAmount: string
   }
   totalDue: string
@@ -117,6 +122,7 @@ export function parseReceipt(value: unknown): ReceiptDto {
     matches(charges, key, MONEY)
   }
   matches(charges, 'electricityUnits', UNITS)
+  parseElectricity(charges, false)
 
   return value as ReceiptDto
 }
@@ -143,6 +149,9 @@ export function toReceipt(dto: ReceiptDto): PaymentReceipt {
       electricityUnits: Number(dto.charges.electricityUnits),
       electricityRate: Number(dto.charges.electricityRate),
       electricityAmount: Number(dto.charges.electricityAmount),
+      electricityMode: dto.charges.electricityMode,
+      openingReading: toMeterPoint(dto.charges.openingReading),
+      closingReading: toMeterPoint(dto.charges.closingReading),
       waterAmount: Number(dto.charges.waterAmount),
     },
     totalDue: Number(dto.totalDue),

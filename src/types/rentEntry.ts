@@ -1,3 +1,5 @@
+import type { ElectricityMode, MeterPoint } from '@/types/meterReading'
+
 export type PaymentStatus = 'unpaid' | 'partially_paid' | 'paid'
 
 // A bill's own status, apart from its payments: a void bill is kept as history and counts
@@ -21,8 +23,14 @@ export interface RentEntryInput {
   tenantId: string
   billingMonth: string // YYYY-MM
   rentAmount: number
+  // Typed units, for a tenant without a meter baseline (ignored otherwise).
   electricityUnits: number
   electricityRate: number
+  // False leaves electricity off the bill (its readings wait for a later bill). Defaults to true.
+  includeElectricity?: boolean
+  // With a meter baseline: the closing reading taken now (recorded with the bill), charged unless
+  // electricity is left off.
+  closingReading?: { reading: number; readOn: string } | null
   waterAmount: number
   notes: string
   // True while the rent is still the tenant's rent the form started with. The request then leaves
@@ -53,6 +61,10 @@ export interface RentEntry {
   electricityUnits: number
   electricityRate: number
   electricityAmount: number
+  electricityMode: ElectricityMode
+  // A meter bill's readings (the opening's id is null when it's the baseline); null otherwise.
+  openingReading: MeterPoint | null
+  closingReading: MeterPoint | null
   waterAmount: number
   totalDue: number
   // The sum of the bill's payments.

@@ -15,6 +15,7 @@ const tenant: Tenant = {
   depositAmount: 90000,
   startDate: '2025-04-01',
   endDate: null,
+  meterBaseline: null,
 }
 
 let wrapper: VueWrapper | undefined
