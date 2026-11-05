@@ -32,7 +32,7 @@ cp backend/.env.example backend/.env    # set DJANGO_SECRET_KEY and FIREBASE_PRO
 docker compose --profile app up         # app: http://localhost:5173, Django: http://localhost:8000
 ```
 
-- The VITE_* values come from the root `.env`, as with `npm run dev`. For phone sign-in, copy the service-account key's fields into `backend/.env`, one variable each (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL` and the rest; `.env.example` shows how): the container can't see a key file's path on your machine. Without them, sign-in answers 503.
+- The VITE_* values come from the root `.env`, as with `npm run dev`. For sign-in, copy the service-account key's fields into `backend/.env`, one variable each (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL` and the rest; `.env.example` shows how): the container can't see a key file's path on your machine. Without them, sign-in answers 503.
 - The backend container migrates on start and runs as your user (uid 1000 by default; otherwise `export UID GID=$(id -g)` first), so new migrations belong to you: `docker compose --profile app exec backend python manage.py makemigrations`. Other commands the same way (`… exec backend python manage.py createsuperuser`, `… test`).
 - Rebuild after changing `Pipfile.lock` (`docker compose --profile app up --build`); `node_modules` lives in a volume and is reinstalled from `package-lock.json` on each start.
 - Ports 5173 and 8000 are the ones the host dev servers use: stop those first. `docker compose --profile app down` stops it all (keeping the database).
@@ -55,51 +55,51 @@ Dependency versions are pinned in `Pipfile.lock`. Add packages with `pipenv inst
 
 - `.env` is local and gitignored; `.env.example` lists every variable. The compose credentials are for local development only.
 - `docker compose down -v` deletes the `postgres_data` volume, which is the whole database.
-- `AUTH_USER_MODEL` is `accounts.User` (an `AbstractUser` with `firebase_uid` and `phone_number`). Roles go on property membership (BE Phase 2), not on the user.
+- `AUTH_USER_MODEL` is `accounts.User` (an `AbstractUser` with `firebase_uid`, a unique `email` and a contact `phone_number`). Roles go on property membership (BE Phase 2), not on the user.
 - CORS only allows the Vue dev origin and is not authentication.
 - `billing` holds rent entries (bills), one per tenancy and month, and the payments received against them. Both are created through the API (a bill can be created with an initial payment, saved together) and are view-only in admin, so nothing bypasses the checks that keep payments within the bill; there's no update or delete yet. Recording a payment locks its bill, and each request carries an `Idempotency-Key` header so a retry returns the payment already recorded instead of recording it twice. Each payment can have one **receipt**: a snapshot of the property, tenancy, bill and payment copied when it's issued (`billing/services.py` `issue_payment_receipt`, which locks the payment, bill, tenancy and property and reads them again before copying, so an edit that commits first is on the receipt; references are unique per property), so later payments or changed details never alter it. Issuing needs the property's name and address (set them in admin). Receipts are view-only in admin. Tests in `billing/tests/test_concurrency.py` run real concurrent transactions, so they need PostgreSQL.
 
 ## Authentication and property access
 
-**Firebase ID token → Django verification → person → property membership.** Firebase proves who controls a phone number; only people an admin has added can use the app, and only an active membership of an active property grants access to it.
+**Firebase ID token → Django verification → person → property membership.** Firebase proves which Google account signed in; only people an admin has added by their Google email can use the app, and only an active membership of an active property grants access to it.
 
 ### The model
 
 | Concept | Is | Where |
 |---|---|---|
-| Firebase identity | Proof of a phone number. No name, no permissions. | Firebase console (not a Django table) |
-| **Person** (`accounts.User`) | A real person: optional name, mobile number, email, and a link to their Firebase identity (`firebase_uid`, a read-only reference). Shown as "Name — +91 …". | Admin → **People** |
+| Firebase identity | Proof of a Google account (its verified email). No name, no permissions. | Firebase console (not a Django table) |
+| **Person** (`accounts.User`) | A real person: optional name, Google email (what lets them sign in), optional mobile number, and a link to their Firebase identity (`firebase_uid`, a read-only reference). Shown as "Name — +91 …", else the email. | Admin → **People** |
 | **Property** | A building, independent of people. | Admin → **Properties** |
 | **Property membership** | A person's role (owner/manager) at a property, active or ended. The only thing that grants property access. | Admin → **Property memberships**, or inline on a person or property |
 | **Tenancy** | One occupant of one flat over a period: name, flat, mobile, rent, due day, electricity rate, deposit, start and (inclusive) end date. Tenants don't sign in. A flat has a new tenancy, with its own id, for each occupant; bills will belong to the tenancy. | Admin → **Tenancies** |
 
-Admin portal access (`is_staff`/`is_superuser`, username + password) and app sign-in (phone) are separate permissions on the same person. Phone sign-in never opens the admin portal. Django's Groups are hidden: they grant admin permissions across every property, so property roles live on the membership. What each role may do is in `properties/roles.py` (owners: everything; managers: tenants, payments, receipts).
+Admin portal access (`is_staff`/`is_superuser`, username + password) and app sign-in (Google) are separate permissions on the same person. Google sign-in never opens the admin portal. Django's Groups are hidden: they grant admin permissions across every property, so property roles live on the membership. What each role may do is in `properties/roles.py` (owners: everything; managers: tenants, payments, receipts).
 
 ### Sign-in is invite-only
 
 - Requests send `Authorization: Bearer <Firebase ID token>`. `accounts/authentication.py` verifies it with the Firebase Admin SDK (`accounts/firebase.py`, the only module that imports `firebase_admin`), with revocation and disabled-user checks. Identity never comes from the request body.
-- **Adding a person** in admin with a mobile number registers that number with Firebase (or reuses its existing identity) and stores the UID, as the last step of the save (`accounts/services.py` `link_firebase_identity`). Changing the number moves the identity; removing it stops phone sign-in. Either change also signs the person out everywhere (Firebase refresh tokens are revoked), and a person without a number gets **403** `not_registered` even with an older token. If Firebase is unreachable, nothing is saved.
-- **A verified number nobody added** gets **403** `{"code": "not_registered"}` and **nothing is created**. People are never matched by phone number at sign-in, only by the UID linked when they were added.
+- **Adding a person** in admin with their Google email invites them; admin doesn't call Firebase. Their **first Google sign-in links them**: with no person linked to the token's UID, `accounts/services.py` `get_registered_user` links the invited, unlinked person with the token's email, only for a `google.com` sign-in whose email Google has verified. After that only the UID is matched.
+- **Changing or removing a linked person's email** unlinks them and signs them out everywhere (Firebase refresh tokens are revoked), as the last step of the admin save; if Firebase is unreachable, nothing is saved. A person without an email gets **403** `not_registered` even with an older token.
+- **A Google account nobody added** gets **403** `{"code": "not_registered"}` and **nothing is created**.
 - Invalid, expired or revoked tokens, disabled or deleted Firebase users and inactive people get **401**. If Firebase can't verify (network, outage, missing credentials) the API returns **503** and logs it, never "wrong login".
-- Mobile numbers are E.164 (`+918341413827`), unique, and limited to the countries the app's login accepts (`accounts/phone.py`, mirroring the frontend's `utils/phoneCountries.ts`). Admin accepts spaces and dashes.
-- Firebase still sends a code to any number typed on the login page (in the allowed SMS regions); the backend is what refuses unknown numbers.
+- Emails are unique ignoring case and stored lowercased. Mobile numbers (contact only) are E.164 (`+918341413827`), unique, and limited to the countries the app accepts (`accounts/phone.py`, mirroring the frontend's `utils/phoneCountries.ts`). Admin accepts spaces and dashes.
 
 Configure in `.env`: `FIREBASE_PROJECT_ID` (the Vue app's project) and either `GOOGLE_APPLICATION_CREDENTIALS` (absolute path to a service-account key kept **outside** the repo) or the key's fields, one variable each (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY_ID`, `FIREBASE_CLIENT_ID`; used when `FIREBASE_PRIVATE_KEY` is set). Tests mock Firebase and need neither.
 
 ### Adding a person and granting access
 
-1. Admin → **People** → **Add person**: enter their mobile number, and optionally a name and email. Saving registers the number for app sign-in.
+1. Admin → **People** → **Add person**: enter their Google email (the account they'll sign in with), and optionally a name and mobile number.
 2. On the person's page that opens, add **Property access**: the property, a role, active. The admin who granted it is recorded.
-3. They can now sign in to the app. A person with sign-in but no active membership sees "No property access"; filter People by **property access → Waiting for access** to find them.
+3. They can now sign in to the app with Google. Filter People by **app sign-in → Not signed in yet** to see who hasn't, and by **property access → Waiting for access** to find people who signed in without an active membership (they see "No property access").
 
-End access by making a membership inactive (memberships aren't deleted, so history is kept), or block someone entirely by making the person inactive. Create admin-portal accounts with `pipenv run createsuperuser`; to let an admin use the app too, add their mobile number on their person page.
+End access by making a membership inactive (memberships aren't deleted, so history is kept), or block someone entirely by making the person inactive. Create admin-portal accounts with `pipenv run createsuperuser`; to let an admin use the app too, add their Google email on their person page.
 
 ### Endpoints
 
 | Endpoint | Returns |
 |---|---|
 | `GET /api/v1/health/` | `{"status": "ok"}`, no authentication |
-| `GET /api/v1/me/` | `{id, phoneNumber, properties: [{id, name, role}]}`; an empty list means access isn't configured; an unregistered number is 403 `not_registered` |
+| `GET /api/v1/me/` | `{id, name, email, phoneNumber, properties: [{id, name, role}]}`; an empty list means access isn't configured; an unregistered Google account is 403 `not_registered` |
 | `GET /api/v1/properties/` | The user's properties (`id, name, address, contactNumber, role`) |
 | `GET /api/v1/properties/{id}/` | One of them; unassigned or missing is **404** |
 | `GET /api/v1/properties/{id}/tenancies/` | The property's tenancies, paginated: `{count, next, previous, results}` (20 per page, `?page=`). `?status=current` (default), `upcoming`, `ended` or `all`; `?search=` matches name or flat, case-insensitively. Ordered by flat, name, id |

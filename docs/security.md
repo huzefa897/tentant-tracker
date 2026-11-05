@@ -26,7 +26,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 1. Protect admin routes
 
-- **Django admin** uses Django's session login and needs `is_staff`. App people get an unusable password (`accounts/admin.py`), so a phone sign-in never opens admin. Admin access and app access are separate permissions ([auth-and-access.md](auth-and-access.md)).
+- **Django admin** uses Django's session login and needs `is_staff`. App people get an unusable password (`accounts/admin.py`), so a Google sign-in never opens admin. Admin access and app access are separate permissions ([auth-and-access.md](auth-and-access.md)).
 - **Its path** is `DJANGO_ADMIN_PATH` (default `admin/`). Use a non-obvious one in production.
 - **Failed logins are throttled** (`config/middleware.py` `AdminLoginThrottleMiddleware`): 5 failures per address and username, or 20 per address across usernames, within 15 minutes, then 429 with `Retry-After`. Each attempt is reserved **before** the password is checked, under a row lock in PostgreSQL (`accounts.AdminLoginAttempts`), so a burst of simultaneous guesses can't slip past the limit and every process shares the count. A refused attempt rolls back, so blocked requests (say, with new usernames) add no rows. A successful login clears that username's count and gives the address its attempt back.
 - **App routes**: the guards in `router/index.ts` are UX only. Every API endpoint checks access itself (item 2).
@@ -35,7 +35,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 ## 2. Server-side access, always
 
 - DRF requires authentication by default (`IsAuthenticated` + `FirebaseAuthentication`). A public endpoint opts out explicitly with `AllowAny` and `authentication_classes([])`; only `/api/v1/health/` and `/api/v1/ready/` do today.
-- Every request is checked on the server: never trust a UID, phone number, role, property, tenancy, rate or total from the request. The server derives them from the verified token and the database.
+- Every request is checked on the server: never trust a UID, email, phone number, role, property, tenancy, rate or total from the request. The server derives them from the verified token and the database.
 - Role permissions are checked with `properties/roles.py` `role_can` on every write.
 
 ## 3. Row-level security
@@ -47,9 +47,9 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 4. Hash passwords
 
-- The app has no passwords: sign-in is a Firebase phone OTP, and Firebase holds the identities.
+- The app has no passwords: sign-in is Google through Firebase, and Google and Firebase hold the identities. An invite is claimed only by a `google.com` sign-in with a Google-verified email, and never relinks a person already linked ([auth-and-access.md](auth-and-access.md)).
 - Staff passwords for Django admin are hashed with **Argon2** (`PASSWORD_HASHERS`, `argon2-cffi`). Older PBKDF2 hashes still verify and are upgraded at the next login. The password validators in `settings.py` apply.
-- Never store or log a password or OTP.
+- Never store or log a password.
 
 ## 5. No auth tokens stored by the app
 
@@ -64,7 +64,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 7. No secrets in logs
 
-- Never log tokens, `Authorization` headers, OTPs, passwords, request bodies or full phone numbers. Log ids (`user.pk`) instead.
+- Never log tokens, `Authorization` headers, passwords, request bodies, emails or full phone numbers. Log ids (`user.pk`) instead.
 - **Logging config** (`LOGGING` in `settings.py`): plain console logs at `DJANGO_LOG_LEVEL`, collected by the host. Django's `mail_admins` handler is not used, since it would email request details.
 - **What's logged today:**
   - `accounts/services.py` logs a user id.
@@ -88,12 +88,12 @@ All settings below come from the environment; `backend/.env.example` lists every
 - Redirects after login only follow same-app paths (`?redirect=`).
 - The API returns JSON only; receipts are generated as PDFs with jsPDF text.
 - **Django's responses** carry `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `Cross-Origin-Opener-Policy: same-origin` and `X-Frame-Options: DENY`, stated explicitly in `settings.py` and tested.
-- **The app's headers** come from Caddy ([deploy/web/Caddyfile](../deploy/web/Caddyfile)): the same four, plus HSTS and a **Content-Security-Policy**, sent as `Content-Security-Policy-Report-Only` until phone sign-in (reCAPTCHA) has been checked against it in the browser, then switched to enforcing ([deployment.md](deployment.md), first deploy). The policy:
+- **The app's headers** come from Caddy ([deploy/web/Caddyfile](../deploy/web/Caddyfile)): the same four, plus HSTS and a **Content-Security-Policy**, sent as `Content-Security-Policy-Report-Only` until Google sign-in (Firebase's popup and its auth-domain iframe) has been checked against it in the browser, then switched to enforcing ([deployment.md](deployment.md), first deploy). The policy:
 
   ```
   default-src 'self';
-  script-src 'self' https://www.google.com https://www.gstatic.com https://apis.google.com;
-  frame-src https://www.google.com https://<VITE_FIREBASE_AUTH_DOMAIN>;
+  script-src 'self' https://apis.google.com;
+  frame-src https://<VITE_FIREBASE_AUTH_DOMAIN>;
   connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com;
   img-src 'self' data:;
   font-src 'self' data:;
@@ -127,7 +127,7 @@ Every API request is limited (`config/throttling.py`); over a limit is 429 with 
 
 **The public health and readiness checks** (`/api/v1/health/`, `/api/v1/ready/`) have their own, stricter limit instead (`HealthCheckRateThrottle`, `DJANGO_THROTTLE_HEALTH`, default 10/minute per address, shared by the two), and no per-person limits. Their counts are always kept in the process's memory (the `health` cache, bounded to 1,000 addresses), never in PostgreSQL, so a flood of pings costs no database work: health makes no queries at all, readiness only its `SELECT 1`. Each worker counts separately, so the effective limit is up to `WEB_CONCURRENCY` times the rate. An uptime monitor every few minutes, and Docker's own check every 30 seconds, are far below it.
 
-Admin login is throttled separately (item 1). OTP abuse is limited by Firebase and reCAPTCHA; consider Firebase App Check.
+Admin login is throttled separately (item 1). Sign-in attempts are limited by Google and Firebase; consider Firebase App Check.
 
 In production:
 
