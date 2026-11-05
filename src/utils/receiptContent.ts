@@ -10,6 +10,7 @@ import {
   formatOrdinal,
   formatTimestamp,
 } from '@/utils/date'
+import { formatReading, NOT_CHARGED } from '@/utils/electricity'
 import { formatPhoneNumber } from '@/utils/phone'
 
 export interface ReceiptField {
@@ -69,6 +70,50 @@ function present(fields: ReceiptField[]): ReceiptField[] {
 
 export const VOID_BANNER = 'VOID — Payment reversed'
 
+// The bill's electricity as saved: a meter bill's two readings, then its units, rate and charge;
+// typed units without readings, as before; one "Not charged" row when it was left off (never
+// ₹0, which would read as paid).
+function electricityRows(charges: PaymentReceipt['charges']): ReceiptChargeRow[] {
+  if (charges.electricityMode === 'not_charged') {
+    return [
+      { description: 'Electricity', details: 'Not charged on this bill', amount: NOT_CHARGED },
+    ]
+  }
+  const readings: ReceiptChargeRow[] =
+    charges.electricityMode === 'meter' && charges.openingReading && charges.closingReading
+      ? [
+          {
+            description: 'Opening Reading',
+            details: `Read ${formatDateValueNumeric(charges.openingReading.readOn)}`,
+            amount: formatReading(charges.openingReading.reading),
+          },
+          {
+            description: 'Closing Reading',
+            details: `Read ${formatDateValueNumeric(charges.closingReading.readOn)}`,
+            amount: formatReading(charges.closingReading.reading),
+          },
+        ]
+      : []
+  return [
+    ...readings,
+    {
+      description: 'Electricity Units',
+      details: readings.length ? 'Closing − Opening' : 'Units Consumed',
+      amount: String(charges.electricityUnits),
+    },
+    {
+      description: 'Electricity Per Unit',
+      details: 'Rate per Unit',
+      amount: formatAmount(charges.electricityRate),
+    },
+    {
+      description: 'Electricity Charge',
+      details: `${charges.electricityUnits} Units × ${formatINR(charges.electricityRate)}`,
+      amount: formatAmount(charges.electricityAmount),
+    },
+  ]
+}
+
 export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
   const { issuer, tenant, charges } = receipt
   const isVoid = receipt.status === 'void'
@@ -83,21 +128,7 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
       details: 'Monthly Rent',
       amount: formatAmount(charges.rentAmount),
     },
-    {
-      description: 'Electricity Units',
-      details: 'Units Consumed',
-      amount: String(charges.electricityUnits),
-    },
-    {
-      description: 'Electricity Per Unit',
-      details: 'Rate per Unit',
-      amount: formatAmount(charges.electricityRate),
-    },
-    {
-      description: 'Electricity Charge',
-      details: `${charges.electricityUnits} Units × ${formatINR(charges.electricityRate)}`,
-      amount: formatAmount(charges.electricityAmount),
-    },
+    ...electricityRows(charges),
   ]
 
   if (charges.waterAmount > 0) {

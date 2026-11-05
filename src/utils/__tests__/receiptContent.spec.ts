@@ -29,6 +29,9 @@ const paidInFull: Partial<PaymentReceipt> = {
     electricityUnits: 109,
     electricityRate: 6,
     electricityAmount: 654,
+    electricityMode: 'manual',
+    openingReading: null,
+    closingReading: null,
     waterAmount: 0,
   },
   totalDue: 17654,
@@ -163,6 +166,38 @@ describe('getReceiptContent', () => {
       amount: '₹17,654.00',
     })
     expect(content.authorizedBy).toBe('AUTHORIZED BY · Test Manager')
+  })
+
+  it('shows a meter bill’s opening and closing readings as saved (TC-13)', () => {
+    const charges = {
+      ...makeReceipt().charges,
+      electricityMode: 'meter' as const,
+      electricityUnits: 422,
+      electricityRate: 8,
+      electricityAmount: 3376,
+      openingReading: { reading: 2563, readOn: '2026-10-31' },
+      closingReading: { reading: 2985, readOn: '2026-12-31' },
+    }
+    expect(getReceiptContent(makeReceipt({ charges })).charges.slice(1, 6)).toEqual([
+      { description: 'Opening Reading', details: 'Read 31/10/2026', amount: '2,563' },
+      { description: 'Closing Reading', details: 'Read 31/12/2026', amount: '2,985' },
+      { description: 'Electricity Units', details: 'Closing − Opening', amount: '422' },
+      { description: 'Electricity Per Unit', details: 'Rate per Unit', amount: '8.00' },
+      { description: 'Electricity Charge', details: '422 Units × ₹8', amount: '3,376.00' },
+    ])
+  })
+
+  it('shows electricity left off as one "Not charged" row, never ₹0 (TC-12)', () => {
+    const charges = {
+      ...makeReceipt().charges,
+      electricityMode: 'not_charged' as const,
+      electricityUnits: 0,
+      electricityAmount: 0,
+    }
+    const rows = getReceiptContent(makeReceipt({ charges })).charges
+    expect(rows.filter((row) => row.description.startsWith('Electricity'))).toEqual([
+      { description: 'Electricity', details: 'Not charged on this bill', amount: 'Not charged' },
+    ])
   })
 
   it('adds a water row when the bill has water charges', () => {
