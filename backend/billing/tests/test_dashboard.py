@@ -30,9 +30,11 @@ def not_owed_url(prop, period):
 
 class DashboardTestCase(TestCase):
     def setUp(self):
-        patcher = mock.patch("billing.dashboard_views.business_date", return_value=TODAY)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        # Today for the dashboard and for the periods frozen before a due day or timing change.
+        for target in ("billing.dashboard_views.business_date", "billing.periods.business_date"):
+            patcher = mock.patch(target, return_value=TODAY)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.user = make_user()
         self.prop = make_property(member=self.user)
         self.track_from(AUGUST)
