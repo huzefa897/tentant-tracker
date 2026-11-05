@@ -32,7 +32,8 @@ class TenancySerializer(serializers.ModelSerializer):
     startDate = serializers.DateField(source="start_date")
     endDate = serializers.DateField(source="end_date", allow_null=True)
     status = serializers.SerializerMethodField()
-    # {reading, readOn} once the meter is set up (in admin), else null: bills then take units.
+    # {reading, readOn} once meter tracking is on (in admin), else null: bills then take units.
+    # readOn is the day the baseline was recorded, at the property.
     meterBaseline = serializers.SerializerMethodField()
 
     class Meta:
@@ -59,7 +60,7 @@ class TenancySerializer(serializers.ModelSerializer):
             return None
         return {
             "reading": f"{tenancy.meter_baseline_reading:.3f}",
-            "readOn": tenancy.meter_baseline_date.isoformat(),
+            "readOn": tenancy.meter_baseline_date().isoformat(),
         }
 
     def get_status(self, tenancy) -> str:

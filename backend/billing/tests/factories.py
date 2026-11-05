@@ -1,9 +1,16 @@
-from datetime import date
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from properties.models import Property, PropertyMembership, Tenancy
+
+
+def recorded_on(day: date) -> datetime:
+    """When a meter baseline was recorded, at noon at the property on that day: tests set it,
+    where admin takes the server's time."""
+    return timezone.make_aware(datetime.combine(day, time(12)))
 
 
 def make_user(username="me", **fields):

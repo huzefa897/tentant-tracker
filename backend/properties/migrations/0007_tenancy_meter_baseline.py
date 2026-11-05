@@ -14,16 +14,16 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name='tenancy',
-            name='meter_baseline_date',
-            field=models.DateField(blank=True, help_text='The day the baseline reading was taken, within the occupancy.', null=True),
+            name='meter_baseline_reading',
+            field=models.DecimalField(blank=True, decimal_places=3, help_text="The meter's reading now (units).", max_digits=10, null=True, validators=[django.core.validators.MinValueValidator(Decimal('0'))], verbose_name='initial meter reading'),
         ),
         migrations.AddField(
             model_name='tenancy',
-            name='meter_baseline_reading',
-            field=models.DecimalField(blank=True, decimal_places=3, help_text='Meter reading when tracking started (units). Leave empty to type units on bills.', max_digits=10, null=True, validators=[django.core.validators.MinValueValidator(Decimal('0'))]),
+            name='meter_baseline_recorded_at',
+            field=models.DateTimeField(blank=True, editable=False, null=True, verbose_name='baseline recorded at'),
         ),
         migrations.AddConstraint(
             model_name='tenancy',
-            constraint=models.CheckConstraint(condition=models.Q(models.Q(('meter_baseline_date__isnull', True), ('meter_baseline_reading__isnull', True)), models.Q(('meter_baseline_date__gte', models.F('start_date')), ('meter_baseline_date__isnull', False), ('meter_baseline_reading__gte', 0)), _connector='OR'), name='tenancy_meter_baseline_complete', violation_error_message='Enter both the baseline reading and its date (not before the start date).'),
+            constraint=models.CheckConstraint(condition=models.Q(models.Q(('meter_baseline_reading__isnull', True), ('meter_baseline_recorded_at__isnull', True)), models.Q(('meter_baseline_reading__gte', 0), ('meter_baseline_recorded_at__isnull', False)), _connector='OR'), name='tenancy_meter_baseline_complete', violation_error_message="The initial meter reading can't be negative."),
         ),
     ]

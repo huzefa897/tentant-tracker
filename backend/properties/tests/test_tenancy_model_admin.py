@@ -228,6 +228,30 @@ class TenancyAdminTests(TestCase):
         page = self.client.get(response["Location"])
         self.assertContains(page, "Not saved: this flat already has a tenancy in this period")
 
+    def test_meter_tracking_needs_the_initial_reading_and_records_when(self):
+        response = self.post(meter_tracking=True, meter_baseline_reading="")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Enter the meter&#x27;s reading to start tracking.")
+
+        response = self.post(meter_tracking=True, meter_baseline_reading="671")
+        self.assertEqual(response.status_code, 302)
+        tenancy = Tenancy.objects.get()
+        self.assertEqual(tenancy.meter_baseline_reading, Decimal("671"))
+        self.assertIsNotNone(tenancy.meter_baseline_recorded_at)
+
+    def test_a_reading_without_tracking_is_not_kept(self):
+        response = self.post(meter_tracking="", meter_baseline_reading="671")
+        self.assertEqual(response.status_code, 302)
+        tenancy = Tenancy.objects.get()
+        self.assertIsNone(tenancy.meter_baseline_reading)
+        self.assertIsNone(tenancy.meter_baseline_recorded_at)
+
+    def test_the_recorded_time_is_read_only(self):
+        response = self.client.get(reverse("admin:properties_tenancy_add"))
+        self.assertContains(response, "Enable meter reading tracking")
+        self.assertContains(response, "Baseline recorded at")
+        self.assertNotContains(response, 'name="meter_baseline_recorded_at"')
+
     def test_list_search_and_filters(self):
         Tenancy.objects.create(**valid_fields(self.tower))
         url = reverse("admin:properties_tenancy_changelist")

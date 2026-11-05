@@ -206,8 +206,8 @@ class TenancyHasBillsError(ValidationError):
 
 
 TENANCY_BASELINE_LOCKED_MESSAGE = (
-    "This tenancy has meter readings, so its meter baseline can't change: they're measured "
-    "from it. Void the readings in the app first."
+    "This tenancy has meter readings, so meter tracking stays on and its initial reading can't "
+    "change: they're measured from it. Void the readings in the app first."
 )
 
 
@@ -275,8 +275,8 @@ class Tenancy(models.Model):
         help_text="Last day of the occupancy. Leave empty while it continues.",
     )
     # The electricity meter's reading when tracking started for this tenancy: the move-in
-    # reading, or for an existing tenancy the latest known one. Empty means the meter isn't set
-    # up (never assumed to be zero): its bills take typed units, as before. Fixed once the
+    # reading, or for an existing tenancy the latest known one. Empty means tracking is off
+    # (never assumed to be zero): its bills take typed units, as before. Fixed once the
     # tenancy has meter readings (billing.MeterReading), which are measured from it.
     meter_baseline_reading = models.DecimalField(
         max_digits=10,
@@ -284,12 +284,13 @@ class Tenancy(models.Model):
         null=True,
         blank=True,
         validators=[MinValueValidator(Decimal("0"))],
-        help_text="Meter reading when tracking started (units). Leave empty to type units on bills.",
+        verbose_name="initial meter reading",
+        help_text="The meter's reading now (units).",
     )
-    meter_baseline_date = models.DateField(
-        null=True,
-        blank=True,
-        help_text="The day the baseline reading was taken, within the occupancy.",
+    # When the baseline was entered: set by save(), never typed in. Readings are dated from that
+    # day on.
+    meter_baseline_recorded_at = models.DateTimeField(
+        null=True, blank=True, editable=False, verbose_name="baseline recorded at"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -326,18 +327,14 @@ class Tenancy(models.Model):
                 name="tenancy_end_date_not_before_start_date",
                 violation_error_message="The end date can't be before the start date.",
             ),
-            # A baseline is a reading and its date, or neither (the meter isn't set up).
+            # A baseline is a reading and when it was recorded, or neither (tracking is off).
             models.CheckConstraint(
-                condition=Q(meter_baseline_reading__isnull=True, meter_baseline_date__isnull=True)
-                | Q(
-                    meter_baseline_reading__gte=0,
-                    meter_baseline_date__isnull=False,
-                    meter_baseline_date__gte=models.F("start_date"),
-                ),
+                condition=Q(
+                    meter_baseline_reading__isnull=True, meter_baseline_recorded_at__isnull=True
+                )
+                | Q(meter_baseline_reading__gte=0, meter_baseline_recorded_at__isnull=False),
                 name="tenancy_meter_baseline_complete",
-                violation_error_message=(
-                    "Enter both the baseline reading and its date (not before the start date)."
-                ),
+                violation_error_message="The initial meter reading can't be negative.",
             ),
             # Needs the btree_gist extension (migration 0004) for the = comparisons.
             ExclusionConstraint(
@@ -393,21 +390,8 @@ class Tenancy(models.Model):
         self._check_no_overlap()
         if self.moves_property_with_bills():
             raise ValidationError({"property": TENANCY_PROPERTY_LOCKED_MESSAGE})
-        self._check_meter_baseline()
         if self.changes_baseline_with_readings():
             raise ValidationError({"meter_baseline_reading": TENANCY_BASELINE_LOCKED_MESSAGE})
-
-    def _check_meter_baseline(self):
-        reading, read_on = self.meter_baseline_reading, self.meter_baseline_date
-        if (reading is None) != (read_on is None):
-            missing = "meter_baseline_date" if read_on is None else "meter_baseline_reading"
-            raise ValidationError({missing: "Enter both the baseline reading and its date."})
-        if read_on is None or self.start_date is None:
-            return
-        if read_on < self.start_date or (self.end_date and read_on > self.end_date):
-            raise ValidationError(
-                {"meter_baseline_date": "The baseline date must be within the occupancy."}
-            )
 
     def save(self, *args, **kwargs):
         # Bills are scoped through their tenancy's property, so moving a tenancy that has bills
@@ -423,20 +407,46 @@ class Tenancy(models.Model):
                 raise TenancyHasReadingsError(
                     {"meter_baseline_reading": TENANCY_BASELINE_LOCKED_MESSAGE}
                 )
+            self._stamp_meter_baseline()
             super().save(*args, **kwargs)
 
+    def _stamp_meter_baseline(self):
+        """The baseline's recorded time is the server's: now, whenever the reading is entered or
+        changed, and cleared with it. A time set by the caller (an import, a test) is kept."""
+        if self.meter_baseline_reading is None:
+            self.meter_baseline_recorded_at = None
+            return
+        stored = None
+        if not self._state.adding:
+            stored = (
+                Tenancy.objects.filter(pk=self.pk)
+                .values_list("meter_baseline_reading", "meter_baseline_recorded_at")
+                .first()
+            )
+        stored_reading, stored_at = stored or (None, None)
+        if self.meter_baseline_recorded_at != stored_at and self.meter_baseline_recorded_at:
+            return
+        if self.meter_baseline_reading != stored_reading or stored_at is None:
+            self.meter_baseline_recorded_at = timezone.now()
+
+    def meter_baseline_date(self) -> date | None:
+        """The day the baseline was recorded, at the property (settings.TIME_ZONE)."""
+        if self.meter_baseline_recorded_at is None:
+            return None
+        return timezone.localdate(self.meter_baseline_recorded_at)
+
     def changes_baseline_with_readings(self) -> bool:
-        """Whether this saved tenancy has active meter readings and a different baseline now.
-        Readings and meter bills are measured from the baseline, so it's fixed once they
-        exist. Callers that need it to hold lock the row first (save() does)."""
+        """Whether this saved tenancy has active meter readings and a different baseline now,
+        or tracking turned off. Readings and meter bills are measured from the baseline, so it's
+        fixed once they exist. Callers that need it to hold lock the row first (save() does)."""
         if self._state.adding:
             return False
         stored = (
             Tenancy.objects.filter(pk=self.pk)
-            .values_list("meter_baseline_reading", "meter_baseline_date")
+            .values_list("meter_baseline_reading", flat=True)
             .first()
         )
-        if stored is None or stored == (self.meter_baseline_reading, self.meter_baseline_date):
+        if stored == self.meter_baseline_reading:
             return False
         return self.meter_readings.filter(status="active").exists()
 

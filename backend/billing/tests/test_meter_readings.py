@@ -10,6 +10,7 @@ from unittest import mock
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.urls import reverse
 from rest_framework.test import APIClient
 
 from billing.meter import (
@@ -28,7 +29,7 @@ from billing.meter import (
 from billing.models import MeterReading
 from properties.models import PropertyMembership, TenancyHasReadingsError
 
-from .factories import make_property, make_tenancy, make_user
+from .factories import make_property, make_tenancy, make_user, recorded_on
 
 TODAY = date(2027, 1, 20)
 
@@ -54,7 +55,7 @@ class MeterTestCase(TestCase):
             self.property,
             electricity_rate=Decimal("8.00"),
             meter_baseline_reading=Decimal("2400"),
-            meter_baseline_date=date(2026, 9, 30),
+            meter_baseline_recorded_at=recorded_on(date(2026, 9, 30)),
         )
 
     def read(self, value, on, tenancy=None, actor=None, key=None, notes=""):
@@ -72,28 +73,48 @@ class BaselineTests(MeterTestCase):
             self.property,
             flat_number="301",
             meter_baseline_reading=Decimal("2804"),
-            meter_baseline_date=date(2026, 1, 1),
+            meter_baseline_recorded_at=recorded_on(date(2026, 1, 1)),
         )
         self.assertEqual(tenancy.meter_baseline_reading, Decimal("2804"))
 
-    def test_a_baseline_needs_its_date_within_the_occupancy(self):
+    def test_the_server_records_when_the_baseline_was_entered(self):
         tenancy = make_tenancy(self.property, flat_number="301")
-        tenancy.meter_baseline_reading = Decimal("100")
-        with self.assertRaises(ValidationError):
-            tenancy.full_clean()
-        tenancy.meter_baseline_date = date(2025, 12, 31)
-        with self.assertRaises(ValidationError):
-            tenancy.full_clean()
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            tenancy.save()
+        self.assertIsNone(tenancy.meter_baseline_recorded_at)
+        first, later = recorded_on(date(2026, 11, 6)), recorded_on(date(2026, 11, 7))
 
-    def test_the_baseline_is_fixed_once_readings_exist(self):
+        tenancy.meter_baseline_reading = Decimal("671")
+        with mock.patch("properties.models.timezone.now", return_value=first):
+            tenancy.save()
+        self.assertEqual(tenancy.meter_baseline_recorded_at, first)
+        self.assertEqual(tenancy.meter_baseline_date(), date(2026, 11, 6))
+
+        # Saving something else keeps it; a new reading is recorded again; off clears it.
+        tenancy.name = "Mohammed Yusuf"
+        with mock.patch("properties.models.timezone.now", return_value=later):
+            tenancy.save()
+        self.assertEqual(tenancy.meter_baseline_recorded_at, first)
+        tenancy.meter_baseline_reading = Decimal("675")
+        with mock.patch("properties.models.timezone.now", return_value=later):
+            tenancy.save()
+        self.assertEqual(tenancy.meter_baseline_recorded_at, later)
+        tenancy.meter_baseline_reading = None
+        tenancy.save()
+        self.assertIsNone(tenancy.meter_baseline_recorded_at)
+
+    def test_the_database_needs_both_or_neither(self):
+        tenancy = make_tenancy(self.property, flat_number="301")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            type(tenancy).objects.filter(pk=tenancy.pk).update(meter_baseline_reading=Decimal("1"))
+
+    def test_the_baseline_is_fixed_and_tracking_stays_on_once_readings_exist(self):
         self.read("2563", date(2026, 10, 31))
-        self.tenancy.meter_baseline_reading = Decimal("2000")
-        with self.assertRaises(ValidationError):
-            self.tenancy.full_clean()
-        with self.assertRaises(TenancyHasReadingsError):
-            self.tenancy.save()
+        for value in (Decimal("2000"), None):
+            with self.subTest(value=value):
+                self.tenancy.meter_baseline_reading = value
+                with self.assertRaises(ValidationError):
+                    self.tenancy.full_clean()
+                with self.assertRaises(TenancyHasReadingsError):
+                    self.tenancy.save()
 
     def test_the_baseline_can_change_while_only_void_readings_exist(self):
         reading = self.read("2563", date(2026, 10, 31))
@@ -102,6 +123,17 @@ class BaselineTests(MeterTestCase):
         )
         self.tenancy.meter_baseline_reading = Decimal("2000")
         self.tenancy.save()
+    def test_admin_keeps_tracking_on_once_readings_exist(self):
+        self.read("2563", date(2026, 10, 31))
+        admin = make_user("admin", is_staff=True, is_superuser=True)
+        self.client.force_login(admin)
+        url = reverse("admin:properties_tenancy_change", args=[self.tenancy.pk])
+
+        page = self.client.get(url)
+        self.assertContains(page, "Enable meter reading tracking")
+        self.assertNotContains(page, 'name="meter_tracking"')
+        self.assertNotContains(page, 'name="meter_baseline_reading"')
+
     def test_a_tenancy_without_a_baseline_takes_no_readings(self):
         tenancy = make_tenancy(self.property, flat_number="301")
         with self.assertRaises(MeterNotSetUpError):
@@ -127,10 +159,12 @@ class ReadingTests(MeterTestCase):
             self.read("2500", date(2026, 11, 30))
         self.read("2876", date(2026, 11, 30))
 
-    def test_dates_are_within_the_tenancy_after_the_baseline_and_not_ahead(self):
-        for on in (date(2026, 9, 30), date(2026, 9, 1), date(2027, 1, 21)):
+    def test_dates_are_from_the_day_tracking_started_and_not_ahead(self):
+        for on in (date(2026, 9, 29), date(2025, 12, 31), date(2027, 1, 21)):
             with self.subTest(on=on), self.assertRaises(InvalidReadingError):
                 self.read("2500", on)
+        # The day the baseline was recorded is fine: tracking started that day.
+        self.read("2500", date(2026, 9, 30))
 
     def test_one_reading_a_day(self):
         self.read("2563", date(2026, 10, 31))

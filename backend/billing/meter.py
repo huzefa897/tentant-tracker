@@ -1,9 +1,10 @@
 """Electricity meter readings.
 
-A tenancy's meter is measured from its baseline (Tenancy.meter_baseline_reading and
-meter_baseline_date, set in admin). Readings are recorded on the day they're taken, never
-below an earlier one or above a later one, and never create, change or settle a bill. Missing
-months need nothing: the next reading covers them.
+A tenancy's meter is measured from its baseline (Tenancy.meter_baseline_reading, entered in
+admin, and when it was recorded, set by the server). Readings are recorded on the day they're
+taken, from the day the baseline was recorded on, never below an earlier one or above a later
+one, and never create, change or settle a bill. Missing months need nothing: the next reading
+covers them.
 
 A reading is never edited: one taken wrongly is voided, or voided and replaced, with a reason.
 
@@ -146,7 +147,7 @@ def _lock_tenancy(tenancy_id) -> Tenancy:
 def baseline(tenancy: Tenancy) -> MeterPoint | None:
     if tenancy.meter_baseline_reading is None:
         return None
-    return MeterPoint(tenancy.meter_baseline_reading, tenancy.meter_baseline_date, None)
+    return MeterPoint(tenancy.meter_baseline_reading, tenancy.meter_baseline_date(), None)
 
 
 def _check_reading_fits(tenancy: Tenancy, value: Decimal, read_on: date, *, ignore=None) -> None:
@@ -161,10 +162,11 @@ def _check_reading_fits(tenancy: Tenancy, value: Decimal, read_on: date, *, igno
         raise InvalidReadingError("readOn", "A reading can't be dated in the future.")
     if read_on < tenancy.start_date or (tenancy.end_date and read_on > tenancy.end_date):
         raise InvalidReadingError("readOn", "The reading's date must be within the tenancy.")
-    if read_on <= start.read_on:
+    if read_on < start.read_on:
         raise InvalidReadingError(
             "readOn",
-            f"The reading must be after the meter's baseline on {start.read_on:%d %b %Y}.",
+            f"The reading can't be dated before meter tracking started on "
+            f"{start.read_on:%d %b %Y}.",
         )
     if value < start.reading:
         raise InvalidReadingError(

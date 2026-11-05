@@ -25,7 +25,7 @@ from billing.services import (
 
 from properties.models import Property, PropertyMembership, Tenancy
 
-from .factories import make_property, make_tenancy, make_user
+from .factories import make_property, make_tenancy, make_user, recorded_on
 
 
 @skipUnlessDBFeature("has_select_for_update")
@@ -661,7 +661,7 @@ class ConcurrentMeterReadingTests(TransactionTestCase):
         self.tenancy = make_tenancy(
             make_property(member=self.user),
             meter_baseline_reading=Decimal("2400"),
-            meter_baseline_date=date(2026, 9, 30),
+            meter_baseline_recorded_at=recorded_on(date(2026, 9, 30)),
         )
         patcher = mock.patch("billing.meter.business_date", return_value=date(2027, 1, 20))
         patcher.start()
