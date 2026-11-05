@@ -16,7 +16,15 @@ Stack: Vue Router, Pinia (setup stores), Tailwind v4, shadcn-vue (reka-ui), Axio
 
 Before calling work done: `npm run format && npm run lint:check && npm test && npm run build`. CI (`.github/workflows/ci.yml`) runs the same checks on every PR and push to `dev` and `main`, plus the conflict check on PRs (fails only on conflicts with the PR's base; conflicts with other PRs are warnings).
 
-**Branches:** branch from `dev` and open PRs against `dev`. `main` is production and deploys on every passing commit; a "Release: dev → main" PR opens by itself, and merging it (with a merge commit, not squash) is the deploy ([docs/deployment.md](docs/deployment.md)).
+## Pull requests
+
+`main` is production: every passing commit on it deploys. Work lands on `dev` and reaches `main` only through the release PR ([docs/deployment.md](docs/deployment.md#branches-and-releases)).
+
+- **Base everything on `dev`.** Fetch, then branch from `origin/dev` (`git switch -c feature/<name> origin/dev`), never from `main` or the branch you happen to be on.
+- **Open PRs against `dev`:** `gh pr create --base dev`. Never against `main`.
+- **Never merge to `main` yourself**, not even a hotfix, unless the user explicitly asks for that hotfix. The "Release: dev → main" PR opens by itself; merging it (with a merge commit, not squash) is the deploy, and it's the user's call.
+- **Before opening:** run the checks above (and the backend's, for backend changes) and `npm run check:conflicts`. The description says what changed and why, any migration and what rolling back would need, and anything not verified (e.g. not tried in a browser).
+- **Opened against the wrong base?** Move it, don't open another: `git rebase --onto origin/dev <old-base> <branch>`, `git push --force-with-lease`, then `gh pr edit <number> --base dev`.
 
 ## Backend
 
