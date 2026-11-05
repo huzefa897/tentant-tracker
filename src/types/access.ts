@@ -13,6 +13,9 @@ export interface AppIdentity {
   id: number
   // The person's name as set in admin; empty when nobody has set it.
   name: string
+  // The Google account they sign in with.
+  email: string
+  // Contact only; empty when not set.
   phoneNumber: string
   properties: PropertyAccess[]
 }

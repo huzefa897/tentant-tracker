@@ -32,10 +32,11 @@
 			X-Content-Type-Options "nosniff"
 			Referrer-Policy "same-origin"
 			X-Frame-Options "DENY"
-			# Report-only until phone sign-in has been checked against it in the browser (no
+			# Report-only until Google sign-in has been checked against it in the browser (no
 			# violations in the console); then rename the header to Content-Security-Policy
-			# (docs/deployment.md).
-			Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' https://www.google.com https://www.gstatic.com https://apis.google.com; frame-src https://www.google.com https://{$FIREBASE_AUTH_DOMAIN}; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+			# (docs/deployment.md). No Cross-Origin-Opener-Policy here: same-origin would cut
+			# the app off from Google's sign-in popup.
+			Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' https://apis.google.com; frame-src https://{$FIREBASE_AUTH_DOMAIN}; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 		}
 	}
 

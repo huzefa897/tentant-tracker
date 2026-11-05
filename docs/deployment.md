@@ -32,7 +32,8 @@ The images:
 - A Linux server with Docker and the Compose plugin, ports 80 and 443 open, and enough disk for the database and backups.
 - A domain (or subdomain) with an A/AAAA record pointing at the server.
 - **Firebase** (the production project):
-  - Authentication > Settings > **Authorized domains**: add the domain, or phone sign-in is refused.
+  - Authentication > Sign-in method: enable **Google** (it's free; phone sign-in, which paid per SMS, stays disabled).
+  - Authentication > Settings > **Authorized domains**: add the domain, or Google sign-in is refused.
   - Project settings > Service accounts > **Generate new private key**: the key for the backend. Store it outside the repository, e.g. `/etc/rent-tracker/firebase-service-account.json`, in a directory only the deploying user can open (`chmod 700`), with the file readable by the container (`chmod 644`; the directory keeps others out).
   - Project settings > General > Your apps: the web app's config for the `VITE_FIREBASE_*` values.
 - Somewhere off the server for backups (another machine, or object storage through `rclone`), and a monitor for them (e.g. a free [healthchecks.io](https://healthchecks.io) check).
@@ -46,13 +47,13 @@ The images:
 5. In admin, set the property's name, address and contact number (receipts need them), add the tenancies, and add the people who sign in, with their property memberships ([auth-and-access.md](auth-and-access.md)).
 6. Import the Sheet's history if needed ([data-import.md](data-import.md)).
 7. Run the checks below, then set up backups.
-8. **Content-Security-Policy:** the site starts with the policy in report-only mode (`Content-Security-Policy-Report-Only` in the `Caddyfile`). Sign in with a phone number, open a bill and download a receipt with the browser's console open. If nothing is reported as violating the policy, rename the header to `Content-Security-Policy` in the `Caddyfile` and deploy again. If something is, add exactly that source to the policy rather than loosening it.
+8. **Content-Security-Policy:** the site starts with the policy in report-only mode (`Content-Security-Policy-Report-Only` in the `Caddyfile`). Sign in with Google, open a bill and download a receipt with the browser's console open. If nothing is reported as violating the policy, rename the header to `Content-Security-Policy` in the `Caddyfile` and deploy again. If something is, add exactly that source to the policy rather than loosening it.
 
 ### Checks after a deploy
 
 - `https://<domain>/api/v1/ready/` answers `{"status": "ok"}`.
 - `https://<domain>/tenants/anything` loads the app (a direct link to a Vue route), not a 404.
-- Sign in with a phone number: the app shows only that person's properties.
+- Sign in with Google: the app shows only that person's properties.
 - Open a tenant, create a bill, record a part payment and the rest, issue a receipt and open it again; refresh each page.
 - `docker compose … restart` (or reboot the server), then check the bill, payment and receipt are still there.
 - `curl -sI https://<domain>/api/v1/me/` shows `Cache-Control: no-store, private`: the API is never cached.
@@ -64,7 +65,7 @@ Run the app against the development backend and go through the journey above (si
 
 ### A local trial of the production setup
 
-To try the containers on your own machine (never on a real server), make a second settings file with the trial values from `.env.production.example` (`SITE_ADDRESS=:80`, `HTTP_PORT=8080`, `HTTPS_PORT=8443`, `DJANGO_ALLOWED_HOSTS=localhost`, `DJANGO_SECURE_SSL_REDIRECT=false`, `DJANGO_SECURE_COOKIES=false`, `DJANGO_SECURE_HSTS_SECONDS=0`) and run `ENV_FILE=.env.trial scripts/deploy.sh`, then open http://localhost:8080. Plain http means admin's login and phone sign-in won't work fully; it's for checking the containers start, migrate, serve the app and survive restarts.
+To try the containers on your own machine (never on a real server), make a second settings file with the trial values from `.env.production.example` (`SITE_ADDRESS=:80`, `HTTP_PORT=8080`, `HTTPS_PORT=8443`, `DJANGO_ALLOWED_HOSTS=localhost`, `DJANGO_SECURE_SSL_REDIRECT=false`, `DJANGO_SECURE_COOKIES=false`, `DJANGO_SECURE_HSTS_SECONDS=0`) and run `ENV_FILE=.env.trial scripts/deploy.sh`, then open http://localhost:8080. Plain http means admin's login and Google sign-in won't work fully; it's for checking the containers start, migrate, serve the app and survive restarts.
 
 ## Releasing
 
@@ -84,6 +85,19 @@ Then go through the checks above.
 
 - Keep each release's migrations usable by the release before it: add columns as nullable or with defaults, and remove or rename things in a later release, once nothing uses them.
 - When a migration can't be compatible (it rewrites or drops data), say so in its PR, and recover by restoring the backup `deploy.sh` took just before it ([restoring](#restoring-production)), then rolling back. Anything recorded after that backup is lost, so check before choosing this.
+
+### Moving to Google sign-in
+
+The release with migration `accounts.0005` replaces phone sign-in with Google. Everyone signs in again once; their person, property access and history stay, because those belong to the person, not the Firebase identity.
+
+1. **Before releasing**, in the Firebase console enable the **Google** provider (Authentication > Sign-in method) and check the domain is under Authorized domains. Leave Phone on for now.
+2. **Still before releasing**, in admin enter each person's **Google email** on their person page: the exact account they'll sign in with. The current release already has the field. Emails must now be unique ignoring case, and before this release nothing checked that: search People for each email (search ignores case) and make sure only one person has it. If two still do, the migration stops before changing anything and names them by admin id (`/admin/accounts/user/<id>/`), and the release doesn't start (`deploy.sh` stops at the migration; on Render the deploy fails and the previous one keeps running). Fix them in admin and release again.
+3. Release as usual. The migration sets each person's phone identity aside (`legacy_phone_firebase_uid`) and unlinks it, so phone sign-in stops at once.
+4. Each person signs in with Google. Their first sign-in links them by email; filter People by **app sign-in → Not signed in yet** to see who hasn't. Someone told "isn't registered" has a different email in admin: correct it there and they try again.
+5. Once everyone has signed in, **disable the Phone provider** in Firebase (this is what ends the SMS charges: until then anyone can request a code for any number). Turning it back on undoes this. **Keep the old phone users** under Authentication > Users: rolling back restores their UIDs, so deleting them locks those people out of a rollback.
+6. **Closing the rollback window**, once you're sure you won't go back to phone sign-in: a later release drops `legacy_phone_firebase_uid` (after that, `accounts.0005` can't be reversed), and only then delete the old phone users in Firebase (the ones with a phone number and no Google provider).
+
+**Rolling back** to the phone release works only until step 6, while the old phone users still exist in Firebase. If you disabled the Phone provider (step 5), turn it back on first. Then undo the migration, with this release still running, so the phone identities come back (Google links made since are dropped): `docker compose … exec backend python manage.py migrate accounts 0004` (on Render, the same command in the API service's shell), then `scripts/rollback.sh` (on Render, redeploy the earlier commit).
 
 ## Health, restarts and logs
 
@@ -129,7 +143,7 @@ If the database is lost or must go back to a backup:
 
 ### What a database backup doesn't cover
 
-- **Firebase accounts** live in the Firebase project, not the database. The database keeps each person's phone number and Firebase id, so people sign in again as themselves. If the Firebase project itself were lost, people would need linking to the new one (re-entering their numbers in admin).
+- **Firebase accounts** live in the Firebase project, not the database. The database keeps each person's Google email and Firebase id, so people sign in again as themselves. If the Firebase project itself were lost, clear their Firebase ids (`firebase_uid`) and each person's next Google sign-in links them to the new project by email.
 - **Secrets**: `.env.production` and the service-account key. Keep a copy in a password manager. A lost key can be replaced from the Firebase console (then delete the old one there); a lost `DJANGO_SECRET_KEY` can be replaced (admin sessions end); the database password can be reset in PostgreSQL.
 - **Certificates**: Caddy gets new ones by itself.
 - **The code**: it's in Git; `deploy/releases.log` says which commit was running.

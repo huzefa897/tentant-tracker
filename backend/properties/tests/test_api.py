@@ -18,10 +18,10 @@ class PropertyApiTests(TestCase):
     def setUp(self):
         User = get_user_model()
         self.user = User.objects.create_user(
-            username="me", firebase_uid="me", phone_number="+919000000001"
+            username="me", firebase_uid="me", email="me@example.com"
         )
         self.other = User.objects.create_user(
-            username="other", firebase_uid="other", phone_number="+919000000002"
+            username="other", firebase_uid="other", email="other@example.com"
         )
         self.property_a = Property.objects.create(
             name="Property A", address="1 Main Road", contact_number="+910000000002"
@@ -110,6 +110,6 @@ class PropertyApiTests(TestCase):
         self.assertEqual(client.get(LIST_URL).status_code, 401)
         self.assertEqual(client.get(detail_url(self.property_a.id)).status_code, 401)
 
-        verify.return_value = {"uid": "me", "phone_number": "+919000000001"}
+        verify.return_value = {"uid": "me", "email": "me@example.com"}
         client.credentials(HTTP_AUTHORIZATION="Bearer token")
         self.assertEqual(len(client.get(LIST_URL).json()), 1)

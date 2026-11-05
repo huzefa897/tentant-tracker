@@ -8,7 +8,12 @@ from accounts.firebase import FirebaseUnavailableError, InvalidFirebaseTokenErro
 from properties.models import PropertyMembership
 
 ME_URL = "/api/v1/me/"
-CLAIMS = {"uid": "firebase-uid-1", "phone_number": "+919000000001"}
+CLAIMS = {
+    "uid": "firebase-uid-1",
+    "email": "owner@example.com",
+    "email_verified": True,
+    "firebase": {"sign_in_provider": "google.com"},
+}
 
 
 @mock.patch("accounts.authentication.verify_firebase_token")
@@ -57,15 +62,13 @@ class FirebaseAuthenticationTests(TestCase):
         verify.assert_called_once_with("the-id-token")
 
     def invite(self, **fields):
-        """A person an admin added, linked to the Firebase identity in CLAIMS."""
+        """A person an admin added with the email in CLAIMS (linking is
+        accounts/tests/test_services.py)."""
         return get_user_model().objects.create_user(
-            username="invited",
-            firebase_uid=CLAIMS["uid"],
-            phone_number=CLAIMS["phone_number"],
-            **fields,
+            **{"username": "invited", "email": CLAIMS["email"], **fields}
         )
 
-    def test_unregistered_number_is_403_and_creates_nothing(self, verify):
+    def test_unregistered_account_is_403_and_creates_nothing(self, verify):
         verify.return_value = CLAIMS
 
         response = self.get_me("Bearer token")
@@ -74,77 +77,37 @@ class FirebaseAuthenticationTests(TestCase):
         self.assertEqual(
             response.json(),
             {
-                "detail": "This phone number isn't registered. Contact the property owner.",
+                "detail": "This Google account isn't registered. Contact the property owner.",
                 "code": "not_registered",
             },
         )
         self.assertFalse(get_user_model().objects.exists())
 
-    def test_unregistered_number_is_not_matched_by_phone_number(self, verify):
-        # Linking happens when the person is added, never by phone at sign-in.
-        get_user_model().objects.create_user(
-            username="unlinked", phone_number=CLAIMS["phone_number"]
-        )
-        verify.return_value = CLAIMS
-
-        self.assertEqual(self.get_me("Bearer token").status_code, 403)
-        self.assertIsNone(get_user_model().objects.get().firebase_uid)
-
-    def test_registered_person_signs_in_without_access_being_added(self, verify):
+    def test_invited_person_signs_in_and_is_linked_without_access_being_added(self, verify):
         user = self.invite()
         verify.return_value = CLAIMS
 
-        response = self.get_me("Bearer token")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["id"], user.id)
-        self.assertEqual(response.json()["properties"], [])
-        self.assertFalse(PropertyMembership.objects.exists())
-        self.assertEqual(get_user_model().objects.count(), 1)
-
-    def test_later_requests_follow_a_changed_phone_number(self, verify):
-        self.invite()
-        verify.return_value = {**CLAIMS, "phone_number": "+919000000002"}
-
-        self.assertEqual(self.get_me("Bearer token").json()["phoneNumber"], "+919000000002")
-        self.assertEqual(get_user_model().objects.get().phone_number, "+919000000002")
-
-    def test_a_number_removed_in_firebase_is_cleared_and_ends_access(self, verify):
-        self.invite()
-        verify.return_value = {"uid": CLAIMS["uid"]}
-
-        response = self.get_me("Bearer token")
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["code"], "not_registered")
-        self.assertEqual(get_user_model().objects.get().phone_number, "")
-
-    def test_a_number_removed_in_admin_ends_access_even_with_an_older_token(self, verify):
-        # The token still carries the number; it must not put it back.
-        user = self.invite()
-        user.phone_number = ""
-        user.save()
-        verify.return_value = CLAIMS
-
-        response = self.get_me("Bearer token")
-
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json()["code"], "not_registered")
-        self.assertEqual(get_user_model().objects.get().phone_number, "")
-
-    def test_phone_number_sync_never_takes_another_persons_number(self, verify):
-        self.invite()
-        get_user_model().objects.create_user(username="other", phone_number="+919000000002")
-        verify.return_value = {**CLAIMS, "phone_number": "+919000000002"}
-
-        with self.assertLogs("accounts.services", "WARNING"):
+        with self.assertLogs("accounts.services", "INFO"):
             response = self.get_me("Bearer token")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["phoneNumber"], CLAIMS["phone_number"])
+        self.assertEqual(response.json()["id"], user.id)
+        self.assertEqual(response.json()["email"], CLAIMS["email"])
+        self.assertEqual(response.json()["properties"], [])
+        self.assertFalse(PropertyMembership.objects.exists())
+        self.assertEqual(get_user_model().objects.get().firebase_uid, CLAIMS["uid"])
+
+    def test_an_email_removed_in_admin_ends_access_even_with_an_older_token(self, verify):
+        self.invite(firebase_uid=CLAIMS["uid"], email="")
+        verify.return_value = CLAIMS
+
+        response = self.get_me("Bearer token")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "not_registered")
 
     def test_inactive_django_user_is_401(self, verify):
-        self.invite(is_active=False)
+        self.invite(firebase_uid=CLAIMS["uid"], is_active=False)
         verify.return_value = CLAIMS
 
         self.assertEqual(self.get_me("Bearer token").status_code, 401)

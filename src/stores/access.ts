@@ -9,7 +9,7 @@ import type { AppIdentity } from '@/types/access'
 export type AccessStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 export const NOT_REGISTERED_MESSAGE =
-  "This number isn't registered. Contact the property owner to be added."
+  "This Google account isn't registered. Contact the property owner to be added."
 
 function messageFor(error: unknown): string {
   const kind = error instanceof ApiError ? error.kind : 'unknown'
