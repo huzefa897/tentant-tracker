@@ -16,11 +16,9 @@ const router = useRouter()
 const logout = useLogout()
 
 // The account menu is the same on every screen, so the layout wires it rather than each view.
-// Until /me answers (or if it fails) the Firebase number stands in, so logout is always there.
+// Until /me answers (or if it fails) the Google email stands in, so logout is always there.
 const name = computed(() => accessStore.identity?.name ?? '')
-const phoneNumber = computed(
-  () => accessStore.identity?.phoneNumber ?? authStore.user?.phoneNumber ?? '',
-)
+const email = computed(() => accessStore.identity?.email ?? authStore.user?.email ?? '')
 const canSwitchProperty = computed(
   () => accessStore.properties.length > 1 && route.name !== 'property-select',
 )
@@ -47,7 +45,7 @@ function switchProperty() {
         <AppLogo />
         <UserMenu
           :name="name"
-          :phone-number="phoneNumber"
+          :email="email"
           :can-switch-property="canSwitchProperty"
           @switch-property="switchProperty"
           @logout="logout"

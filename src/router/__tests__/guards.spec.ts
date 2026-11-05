@@ -30,10 +30,6 @@ async function navigate(path: string, beforeNavigate?: () => Promise<void> | voi
   return router.currentRoute.value.name
 }
 
-async function startOtpFlow() {
-  await useAuthStore().sendOtp('+918341413827', document.createElement('div'))
-}
-
 beforeEach(() => {
   resetAuthService()
   resetAccessService()
@@ -88,12 +84,8 @@ describe('route guards', () => {
       expect(accessService.getMe).not.toHaveBeenCalled()
     })
 
-    it('redirects verify to login without a pending number', async () => {
+    it('sends the old code page to login', async () => {
       expect(await navigate('/verify')).toBe('login')
-    })
-
-    it('allows verify mid OTP flow', async () => {
-      expect(await navigate('/verify', startOtpFlow)).toBe('verify')
     })
   })
 
@@ -125,10 +117,6 @@ describe('route guards', () => {
 
     it('redirects login to the dashboard', async () => {
       expect(await navigate('/login')).toBe('dashboard')
-    })
-
-    it('redirects verify to the dashboard', async () => {
-      expect(await navigate('/verify', startOtpFlow)).toBe('dashboard')
     })
   })
 

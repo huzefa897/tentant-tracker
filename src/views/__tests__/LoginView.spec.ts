@@ -21,9 +21,8 @@ async function mountView() {
   return mount(LoginView, { global: { plugins: [pinia, router] }, attachTo: document.body })
 }
 
-async function submit(view: Awaited<ReturnType<typeof mountView>>, digits = '8341413827') {
-  await view.get('#phone').setValue(digits)
-  await view.get('form').trigger('submit')
+async function signIn(view: Awaited<ReturnType<typeof mountView>>) {
+  await view.get('button').trigger('click')
   await flushPromises()
 }
 
@@ -33,44 +32,51 @@ beforeEach(() => {
 })
 
 describe('LoginView', () => {
-  it('sends a code with a reCAPTCHA host on the page and goes to verify', async () => {
+  it('signs in with Google and goes to the dashboard', async () => {
     const view = await mountView()
 
-    await submit(view)
+    await signIn(view)
 
-    expect(authService.sendOtp).toHaveBeenCalledWith(
-      { phoneNumber: '+918341413827' },
-      expect.any(HTMLElement),
-    )
-    const host = vi.mocked(authService.sendOtp).mock.calls[0]![1]
-    expect(view.element.contains(host)).toBe(true)
-    expect(router.currentRoute.value.name).toBe('verify')
+    expect(authService.signInWithGoogle).toHaveBeenCalled()
+    expect(router.currentRoute.value.name).toBe('dashboard')
     view.unmount()
   })
 
-  it('stays on login and shows the error when sending fails', async () => {
-    vi.mocked(authService.sendOtp).mockRejectedValue(new Error('down'))
+  it('stays on login without an error when the person closes Google', async () => {
+    vi.mocked(authService.signInWithGoogle).mockRejectedValue(new AuthError('cancelled'))
     const view = await mountView()
 
-    await submit(view)
+    await signIn(view)
 
     expect(router.currentRoute.value.name).toBe('login')
-    expect(view.get('[role="alert"]').text()).toBe(
-      'Unable to send verification code. Please try again.',
-    )
+    expect(view.find('[role="alert"]').exists()).toBe(false)
+    view.unmount()
+  })
+
+  it('stays on login and shows the error when sign-in fails', async () => {
+    vi.mocked(authService.signInWithGoogle).mockRejectedValue(new Error('down'))
+    const view = await mountView()
+
+    await signIn(view)
+
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(view.get('[role="alert"]').text()).toBe('Unable to sign in. Please try again.')
     view.unmount()
   })
 
   it.each([
     ['too-many-requests', 'Too many attempts. Please wait a while and try again.'],
-    ['captcha-failed', 'The security check failed. Refresh the page and try again.'],
+    [
+      'popup-blocked',
+      'Your browser blocked the Google sign-in window. Allow pop-ups and try again.',
+    ],
     ['network', 'No connection. Check your internet and try again.'],
-    ['not-configured', "Phone sign-in isn't available right now. Contact the property owner."],
+    ['not-configured', "Google sign-in isn't available right now. Contact the property owner."],
   ] as const)('explains a %s failure', async (code, message) => {
-    vi.mocked(authService.sendOtp).mockRejectedValue(new AuthError(code))
+    vi.mocked(authService.signInWithGoogle).mockRejectedValue(new AuthError(code))
     const view = await mountView()
 
-    await submit(view)
+    await signIn(view)
 
     expect(view.get('[role="alert"]').text()).toBe(message)
     view.unmount()
@@ -80,8 +86,8 @@ describe('LoginView', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useAuthStore()
-    vi.mocked(authService.sendOtp).mockRejectedValueOnce(new Error('down'))
-    await store.sendOtp('+918341413827', document.createElement('div')).catch(() => {})
+    vi.mocked(authService.signInWithGoogle).mockRejectedValueOnce(new Error('down'))
+    await store.signInWithGoogle().catch(() => {})
 
     const view = mount(LoginView, { global: { plugins: [pinia, router] } })
     await flushPromises()
@@ -94,12 +100,12 @@ describe('LoginView', () => {
     const view = await mountView()
 
     await useAuthStore().endSession(
-      "This number isn't registered. Contact the property owner to be added.",
+      "This Google account isn't registered. Contact the property owner to be added.",
     )
     await flushPromises()
 
     expect(view.get('[role="alert"]').text()).toBe(
-      "This number isn't registered. Contact the property owner to be added.",
+      "This Google account isn't registered. Contact the property owner to be added.",
     )
     view.unmount()
   })
@@ -115,7 +121,7 @@ describe('LoginView', () => {
     await flushPromises()
 
     expect(view.get('[role="alert"]').text()).toBe(
-      "Phone sign-in isn't available right now. Contact the property owner.",
+      "Google sign-in isn't available right now. Contact the property owner.",
     )
     view.unmount()
   })

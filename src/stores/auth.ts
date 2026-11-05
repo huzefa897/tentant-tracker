@@ -5,21 +5,13 @@ import { authService } from '@/services/auth.service'
 import { AuthError, type AuthErrorCode } from '@/services/authErrors'
 import type { AuthUser } from '@/types/auth'
 
-const SEND_MESSAGES: Partial<Record<AuthErrorCode, string>> = {
-  'invalid-phone-number': 'Enter a valid mobile number.',
-  'too-many-requests': 'Too many attempts. Please wait a while and try again.',
-  'captcha-failed': 'The security check failed. Refresh the page and try again.',
-  network: 'No connection. Check your internet and try again.',
-  'not-configured': "Phone sign-in isn't available right now. Contact the property owner.",
-}
-
-const VERIFY_MESSAGES: Partial<Record<AuthErrorCode, string>> = {
-  'invalid-code': 'Invalid verification code. Please try again.',
-  'code-expired': 'This code has expired. Request a new one.',
-  'session-missing': 'Your sign-in expired. Request a new code.',
+const SIGN_IN_MESSAGES: Partial<Record<AuthErrorCode, string>> = {
+  'popup-blocked': 'Your browser blocked the Google sign-in window. Allow pop-ups and try again.',
+  'account-exists': 'This email is set up to sign in another way. Contact the property owner.',
   'too-many-requests': 'Too many attempts. Please wait a while and try again.',
   'user-disabled': 'This account has been disabled. Contact the property owner.',
   network: 'No connection. Check your internet and try again.',
+  'not-configured': "Google sign-in isn't available right now. Contact the property owner.",
 }
 
 function messageFor(
@@ -34,10 +26,8 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null)
   // False until Firebase has restored (or ruled out) a saved session. Guards wait for it.
   const ready = ref(false)
-  // Shown on the login page: sign-in couldn't start, or the backend refused this number.
+  // Shown on the login page: sign-in couldn't start, or the backend refused this account.
   const loginNotice = ref<string | null>(null)
-  // In memory only, like Firebase's pending confirmation: a refresh on /verify starts over.
-  const pendingPhoneNumber = ref<string | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -57,7 +47,7 @@ export const useAuthStore = defineStore('auth', () => {
       } catch (err) {
         // e.g. missing Firebase config: treat as signed out and say so on the login page.
         console.error(err)
-        loginNotice.value = messageFor(err, SEND_MESSAGES, 'Sign-in is unavailable right now.')
+        loginNotice.value = messageFor(err, SIGN_IN_MESSAGES, 'Sign-in is unavailable right now.')
         ready.value = true
         resolve()
       }
@@ -66,49 +56,23 @@ export const useAuthStore = defineStore('auth', () => {
     return readyPromise
   }
 
-  async function sendOtp(phoneNumber: string, recaptchaHost: HTMLElement) {
+  // Resolves once signed in; closing Google's window resolves too, with nobody signed in and no
+  // error, since that's the person's choice.
+  async function signInWithGoogle() {
     loading.value = true
     error.value = null
     loginNotice.value = null
 
     try {
-      await authService.sendOtp({ phoneNumber }, recaptchaHost)
-      pendingPhoneNumber.value = phoneNumber
-    } catch (err) {
-      error.value = messageFor(
-        err,
-        SEND_MESSAGES,
-        'Unable to send verification code. Please try again.',
-      )
-      throw err
-    } finally {
-      loading.value = false
-    }
-  }
-
-  async function verifyOtp(code: string) {
-    if (!pendingPhoneNumber.value) {
-      throw new Error('Phone number missing')
-    }
-
-    loading.value = true
-    error.value = null
-
-    try {
       // onAuthStateChanged reports the same user; setting it here avoids waiting for that.
-      user.value = await authService.verifyOtp({ code })
-      pendingPhoneNumber.value = null
+      user.value = await authService.signInWithGoogle()
     } catch (err) {
-      error.value = messageFor(err, VERIFY_MESSAGES, 'Unable to verify the code. Please try again.')
+      if (err instanceof AuthError && err.code === 'cancelled') return
+      error.value = messageFor(err, SIGN_IN_MESSAGES, 'Unable to sign in. Please try again.')
       throw err
     } finally {
       loading.value = false
     }
-  }
-
-  function resetOtpFlow() {
-    pendingPhoneNumber.value = null
-    error.value = null
   }
 
   function clearError() {
@@ -119,10 +83,10 @@ export const useAuthStore = defineStore('auth', () => {
     await authService.logout()
 
     user.value = null
-    resetOtpFlow()
+    error.value = null
   }
 
-  // Signs out of Firebase and explains why on the login page, e.g. a number nobody added.
+  // Signs out of Firebase and explains why on the login page, e.g. an account nobody added.
   async function endSession(notice: string) {
     await logout()
     loginNotice.value = notice
@@ -132,14 +96,11 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     ready,
     loginNotice,
-    pendingPhoneNumber,
     loading,
     error,
     isAuthenticated,
     init,
-    sendOtp,
-    verifyOtp,
-    resetOtpFlow,
+    signInWithGoogle,
     clearError,
     logout,
     endSession,
