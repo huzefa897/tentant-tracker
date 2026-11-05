@@ -330,6 +330,13 @@ function openHistory() {
 
   router.push({ name: 'rent-entry-history', params: { tenantId: tenant.id } })
 }
+
+function openMeter() {
+  const tenant = tenantStore.selectedTenant
+  if (!tenant) return
+
+  router.push({ name: 'meter-readings', params: { tenantId: tenant.id } })
+}
 </script>
 
 <template>
@@ -380,6 +387,7 @@ function openHistory() {
       :entry-count="selectedTenantEntryCount"
       @add-entry="openNewEntry"
       @view-entries="openHistory"
+      @view-meter="openMeter"
     >
       <template v-if="summaryLoading" #latest-entry>
         <LoadingRegion label="Loading the latest bill…" data-testid="latest-entry-loading">

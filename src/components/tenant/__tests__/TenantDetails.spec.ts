@@ -15,6 +15,7 @@ const tenant: Tenant = {
   depositAmount: 90000,
   startDate: '2025-04-01',
   endDate: null,
+  meterBaseline: null,
 }
 
 function details(wrapper: ReturnType<typeof mount>) {
@@ -40,8 +41,28 @@ describe('TenantDetails', () => {
       'Due each month': '11th',
       Electricity: '₹6 / unit',
       Deposit: '₹90,000',
+      Meter: 'Not set up',
       Mobile: '83414 13827',
     })
+  })
+
+  it('shows where a set-up meter starts, and offers its readings', async () => {
+    const wrapper = mount(TenantDetails, {
+      props: { tenant: { ...tenant, meterBaseline: { reading: 2804, readOn: '2026-09-01' } } },
+    })
+
+    expect(details(wrapper).Meter).toBe('From 2,804')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === 'Meter readings')!
+      .trigger('click')
+    expect(wrapper.emitted('viewMeter')).toHaveLength(1)
+  })
+
+  it('offers no meter readings while the meter isn’t set up', () => {
+    const wrapper = mount(TenantDetails, { props: { tenant } })
+
+    expect(wrapper.findAll('button').map((b) => b.text())).not.toContain('Meter readings')
   })
 
   it('never repeats the name or flat in the details', () => {
