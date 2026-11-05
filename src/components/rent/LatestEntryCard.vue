@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
+import { electricityDetails, electricityValue } from '@/utils/electricity'
 
 // A tenant's most recent bill in full, for the dashboard, with the figures the backend
 // calculated, so they match Bills and the summary page.
@@ -29,8 +30,8 @@ const charges = computed(() => [
   { label: 'Rent', value: formatINR(props.entry.rentAmount) },
   {
     label: 'Electricity',
-    value: formatINR(props.entry.electricityAmount),
-    details: `${props.entry.electricityUnits} units × ${formatINR(props.entry.electricityRate)}`,
+    value: electricityValue(props.entry),
+    details: electricityDetails(props.entry),
   },
   { label: 'Water', value: formatINR(props.entry.waterAmount) },
 ])

@@ -119,4 +119,37 @@ describe('EntryCorrectionForm', () => {
     expect(wrapper.text()).toContain('Unable to correct the bill.')
     wrapper.unmount()
   })
+
+  it('keeps a meter bill’s electricity as it is, and sends its units back unchanged', async () => {
+    const meterBill = makeEntry({
+      id: 'dec',
+      billingMonth: '2026-12',
+      electricityMode: 'meter',
+      electricityUnits: 422,
+      electricityRate: 8,
+      openingReading: { id: 'r1', reading: 2563, readOn: '2026-10-31' },
+      closingReading: { id: 'r2', reading: 2985, readOn: '2026-12-31' },
+    })
+    const wrapper = mountForm({ original: meterBill })
+
+    expect(wrapper.find('#correction-electricityUnits').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="electricity-fixed"]').text()).toContain(
+      'Electricity (2,563 → 2,985: 422 units × ₹8)',
+    )
+    await wrapper.get('#correction-rentAmount').setValue('16000')
+    await wrapper.get('#correction-reason').setValue('Rent was wrong')
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ electricityUnits: 422 })
+    wrapper.unmount()
+  })
+
+  it('says a not-charged bill’s electricity was left off', () => {
+    const off = makeEntry({ electricityMode: 'not_charged', electricityUnits: 0 })
+    const wrapper = mountForm({ original: off })
+
+    expect(wrapper.find('#correction-electricityUnits').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="electricity-fixed"]').text()).toContain('Not charged')
+    wrapper.unmount()
+  })
 })

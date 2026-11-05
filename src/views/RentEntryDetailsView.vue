@@ -37,7 +37,9 @@ import {
 } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 import type { Payment, PaymentInput } from '@/types/payment'
+import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
+import { formatReading, NOT_CHARGED } from '@/utils/electricity'
 import { formatDateValue, formatMonthValue, formatTimestamp } from '@/utils/date'
 import { formatPaymentTiming } from '@/utils/rentCalculations'
 
@@ -302,12 +304,36 @@ const charges = computed(() => {
 
   return [
     { label: 'Rent', value: formatINR(value.rentAmount) },
-    { label: 'Electricity units', value: String(value.electricityUnits) },
-    { label: 'Electricity rate', value: `${formatINR(value.electricityRate)} / unit` },
-    { label: 'Electricity amount', value: formatINR(value.electricityAmount) },
+    ...electricityRows(value),
     { label: 'Water', value: formatINR(value.waterAmount) },
   ]
 })
+
+// A meter bill's readings, then its units; "Not charged" alone when electricity was left off.
+function electricityRows(value: RentEntry) {
+  if (value.electricityMode === 'not_charged') {
+    return [{ label: 'Electricity', value: NOT_CHARGED }]
+  }
+  const readings =
+    value.electricityMode === 'meter' && value.openingReading && value.closingReading
+      ? [
+          {
+            label: 'Opening reading',
+            value: `${formatReading(value.openingReading.reading)} (${formatDateValue(value.openingReading.readOn)})`,
+          },
+          {
+            label: 'Closing reading',
+            value: `${formatReading(value.closingReading.reading)} (${formatDateValue(value.closingReading.readOn)})`,
+          },
+        ]
+      : []
+  return [
+    ...readings,
+    { label: 'Electricity units', value: formatReading(value.electricityUnits) },
+    { label: 'Electricity rate', value: `${formatINR(value.electricityRate)} / unit` },
+    { label: 'Electricity amount', value: formatINR(value.electricityAmount) },
+  ]
+}
 
 function goToDashboard() {
   router.push({ name: 'dashboard' })
