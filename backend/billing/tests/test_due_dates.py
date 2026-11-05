@@ -133,12 +133,15 @@ class BillDueDateTests(TestCase):
 
     def test_a_bill_prepared_late_keeps_its_months_due_date(self):
         # September became due (and got its period) on the 11th; the tenant then moved to the
-        # 1st, and the bill was prepared after.
+        # 1st, and the bill was prepared after. Saving the new due day first creates the periods
+        # due by today, so today is pinned: from late October October is due too.
+        today = date(2026, 10, 12)
         self.prop.rent_tracking_start = SEPTEMBER
         self.prop.save()
-        ensure_periods(self.tenancy, date(2026, 10, 12))
+        ensure_periods(self.tenancy, today)
         self.tenancy.rent_due_day = 1
-        self.tenancy.save()
+        with mock.patch("billing.periods.business_date", return_value=today):
+            self.tenancy.save()
 
         self.create()
 
