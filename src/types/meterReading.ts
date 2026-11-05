@@ -11,6 +11,13 @@ export interface MeterPoint {
   readOn: string // YYYY-MM-DD
 }
 
+// A receipt's opening reading: no date when it's where tracking started (the baseline has a
+// recorded time, not a day the meter was read).
+export interface ReceiptMeterPoint {
+  reading: number
+  readOn: string | null // YYYY-MM-DD
+}
+
 export type MeterReadingStatus = 'active' | 'void'
 
 // One reading of a tenancy's meter, from the backend. Never edited: a wrong one is voided, or

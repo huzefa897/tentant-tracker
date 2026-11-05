@@ -5,6 +5,7 @@ import type {
   MeterPoint,
   MeterReading,
   MeterReadingInput,
+  ReceiptMeterPoint,
   TenantMeter,
 } from '@/types/meterReading'
 
@@ -14,6 +15,12 @@ export interface MeterPointDto {
   id?: string | null
   reading: string // "2563.000"
   readOn: string // YYYY-MM-DD
+}
+
+// A receipt's opening reading: readOn is null when it's the baseline.
+export interface ReceiptMeterPointDto {
+  reading: string
+  readOn: string | null
 }
 
 export interface MeterReadingDto {
@@ -56,16 +63,19 @@ function optionalId(value: unknown, what: string) {
   if (value !== null && (typeof value !== 'string' || value === '')) invalid(what)
 }
 
-// null, or a reading and its date (and, when `withId`, the reading's id or null).
+// null, or a reading and its date (and, when `withId`, the reading's id or null). With
+// `undated`, the date may be null too.
 export function parseMeterPoint(
   value: unknown,
   what: string,
   withId: boolean,
+  undated = false,
 ): MeterPointDto | null {
   if (value === null) return null
   if (!isRecord(value)) invalid(what)
   if (typeof value.reading !== 'string' || !READING.test(value.reading)) invalid(`${what}.reading`)
-  if (typeof value.readOn !== 'string' || !DATE.test(value.readOn)) invalid(`${what}.readOn`)
+  const dated = typeof value.readOn === 'string' && DATE.test(value.readOn)
+  if (!dated && !(undated && value.readOn === null)) invalid(`${what}.readOn`)
   if (withId) optionalId(value.id, `${what}.id`)
   return value as unknown as MeterPointDto
 }
@@ -79,17 +89,31 @@ export function toMeterPoint(dto: MeterPointDto | null): MeterPoint | null {
   }
 }
 
-// A bill's or receipt's electricity: its mode, and readings exactly when it's a meter bill.
+export function toReceiptMeterPoint(dto: ReceiptMeterPointDto | null): ReceiptMeterPoint | null {
+  return dto === null ? null : { reading: Number(dto.reading), readOn: dto.readOn }
+}
+
+// A bill's (`withIds`) or receipt's electricity: its mode, and readings exactly when it's a
+// meter bill. A receipt's opening reading has no date when it's the baseline.
 export function parseElectricity(
   value: Record<string, unknown>,
-  withIds: boolean,
+  withIds: true,
 ): {
   electricityMode: ElectricityMode
   openingReading: MeterPointDto | null
   closingReading: MeterPointDto | null
-} {
+}
+export function parseElectricity(
+  value: Record<string, unknown>,
+  withIds: false,
+): {
+  electricityMode: ElectricityMode
+  openingReading: ReceiptMeterPointDto | null
+  closingReading: MeterPointDto | null
+}
+export function parseElectricity(value: Record<string, unknown>, withIds: boolean) {
   if (!MODES.includes(value.electricityMode as ElectricityMode)) invalid('electricityMode')
-  const opening = parseMeterPoint(value.openingReading, 'openingReading', withIds)
+  const opening = parseMeterPoint(value.openingReading, 'openingReading', withIds, !withIds)
   const closing = parseMeterPoint(value.closingReading, 'closingReading', withIds)
   const isMeter = value.electricityMode === 'meter'
   if (isMeter !== (opening !== null) || isMeter !== (closing !== null)) invalid('closingReading')

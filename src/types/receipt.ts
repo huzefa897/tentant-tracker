@@ -1,4 +1,4 @@
-import type { ElectricityMode, MeterPoint } from '@/types/meterReading'
+import type { ElectricityMode, MeterPoint, ReceiptMeterPoint } from '@/types/meterReading'
 
 // Who issued a receipt, copied when it was issued: the property, the person who recorded the
 // payment (received the money) and the person who issued the receipt (authorized it).
@@ -48,7 +48,7 @@ export interface PaymentReceipt {
     electricityAmount: number
     // How the bill charged electricity, and a meter bill's readings as saved.
     electricityMode: ElectricityMode
-    openingReading: MeterPoint | null
+    openingReading: ReceiptMeterPoint | null // readOn null: the baseline
     closingReading: MeterPoint | null
     waterAmount: number
   }

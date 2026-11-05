@@ -187,6 +187,20 @@ describe('getReceiptContent', () => {
     ])
   })
 
+  it('shows the reading tracking started from without a date', () => {
+    const charges = {
+      ...makeReceipt().charges,
+      electricityMode: 'meter' as const,
+      openingReading: { reading: 2400, readOn: null },
+      closingReading: { reading: 2563, readOn: '2026-10-31' },
+    }
+    expect(getReceiptContent(makeReceipt({ charges })).charges[1]).toEqual({
+      description: 'Opening Reading',
+      details: 'Starting reading',
+      amount: '2,400',
+    })
+  })
+
   it('shows electricity left off as one "Not charged" row, never ₹0 (TC-12)', () => {
     const charges = {
       ...makeReceipt().charges,

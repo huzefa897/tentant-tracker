@@ -70,7 +70,8 @@ function present(fields: ReceiptField[]): ReceiptField[] {
 
 export const VOID_BANNER = 'VOID — Payment reversed'
 
-// The bill's electricity as saved: a meter bill's two readings, then its units, rate and charge;
+// The bill's electricity as saved: a meter bill's two readings (the opening one undated when
+// it's where tracking started), then its units, rate and charge;
 // typed units without readings, as before; one "Not charged" row when it was left off (never
 // ₹0, which would read as paid).
 function electricityRows(charges: PaymentReceipt['charges']): ReceiptChargeRow[] {
@@ -84,7 +85,10 @@ function electricityRows(charges: PaymentReceipt['charges']): ReceiptChargeRow[]
       ? [
           {
             description: 'Opening Reading',
-            details: `Read ${formatDateValueNumeric(charges.openingReading.readOn)}`,
+            details:
+              charges.openingReading.readOn === null
+                ? 'Starting reading'
+                : `Read ${formatDateValueNumeric(charges.openingReading.readOn)}`,
             amount: formatReading(charges.openingReading.reading),
           },
           {

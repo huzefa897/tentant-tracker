@@ -7,7 +7,8 @@ import {
   validateReason,
 } from '@/utils/meterReadingValidation'
 
-const after = { reading: 2563, readOn: '2026-10-31' }
+const after = { id: 'reading-1', reading: 2563, readOn: '2026-10-31' }
+const baseline = { id: null, reading: 2400, readOn: '2026-10-31' }
 const today = '2026-11-05'
 
 describe('validateMeterReadingDraft', () => {
@@ -45,6 +46,18 @@ describe('validateMeterReadingDraft', () => {
     expect(validateMeterReadingDraft({ reading: 2600, readOn }, { after, today }).readOn).toBe(
       message,
     )
+  })
+
+  it('allows the day tracking started, but not before it', () => {
+    for (const start of [baseline, { reading: 2400, readOn: '2026-10-31' }]) {
+      expect(
+        validateMeterReadingDraft({ reading: 2410, readOn: '2026-10-31' }, { after: start, today }),
+      ).toEqual({})
+      expect(
+        validateMeterReadingDraft({ reading: 2410, readOn: '2026-10-30' }, { after: start, today })
+          .readOn,
+      ).toBe("The reading can't be dated before meter tracking started on 31 Oct 2026.")
+    }
   })
 
   it('only checks the basics without a reading to follow', () => {

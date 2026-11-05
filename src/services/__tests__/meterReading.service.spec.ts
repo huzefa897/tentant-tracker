@@ -167,6 +167,33 @@ describe('parseElectricity', () => {
       ),
     ).toThrow(ApiError)
   })
+
+  it('lets only a receipt’s opening reading go undated (the baseline)', () => {
+    const undated = { reading: '2400.000', readOn: null }
+    const receiptPoint = { reading: '2563.000', readOn: '2026-10-31' }
+    expect(
+      parseElectricity(
+        { electricityMode: 'meter', openingReading: undated, closingReading: receiptPoint },
+        false,
+      ).openingReading,
+    ).toEqual(undated)
+    expect(() =>
+      parseElectricity(
+        { electricityMode: 'meter', openingReading: receiptPoint, closingReading: undated },
+        false,
+      ),
+    ).toThrow(ApiError)
+    expect(() =>
+      parseElectricity(
+        {
+          electricityMode: 'meter',
+          openingReading: { ...undated, id: null },
+          closingReading: point,
+        },
+        true,
+      ),
+    ).toThrow(ApiError)
+  })
 })
 
 describe('toMeterReadingDto', () => {

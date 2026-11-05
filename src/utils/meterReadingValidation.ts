@@ -18,7 +18,7 @@ export type MeterReadingErrors = Partial<Record<keyof MeterReadingDraft, string>
 
 export interface MeterReadingContext {
   // The reading it must follow (the last billed one on a bill, the baseline otherwise): not
-  // below its value, and after its day.
+  // below its value, and after its day (or on it, for the baseline: id null or left out).
   after: MeterPoint | null
   today: string // YYYY-MM-DD
 }
@@ -45,7 +45,9 @@ export function validateMeterReadingDraft(
     errors.readOn = 'Enter the day the meter was read.'
   } else if (draft.readOn > today) {
     errors.readOn = "The reading can't be dated in the future."
-  } else if (after && draft.readOn <= after.readOn) {
+  } else if (after && !after.id && draft.readOn < after.readOn) {
+    errors.readOn = `The reading can't be dated before meter tracking started on ${formatDateValue(after.readOn)}.`
+  } else if (after?.id && draft.readOn <= after.readOn) {
     errors.readOn = `The reading must be after ${formatDateValue(after.readOn)}.`
   }
   return errors

@@ -1,6 +1,12 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
-import { parseElectricity, toMeterPoint, type MeterPointDto } from '@/services/meterReading.service'
+import {
+  parseElectricity,
+  toMeterPoint,
+  toReceiptMeterPoint,
+  type MeterPointDto,
+  type ReceiptMeterPointDto,
+} from '@/services/meterReading.service'
 import { paymentsUrl } from '@/services/payment.service'
 import type { ElectricityMode } from '@/types/meterReading'
 import type { IssuedReceipt, PaymentReceipt } from '@/types/receipt'
@@ -30,7 +36,7 @@ export interface ReceiptDto {
     electricityRate: string
     electricityAmount: string
     electricityMode: ElectricityMode
-    openingReading: MeterPointDto | null
+    openingReading: ReceiptMeterPointDto | null // readOn null: the baseline
     closingReading: MeterPointDto | null
     waterAmount: string
   }
@@ -150,7 +156,7 @@ export function toReceipt(dto: ReceiptDto): PaymentReceipt {
       electricityRate: Number(dto.charges.electricityRate),
       electricityAmount: Number(dto.charges.electricityAmount),
       electricityMode: dto.charges.electricityMode,
-      openingReading: toMeterPoint(dto.charges.openingReading),
+      openingReading: toReceiptMeterPoint(dto.charges.openingReading),
       closingReading: toMeterPoint(dto.charges.closingReading),
       waterAmount: Number(dto.charges.waterAmount),
     },
