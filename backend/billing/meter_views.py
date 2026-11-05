@@ -49,10 +49,7 @@ class Conflict(exceptions.APIException):
 
 def meter_not_set_up() -> exceptions.ValidationError:
     return exceptions.ValidationError(
-        {
-            "code": "meter_not_set_up",
-            "detail": "This tenancy's meter isn't set up: an owner sets its baseline in admin.",
-        }
+        {"reading": ["This tenancy's meter isn't set up: an owner sets its baseline in admin."]}
     )
 
 

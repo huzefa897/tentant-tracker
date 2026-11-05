@@ -390,10 +390,7 @@ class RentEntryViewSet(
             ) from None
         except ClosingReadingRequiredError:
             raise exceptions.ValidationError(
-                {
-                    "code": "closing_reading_required",
-                    "closingReading": ["Enter the closing meter reading to charge electricity."],
-                }
+                {"closingReading": ["Enter the closing meter reading to charge electricity."]}
             ) from None
         except ReadingVoidError:
             raise exceptions.ValidationError(
@@ -403,7 +400,6 @@ class RentEntryViewSet(
             last = error.last
             raise exceptions.ValidationError(
                 {
-                    "code": "reading_already_billed",
                     "closingReading": [
                         "These readings are already billed."
                         if last is None

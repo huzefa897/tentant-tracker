@@ -555,9 +555,9 @@ class MeterApiTests(MeterTestCase):
             {"billingMonth": "2026-11", "waterAmount": "0", "closingReadingId": body["closingReading"]["id"]},
             format="json",
         )
-        self.assertEqual(again.json()["code"], "reading_already_billed")
+        self.assertIn("already billed up to 2563", again.json()["closingReading"][0])
         missing = self.client.post(entries, {"billingMonth": "2026-11", "waterAmount": "0"}, format="json")
-        self.assertEqual(missing.json()["code"], "closing_reading_required")
+        self.assertIn("closing meter reading", missing.json()["closingReading"][0])
 
         reading_id = body["closingReading"]["id"]
         in_use = self.client.post(f"{self.url}{reading_id}/void/", {"reason": "x"}, format="json")
