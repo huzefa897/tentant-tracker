@@ -81,7 +81,8 @@ class ReadingVoidConflictError(Exception):
 
 
 class ReadingInUseError(Exception):
-    """Active bills are measured from this reading: void them first, newest first."""
+    """Active bills are measured from this reading. entries: every bill to void first (those
+    and the meter bills after them), newest first."""
 
     def __init__(self, entries: list[RentEntry]):
         super().__init__(f"{len(entries)} bill(s) are measured from this reading.")
@@ -341,13 +342,18 @@ def record_meter_reading(*, tenancy_id, actor, validated_data: dict, idempotency
         raise
 
 
-def bills_measured_from(reading: MeterReading) -> list[RentEntry]:
-    """The active bills that open or close on this reading, newest month first."""
+def bills_to_void_for(reading: MeterReading) -> list[RentEntry]:
+    """The active meter bills to void before this reading can change, in the order to void
+    them (newest first): the bills that open or close on it and every meter bill after them,
+    since meter bills are voided newest first. Empty when no bill is measured from it."""
+    bills = RentEntry.objects.active().filter(tenancy_id=reading.tenancy_id)
+    if not bills.filter(Q(opening_reading=reading) | Q(closing_reading=reading)).exists():
+        return []
     return list(
-        RentEntry.objects.active()
-        .filter(tenancy_id=reading.tenancy_id)
-        .filter(Q(opening_reading=reading) | Q(closing_reading=reading))
-        .order_by("-billing_month")
+        bills.filter(
+            electricity_mode=RentEntry.ElectricityMode.METER,
+            closing_reading__read_on__gte=reading.read_on,
+        ).order_by("-closing_reading__read_on")
     )
 
 
@@ -387,7 +393,7 @@ def void_meter_reading(*, tenancy_id, reading_id, actor, reason: str) -> VoidedR
             if reading.void_reason != reason:
                 raise ReadingVoidConflictError()
             return VoidedReading(reading=reading, created=False)
-        in_use = bills_measured_from(reading)
+        in_use = bills_to_void_for(reading)
         if in_use:
             raise ReadingInUseError(in_use)
         _void_reading(reading, actor=actor, reason=reason)
@@ -436,7 +442,7 @@ def correct_meter_reading(
                 and original.notes == notes
             ):
                 raise NothingToCorrectReadingError()
-            in_use = bills_measured_from(original)
+            in_use = bills_to_void_for(original)
             if in_use:
                 raise ReadingInUseError(in_use)
 

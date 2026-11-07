@@ -153,7 +153,7 @@ class ReadingLookupMixin(ScopedLookupMixin):
 
 class MeterReadingVoidViewSet(ReadingLookupMixin, viewsets.GenericViewSet):
     """POST {reason}: voids a reading recorded by mistake (201 with the meter; 200 for a retry
-    with the same reason). 409 reading_in_use (with the bills measured from it),
+    with the same reason). 409 reading_in_use (with every bill to void first, newest first),
     reading_void_conflict."""
 
     pagination_class = None

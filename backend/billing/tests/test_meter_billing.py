@@ -20,6 +20,7 @@ from billing.meter import (
     ReadingInUseError,
     correct_meter_reading,
     last_billed,
+    void_meter_reading,
 )
 from billing.models import MeterReading, Payment, Receipt, RentEntry
 from billing.services import (
@@ -137,6 +138,34 @@ class ReadingBillingTests(MeterBillTestCase):
         )
         entry.refresh_from_db()
         self.assertEqual(entry.electricity_units, Decimal("163"))  # never changed silently
+
+    def test_a_billed_reading_names_every_bill_to_void_newest_first(self):
+        october = self.bill(OCTOBER, ("2563", date(2026, 10, 31)))
+        november = self.bill(NOVEMBER, ("2876", date(2026, 11, 30)))
+        december = self.bill(DECEMBER, ("2985", date(2026, 12, 31)))
+        unbilled = self.read("3001", date(2027, 1, 5))
+        with self.assertRaises(ReadingInUseError) as caught:
+            correct_meter_reading(
+                tenancy_id=self.tenancy.pk,
+                reading_id=november.closing_reading_id,
+                actor=self.owner,
+                reason="Wrong",
+                validated_data={"reading": Decimal("2870"), "read_on": date(2026, 11, 30)},
+                idempotency_key=uuid.uuid4(),
+            )
+        # November closes on it, December opens on it; October is untouched.
+        self.assertEqual(caught.exception.entries, [december, november])
+        with self.assertRaises(ReadingInUseError) as caught:
+            void_meter_reading(
+                tenancy_id=self.tenancy.pk,
+                reading_id=october.closing_reading_id,
+                actor=self.owner,
+                reason="Wrong",
+            )
+        self.assertEqual(caught.exception.entries, [december, november, october])
+        void_meter_reading(
+            tenancy_id=self.tenancy.pk, reading_id=unbilled.pk, actor=self.owner, reason="Wrong"
+        )
 
 
 class BillingTests(MeterBillTestCase):
@@ -370,6 +399,19 @@ class MeterBillApiTests(MeterBillTestCase):
         self.assertIn("already billed up to 2563", again.json()["closingReading"][0])
         missing = self.client.post(entries, {"billingMonth": "2026-11", "waterAmount": "0"}, format="json")
         self.assertIn("closing meter reading", missing.json()["closingReading"][0])
+        both = self.client.post(
+            entries,
+            {
+                "billingMonth": "2026-11",
+                "waterAmount": "0",
+                "closingReading": {"reading": "2700", "readOn": "2026-11-30"},
+                "closingReadingId": body["closingReading"]["id"],
+            },
+            format="json",
+        )
+        self.assertEqual(both.status_code, 400)
+        self.assertIn("not both", both.json()["closingReading"][0])
+        self.assertFalse(MeterReading.objects.filter(reading=Decimal("2700")).exists())
 
         reading_id = body["closingReading"]["id"]
         in_use = self.client.post(f"{self.url}{reading_id}/void/", {"reason": "x"}, format="json")
