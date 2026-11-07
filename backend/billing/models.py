@@ -26,7 +26,6 @@ def tenancy_covers_month(tenancy: Tenancy, billing_month: date) -> bool:
 MONEY = DecimalField(max_digits=12, decimal_places=2)
 
 
-
 # The one definition of a bill's amounts in SQL, shared by bill lists, their filters and the
 # dashboard; billing/calculations.py is the same rule in Python. Payments are summed in a
 # subquery per bill, never joined, so adding up many bills never counts a bill once per payment.
