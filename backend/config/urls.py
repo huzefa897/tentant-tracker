@@ -18,6 +18,11 @@ from billing.views import (
     ReceiptViewSet,
     RentEntryViewSet,
 )
+from billing.meter_views import (
+    MeterReadingCorrectionViewSet,
+    MeterReadingViewSet,
+    MeterReadingVoidViewSet,
+)
 from properties.views import PropertyViewSet, TenancyViewSet
 
 from .views import health_check, readiness_check
@@ -36,6 +41,10 @@ entry_correction = EntryCorrectionViewSet.as_view({"post": "create"})
 payment_list = PaymentViewSet.as_view({"get": "list", "post": "create"})
 payment_receipt = ReceiptViewSet.as_view({"get": "retrieve", "post": "create"})
 payment_reversal = PaymentReversalViewSet.as_view({"post": "create"})
+# Meter readings, through their property and tenancy.
+meter_reading_list = MeterReadingViewSet.as_view({"get": "list", "post": "create"})
+meter_reading_void = MeterReadingVoidViewSet.as_view({"post": "create"})
+meter_reading_correction = MeterReadingCorrectionViewSet.as_view({"post": "create"})
 
 urlpatterns = [
     path(settings.ADMIN_PATH, admin.site.urls),
@@ -102,6 +111,21 @@ urlpatterns = [
         "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/entries/<uuid:entry_id>/payments/<uuid:payment_id>/reversal/",
         payment_reversal,
         name="payment-reversal",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/meter-readings/",
+        meter_reading_list,
+        name="meter-reading-list",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/meter-readings/<uuid:reading_id>/void/",
+        meter_reading_void,
+        name="meter-reading-void",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/meter-readings/<uuid:reading_id>/correction/",
+        meter_reading_correction,
+        name="meter-reading-correction",
     ),
     path("api/v1/", include(router.urls)),
 ]

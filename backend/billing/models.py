@@ -590,6 +590,108 @@ def receipt_reference(tenant_name: str, flat_number: str, billing_month: date) -
     return f"{part(tenant_name)}_{part(flat_number)}_Rent_{billing_month:%B %Y}"
 
 
+class MeterReadingQuerySet(models.QuerySet):
+    def active(self):
+        """Readings that count: a void one is kept as history and measures nothing."""
+        return self.filter(status=MeterReading.Status.ACTIVE)
+
+
+class MeterReading(models.Model):
+    """One reading of a tenancy's electricity meter, on the day it was taken.
+
+    Measured from the tenancy's baseline (Tenancy.meter_baseline_reading, set in admin): a
+    reading is never before the baseline's date or below it, and readings never go down over
+    time. Missing months need nothing: the next reading simply covers them. Recording a reading
+    never creates, changes or settles a bill: a bill that charges electricity names the
+    readings it's measured between (billing/meter.py).
+
+    Never edited or deleted. One taken wrongly is voided (status, voided_*), or voided and
+    replaced (replaces_reading), through billing/meter.py, while no active bill is measured
+    from it. Every reading belongs to one tenancy: another tenancy's readings never count,
+    even for the same flat.
+    """
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        VOID = "void", "Void"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenancy = models.ForeignKey(
+        Tenancy, on_delete=models.PROTECT, related_name="meter_readings"
+    )
+    reading = models.DecimalField(max_digits=10, decimal_places=3)
+    read_on = models.DateField(help_text="The day the meter was read.")
+    notes = models.CharField(max_length=500, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    # One intended reading (the Idempotency-Key header): a retry returns this reading. The
+    # fingerprint is the original request, so a retry with other details is refused.
+    idempotency_key = models.UUIDField(editable=False)
+    fingerprint = models.CharField(max_length=64, editable=False)
+
+    status = models.CharField(max_length=6, choices=Status.choices, default=Status.ACTIVE)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    void_reason = models.CharField(max_length=500, blank=True)
+    # The void reading this one corrects. One-to-one: a reading is replaced at most once.
+    replaces_reading = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="replaced_by",
+    )
+
+    objects = MeterReadingQuerySet.as_manager()
+
+    class Meta:
+        ordering = ("-read_on", "-created_at")
+        constraints = [
+            # One active reading per tenancy and day, so readings have one order.
+            models.UniqueConstraint(
+                fields=["tenancy", "read_on"],
+                condition=Q(status="active"),
+                name="unique_active_meter_reading_per_day",
+            ),
+            models.UniqueConstraint(
+                fields=["idempotency_key"], name="unique_meter_reading_idempotency_key"
+            ),
+            models.CheckConstraint(
+                condition=Q(reading__gte=0), name="meter_reading_not_negative"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        status="active",
+                        voided_at__isnull=True,
+                        voided_by__isnull=True,
+                        void_reason="",
+                    )
+                    | (
+                        Q(status="void", voided_at__isnull=False, voided_by__isnull=False)
+                        & ~Q(void_reason="")
+                    )
+                ),
+                name="meter_reading_void_details_match_status",
+            ),
+            models.CheckConstraint(
+                condition=~Q(replaces_reading=F("id")),
+                name="meter_reading_not_replacing_itself",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.reading} on {self.read_on:%d %b %Y} — {self.tenancy}"
+
+
 class LegacyRecord(models.Model):
     """A record imported from an old ledger (billing/legacy_import.py): which source record
     became which bill, payment or receipt, and a fingerprint of what was imported. Rerunning an

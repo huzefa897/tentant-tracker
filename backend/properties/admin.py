@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.utils import unquote
 from django.db import IntegrityError
@@ -11,6 +12,7 @@ from .models import (
     PropertyMembership,
     Tenancy,
     TenancyHasBillsError,
+    TenancyHasReadingsError,
     business_date,
 )
 
@@ -141,9 +143,49 @@ class TenancyStatusFilter(admin.SimpleListFilter):
         return queryset
 
 
+class TenancyAdminForm(forms.ModelForm):
+    """The tenancy, with meter tracking as a checkbox: on, it needs the initial reading; off,
+    the reading is cleared. When the baseline was recorded is the server's (Tenancy.save)."""
+
+    meter_tracking = forms.BooleanField(
+        label="Enable meter reading tracking",
+        required=False,
+        help_text="Bills then charge the units between meter readings, instead of typed units.",
+    )
+
+    class Meta:
+        model = Tenancy
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "meter_tracking" in self.fields:  # read-only once the tenancy has readings
+            self.fields["meter_tracking"].initial = (
+                self.instance.pk is not None and self.instance.meter_baseline_reading is not None
+            )
+
+    def clean(self):
+        cleaned = super().clean()
+        if "meter_tracking" not in self.fields or "meter_baseline_reading" not in self.fields:
+            return cleaned  # fixed: the tenancy has readings (get_readonly_fields)
+        if cleaned.get("meter_tracking"):
+            if cleaned.get("meter_baseline_reading") is None and not self.has_error(
+                "meter_baseline_reading"
+            ):
+                self.add_error(
+                    "meter_baseline_reading", "Enter the meter's reading to start tracking."
+                )
+        else:
+            cleaned["meter_baseline_reading"] = None
+            self.instance.meter_baseline_reading = None
+        return cleaned
+
+
 @admin.register(Tenancy)
 class TenancyAdmin(admin.ModelAdmin):
     """Tenancies are entered here for now; the app only reads them."""
+
+    form = TenancyAdminForm
 
     list_display = (
         "name",
@@ -157,10 +199,25 @@ class TenancyAdmin(admin.ModelAdmin):
     list_filter = ("property", TenancyStatusFilter)
     list_select_related = ("property",)
     search_fields = ("name", "flat_number", "mobile_number")
-    readonly_fields = ("status", "id", "created_at", "updated_at")
+    readonly_fields = ("status", "meter_baseline_recorded_at", "id", "created_at", "updated_at")
     fieldsets = (
         (None, {"fields": ("property", "name", "flat_number", "mobile_number")}),
         ("Rent", {"fields": ("rent_amount", "rent_due_day", "electricity_rate", "deposit_amount")}),
+        (
+            "Electricity meter",
+            {
+                "fields": (
+                    "meter_tracking",
+                    "meter_baseline_reading",
+                    "meter_baseline_recorded_at",
+                ),
+                "description": (
+                    "The initial reading is the meter's reading when tracking starts: at move-in, "
+                    "or now for an existing tenancy. Readings after it are recorded in the app; "
+                    "once there are any, tracking stays on and the initial reading is fixed."
+                ),
+            },
+        ),
         (
             "Occupancy",
             {
@@ -172,10 +229,18 @@ class TenancyAdmin(admin.ModelAdmin):
     )
 
     def get_readonly_fields(self, request, obj=None):
+        fields = self.readonly_fields
         # A tenancy with bills keeps its property (Tenancy.save refuses the move).
         if obj is not None and obj.rent_entries.exists():
-            return ("property", *self.readonly_fields)
-        return self.readonly_fields
+            fields = ("property", *fields)
+        # Readings are measured from the baseline (Tenancy.save refuses a change).
+        if obj is not None and obj.meter_readings.filter(status="active").exists():
+            fields = ("meter_tracking", "meter_baseline_reading", *fields)
+        return fields
+
+    @admin.display(description="Enable meter reading tracking", boolean=True)
+    def meter_tracking(self, obj):
+        return obj.meter_baseline_reading is not None
 
     def changeform_view(self, request, object_id=None, form_url="", extra_context=None):
         try:
@@ -185,6 +250,15 @@ class TenancyAdmin(admin.ModelAdmin):
             self.message_user(
                 request,
                 "Not saved: this tenancy now has bills, so its property can't change.",
+                messages.ERROR,
+            )
+            return HttpResponseRedirect(request.get_full_path())
+        except TenancyHasReadingsError:
+            # A reading was recorded after this form loaded with the baseline still editable.
+            self.message_user(
+                request,
+                "Not saved: this tenancy now has meter readings, so its meter tracking can't "
+                "change.",
                 messages.ERROR,
             )
             return HttpResponseRedirect(request.get_full_path())

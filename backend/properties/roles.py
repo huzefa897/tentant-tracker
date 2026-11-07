@@ -18,20 +18,22 @@ class Capability(StrEnum):
     ISSUE_RECEIPTS = "issue_receipts"
     REVERSE_PAYMENTS = "reverse_payments"  # correct a payment recorded by mistake
     CORRECT_BILLS = "correct_bills"  # void a bill, or void it and create its replacement
+    RECORD_READINGS = "record_readings"  # record, void and correct electricity meter readings
 
 
 Role = PropertyMembership.Role
 
 ROLE_CAPABILITIES: dict[str, frozenset[Capability]] = {
     Role.OWNER: frozenset(Capability),
-    # Managers record payments and can reverse one recorded by mistake, but voiding or
-    # correcting a bill is the owners'.
+    # Managers record payments and meter readings and can reverse a payment or correct a
+    # reading recorded by mistake, but voiding or correcting a bill is the owners'.
     Role.MANAGER: frozenset(
         {
             Capability.MANAGE_TENANTS,
             Capability.RECORD_PAYMENTS,
             Capability.ISSUE_RECEIPTS,
             Capability.REVERSE_PAYMENTS,
+            Capability.RECORD_READINGS,
         }
     ),
 }

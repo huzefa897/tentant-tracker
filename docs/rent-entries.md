@@ -4,6 +4,7 @@
 
 **Bills are rent entries** (`billing.RentEntry`): one **active** bill per tenancy and billing month (stored as the first of the month), `PROTECT`ed from tenancy deletion. Void bills stay beside it as history ([Correcting a bill](#correcting-a-bill)).
 
+- **Electricity** is typed units (`manual`), measured from the meter (`meter`) or left off (`not_charged`), by `electricity_mode`: [meter-readings.md](meter-readings.md). Either way the bill stores its units, so everything below works out the same.
 - Rent and electricity rate are copied from the tenancy when the bill is created and never change after. Totals, paid, outstanding and status are derived in `billing/calculations.py` with `Decimal` (electricity rounded to paise, half up, **then** added to rent and water) and never stored. Paid counts only payments that weren't reversed ([payments-and-receipts.md](payments-and-receipts.md#corrections-reversing-a-payment)), so a reversal can make a paid bill partially paid or unpaid again.
 - Database constraints back every rule (one active bill per month, a conditional unique constraint `unique_active_tenancy_billing_month`; rent > 0, units/rate/water ≥ 0, first of month; void details present exactly when void).
 - The API (`/api/v1/properties/{id}/tenancies/{id}/entries/`, list/create, and `.../{entryId}/`) is scoped through `properties_for_user` then the tenancy, so others' bills 404; there's no update or delete: a bill is voided or corrected instead.
