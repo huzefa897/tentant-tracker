@@ -1,12 +1,21 @@
-"""Electricity meter readings.
+"""Electricity meter readings, and how a bill charges the units between them.
 
 A tenancy's meter is measured from its baseline (Tenancy.meter_baseline_reading, entered in
 admin, and when it was recorded, set by the server). Readings are recorded on the day they're
 taken, from the day the baseline was recorded on, never below an earlier one or above a later
-one, and never create, change or settle a bill. Missing months need nothing: the next reading
-covers them.
+one, and never create, change or settle a bill.
 
-A reading is never edited: one taken wrongly is voided, or voided and replaced, with a reason.
+A bill that charges electricity from the meter (RentEntry.ElectricityMode.METER) is measured
+from the **last billed reading**, the closing reading of the tenancy's latest active meter
+bill (or the baseline when there's none), to a later reading. A bill that leaves electricity
+off (NOT_CHARGED) moves nothing, so the units it skipped are charged by the next meter bill:
+October billed at 2563, November read at 2876 but not charged, December billed at 2985 charges
+422 units. Unique constraints on the bills' readings (RentEntry.Meta), checked here first under
+the tenancy's lock, keep the active meter bills one unbroken chain, so no stretch of the meter
+is billed twice or lost.
+
+Corrections never change a bill silently: a reading an active bill is measured from can't be
+voided or corrected until that bill is voided (after its payments are reversed), newest first.
 
 Lock order: the tenancy (FOR UPDATE: the same lock as creating a bill, so readings and bills
 of one tenancy are written one at a time), then the reading.
@@ -20,13 +29,14 @@ from datetime import date
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from properties.models import Tenancy, business_date
 from properties.queries import properties_for_user
 from properties.roles import Capability, role_can
 
-from .models import MeterReading
+from .models import MeterReading, RentEntry
 
 READING_DAY_CONSTRAINT = "unique_active_meter_reading_per_day"
 READING_KEY_CONSTRAINT = "unique_meter_reading_idempotency_key"
@@ -70,8 +80,41 @@ class ReadingVoidConflictError(Exception):
     """The reading was already voided, with another reason."""
 
 
+class ReadingInUseError(Exception):
+    """Active bills are measured from this reading. entries: every bill to void first (those
+    and the meter bills after them), newest first."""
+
+    def __init__(self, entries: list[RentEntry]):
+        super().__init__(f"{len(entries)} bill(s) are measured from this reading.")
+        self.entries = entries
+
+
 class NothingToCorrectReadingError(Exception):
     """The replacement has the same reading, date and notes as the reading it corrects."""
+
+
+class ClosingReadingRequiredError(Exception):
+    """Charging electricity from the meter needs a closing reading."""
+
+
+class ReadingAlreadyBilledError(Exception):
+    """The chosen closing reading isn't after the last billed reading."""
+
+    def __init__(self, last: "MeterPoint | None"):
+        super().__init__(
+            "These readings are already billed."
+            if last is None
+            else f"Electricity is billed up to {last.reading} on {last.read_on}."
+        )
+        self.last = last
+
+
+class LaterMeterBillError(Exception):
+    """A later meter bill is measured from this bill's closing reading: void that one first."""
+
+    def __init__(self, entry: RentEntry):
+        super().__init__(f"The {entry.billing_month:%B %Y} bill is measured from this one.")
+        self.entry = entry
 
 
 @dataclass(frozen=True)
@@ -101,6 +144,16 @@ class CorrectedReading:
     original: MeterReading
     replacement: MeterReading
     created: bool
+
+
+@dataclass(frozen=True)
+class ElectricityCharge:
+    """What a new bill's electricity is: its mode, units and the readings measured between."""
+
+    mode: str
+    units: Decimal
+    opening: MeterPoint | None = None
+    closing: MeterReading | None = None
 
 
 def _violated_constraint(error: IntegrityError) -> str | None:
@@ -148,6 +201,26 @@ def baseline(tenancy: Tenancy) -> MeterPoint | None:
     if tenancy.meter_baseline_reading is None:
         return None
     return MeterPoint(tenancy.meter_baseline_reading, tenancy.meter_baseline_date(), None)
+
+
+def last_billed(tenancy: Tenancy) -> MeterPoint | None:
+    """Where the next meter bill starts: the closing reading of the latest active meter bill
+    (the chain's end; readings only go up and each starts where the one before ended), else the
+    baseline. None when the meter isn't set up."""
+    start = baseline(tenancy)
+    if start is None:
+        return None
+    latest = (
+        RentEntry.objects.active()
+        .filter(tenancy=tenancy, electricity_mode=RentEntry.ElectricityMode.METER)
+        .select_related("closing_reading")
+        .order_by("-closing_reading__read_on")
+        .first()
+    )
+    if latest is None:
+        return start
+    closing = latest.closing_reading
+    return MeterPoint(closing.reading, closing.read_on, closing.pk)
 
 
 def _check_reading_fits(tenancy: Tenancy, value: Decimal, read_on: date, *, ignore=None) -> None:
@@ -269,6 +342,21 @@ def record_meter_reading(*, tenancy_id, actor, validated_data: dict, idempotency
         raise
 
 
+def bills_to_void_for(reading: MeterReading) -> list[RentEntry]:
+    """The active meter bills to void before this reading can change, in the order to void
+    them (newest first): the bills that open or close on it and every meter bill after them,
+    since meter bills are voided newest first. Empty when no bill is measured from it."""
+    bills = RentEntry.objects.active().filter(tenancy_id=reading.tenancy_id)
+    if not bills.filter(Q(opening_reading=reading) | Q(closing_reading=reading)).exists():
+        return []
+    return list(
+        bills.filter(
+            electricity_mode=RentEntry.ElectricityMode.METER,
+            closing_reading__read_on__gte=reading.read_on,
+        ).order_by("-closing_reading__read_on")
+    )
+
+
 def _lock_reading(tenancy_id, reading_id, actor) -> tuple[Tenancy, MeterReading]:
     tenancy = _lock_tenancy(tenancy_id)
     _check_can_record_readings(actor, tenancy.property_id)
@@ -296,8 +384,8 @@ def _void_reading(reading: MeterReading, *, actor, reason: str) -> None:
 
 def void_meter_reading(*, tenancy_id, reading_id, actor, reason: str) -> VoidedReading:
     """Voids a reading recorded by mistake (entered twice, say). Kept as history; it then
-    measures nothing. A retry with the same reason returns it; another reason is
-    ReadingVoidConflictError."""
+    measures nothing. Refused while an active bill is measured from it (ReadingInUseError). A
+    retry with the same reason returns it; another reason is ReadingVoidConflictError."""
     reason = _clean_reason(reason)
     with transaction.atomic():
         _tenancy, reading = _lock_reading(tenancy_id, reading_id, actor)
@@ -305,6 +393,9 @@ def void_meter_reading(*, tenancy_id, reading_id, actor, reason: str) -> VoidedR
             if reading.void_reason != reason:
                 raise ReadingVoidConflictError()
             return VoidedReading(reading=reading, created=False)
+        in_use = bills_to_void_for(reading)
+        if in_use:
+            raise ReadingInUseError(in_use)
         _void_reading(reading, actor=actor, reason=reason)
         return VoidedReading(reading=reading, created=True)
 
@@ -315,8 +406,10 @@ def correct_meter_reading(
     """Voids a wrong reading and records its replacement, in one transaction: both or neither.
 
     validated_data: the replacement's reading, read_on and optionally notes; it passes the
-    same order checks as any reading, against the others. A retry with the same key and
-    request returns the correction.
+    same order checks as any reading, against the others. Refused while an active bill is
+    measured from the original (ReadingInUseError): those bills are voided first, so no saved
+    amount ever changes underneath a bill. A retry with the same key and request returns the
+    correction.
     """
     reason = _clean_reason(reason)
     value = validated_data["reading"]
@@ -349,6 +442,10 @@ def correct_meter_reading(
                 and original.notes == notes
             ):
                 raise NothingToCorrectReadingError()
+            in_use = bills_to_void_for(original)
+            if in_use:
+                raise ReadingInUseError(in_use)
+
             _check_reading_fits(tenancy, value, read_on, ignore=original.pk)
             _void_reading(original, actor=actor, reason=reason)
             replacement = MeterReading.objects.create(
@@ -369,6 +466,101 @@ def correct_meter_reading(
         if constraint == READING_KEY_CONSTRAINT:
             raise ReadingIdempotencyConflictError() from error
         raise
+
+
+def electricity_for_new_bill(
+    tenancy: Tenancy, *, actor, validated_data: dict, reading_key
+) -> ElectricityCharge:
+    """Works out a new bill's electricity, on the tenancy bill creation has locked.
+
+    validated_data (from RentEntryCreateSerializer): include_electricity (default True),
+    electricity_units (typed units: only without a baseline), closing_reading ({reading,
+    read_on, notes?}: a new reading, recorded now) or closing_reading_id (an existing one).
+
+    - No baseline: included is typed units (MANUAL), as before meter readings; excluded is
+      NOT_CHARGED. A reading is refused (MeterNotSetUpError).
+    - Baseline, included: METER, from the last billed reading to the closing one, which must be
+      after it. Typed units are refused: the readings decide them.
+    - Baseline, excluded: NOT_CHARGED. A reading sent with it is recorded as a reading only;
+      the last billed reading doesn't move, so its units wait for the next meter bill.
+
+    reading_key: the idempotency key for a new reading recorded with the bill.
+    """
+    include = validated_data.get("include_electricity", True)
+    new_reading = validated_data.get("closing_reading")
+    reading_id = validated_data.get("closing_reading_id")
+    typed_units = validated_data.get("electricity_units")
+    start = baseline(tenancy)
+
+    if start is None:
+        if new_reading is not None or reading_id is not None:
+            raise MeterNotSetUpError()
+        if not include:
+            return ElectricityCharge(RentEntry.ElectricityMode.NOT_CHARGED, Decimal("0"))
+        if typed_units is None:
+            raise InvalidReadingError("electricityUnits", "Enter the electricity units used.")
+        return ElectricityCharge(RentEntry.ElectricityMode.MANUAL, typed_units)
+
+    if typed_units is not None:
+        raise InvalidReadingError(
+            "electricityUnits",
+            "This tenancy's units come from its meter readings: send the closing reading.",
+        )
+
+    closing = None
+    if new_reading is not None:
+        closing = record_reading_locked(
+            tenancy,
+            actor=actor,
+            value=new_reading["reading"],
+            read_on=new_reading["read_on"],
+            notes=new_reading.get("notes", ""),
+            idempotency_key=reading_key,
+        )
+    elif reading_id is not None:
+        closing = (
+            MeterReading.objects.select_for_update().filter(pk=reading_id, tenancy=tenancy).first()
+        )
+        if closing is None:
+            raise InvalidReadingError("closingReadingId", "No such reading for this tenancy.")
+        if closing.status == MeterReading.Status.VOID:
+            raise ReadingVoidError()
+
+    if not include:
+        return ElectricityCharge(RentEntry.ElectricityMode.NOT_CHARGED, Decimal("0"))
+    if closing is None:
+        raise ClosingReadingRequiredError()
+
+    opening = last_billed(tenancy)
+    # A reading can be taken the day tracking starts (the baseline's day), never the same day
+    # as another reading.
+    from_baseline = opening.reading_id is None
+    if (
+        closing.pk == opening.reading_id
+        or closing.read_on < opening.read_on
+        or (closing.read_on == opening.read_on and not from_baseline)
+    ):
+        raise ReadingAlreadyBilledError(opening)
+    # The order checks make this non-negative; checked again rather than trusted.
+    units = closing.reading - opening.reading
+    if units < 0:
+        raise ReadingAlreadyBilledError(opening)
+    return ElectricityCharge(RentEntry.ElectricityMode.METER, units, opening, closing)
+
+
+def check_meter_bill_can_be_voided(entry: RentEntry) -> None:
+    """A meter bill is voided only while no later active meter bill is measured from its
+    closing reading, so the chain never has a gap. The caller holds the tenancy's lock."""
+    if entry.electricity_mode != RentEntry.ElectricityMode.METER:
+        return
+    later = (
+        RentEntry.objects.active()
+        .filter(opening_reading_id=entry.closing_reading_id)
+        .exclude(pk=entry.pk)
+        .first()
+    )
+    if later is not None:
+        raise LaterMeterBillError(later)
 
 
 def meter_readings_with_consumption(tenancy: Tenancy) -> list[tuple[MeterReading, Decimal | None]]:
