@@ -11,6 +11,15 @@ from properties.queries import properties_for_user
 from properties.roles import Capability, role_can
 
 from .calculations import PaymentStatus
+from .meter import (
+    ClosingReadingRequiredError,
+    DuplicateReadingDayError,
+    InvalidReadingError,
+    LaterMeterBillError,
+    MeterNotSetUpError,
+    ReadingAlreadyBilledError,
+    ReadingVoidError,
+)
 from .models import Payment, Receipt, RentEntry
 from .serializers import (
     BillingMonthField,
@@ -22,17 +31,8 @@ from .serializers import (
     ReceiptSerializer,
     RentEntryCreateSerializer,
     RentEntrySerializer,
+    format_month,
 )
-from .meter import (
-    ClosingReadingRequiredError,
-    DuplicateReadingDayError,
-    InvalidReadingError,
-    LaterMeterBillError,
-    MeterNotSetUpError,
-    ReadingAlreadyBilledError,
-    ReadingVoidError,
-)
-from .serializers import format_month
 from .services import (
     BillCorrectionNotAllowedError,
     ElectricityNotCorrectableError,
@@ -384,7 +384,7 @@ class RentEntryViewSet(
             raise exceptions.ValidationError(
                 {
                     "closingReading": [
-                        "There's already a reading on that day: choose it instead."
+                        "There's already a reading on that day: send its closingReadingId, or pick another day."
                     ]
                 }
             ) from None

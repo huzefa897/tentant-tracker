@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from unittest import mock
 
-from django.db import connection, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
 from billing.calculations import entry_amounts
@@ -715,6 +715,65 @@ class ConcurrentMeterBillTests(TransactionTestCase):
         self.assertEqual(
             RentEntry.objects.filter(closing_reading=self.reading, status="active").count(), 1
         )
+
+
+    def test_the_database_refuses_a_void_racing_a_bill_that_isnt_committed_yet(self):
+        """The triggers (billing.0016) back up the app's lock for a script that doesn't take
+        it: a bill saved on a reading and a void of that reading, in two sessions at once. The
+        void waits for the bill, then sees it and is refused."""
+        inserted, proceed = threading.Event(), threading.Event()
+        outcome = []
+
+        def save_bill():
+            try:
+                with transaction.atomic():
+                    RentEntry.objects.create(
+                        tenancy=self.tenancy,
+                        billing_month=date(2026, 10, 1),
+                        rent_amount=Decimal("15000"),
+                        electricity_units=Decimal("163"),
+                        electricity_rate=Decimal("6"),
+                        water_amount=Decimal("0"),
+                        created_by=self.user,
+                        electricity_mode="meter",
+                        closing_reading=self.reading,
+                        meter_opening=Decimal("2400"),
+                        meter_opening_date=date(2026, 9, 30),
+                    )
+                    inserted.set()
+                    proceed.wait(timeout=30)
+            finally:
+                connection.close()
+
+        def void_reading():
+            try:
+                MeterReading.objects.filter(pk=self.reading.pk).update(
+                    status="void", voided_at=self.reading.created_at,
+                    voided_by=self.user, void_reason="Racing",
+                )
+                outcome.append("voided")
+            except IntegrityError:
+                outcome.append("refused")
+            except Exception as error:  # noqa: BLE001 - reported by the assertion below
+                outcome.append(repr(error))
+            finally:
+                connection.close()
+
+        bill = threading.Thread(target=save_bill)
+        bill.start()
+        self.assertTrue(inserted.wait(timeout=30))
+        void = threading.Thread(target=void_reading)
+        void.start()
+        time.sleep(1)
+        self.assertTrue(void.is_alive(), "the void should wait for the bill's transaction")
+        proceed.set()
+        bill.join(timeout=30)
+        void.join(timeout=30)
+
+        self.assertEqual(outcome, ["refused"])
+        self.reading.refresh_from_db()
+        self.assertEqual(self.reading.status, "active")
+        self.assertEqual(RentEntry.objects.filter(closing_reading=self.reading).count(), 1)
 
 
 @skipUnlessDBFeature("has_select_for_update")

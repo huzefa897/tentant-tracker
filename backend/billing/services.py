@@ -29,6 +29,7 @@ from .models import (
 from .meter import (
     READING_KEY_CONSTRAINT,
     ElectricityCharge,
+    last_billed,
     ReadingAlreadyBilledError,
     check_meter_bill_can_be_voided,
     electricity_for_new_bill,
@@ -468,7 +469,7 @@ def create_rent_entry(
             raise DuplicateBillingMonthError() from error
         if constraint in METER_CHAIN_CONSTRAINTS:
             # The last guard behind the tenancy's lock: these readings are already billed.
-            raise ReadingAlreadyBilledError(None) from error
+            raise ReadingAlreadyBilledError(last_billed(tenancy)) from error
         if constraint == READING_KEY_CONSTRAINT:
             # The bill's key also keys the reading it records, and another reading or
             # correction already used it. (A retry of this bill was replayed above.)

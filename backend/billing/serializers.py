@@ -592,7 +592,11 @@ def entry_meter_data(entry: RentEntry) -> dict:
     openingReading and closingReading ({id, reading, readOn}; the opening's id is null when it's
     the tenancy's baseline). Lists load the closing reading in the same query."""
     if entry.electricity_mode != RentEntry.ElectricityMode.METER:
-        return {"electricityMode": entry.electricity_mode, "openingReading": None, "closingReading": None}
+        return {
+            "electricityMode": entry.electricity_mode,
+            "openingReading": None,
+            "closingReading": None,
+        }
     closing = entry.closing_reading
     return {
         "electricityMode": entry.electricity_mode,

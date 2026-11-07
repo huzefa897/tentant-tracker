@@ -190,6 +190,15 @@ class BillingTests(MeterBillTestCase):
         amounts = RentEntry.objects.with_amounts().get(pk=december.pk)
         self.assertEqual(amounts.due_total - december.rent_amount, Decimal("3376.00"))
 
+    def test_a_stretch_with_no_consumption_is_a_meter_bill_of_zero_units(self):
+        # The meter didn't move: the same figure on a later day is a valid reading, and the
+        # bill says so (its readings and 0 units) rather than pretending electricity was left off.
+        self.bill(OCTOBER, ("2563", date(2026, 10, 31)))
+        november = self.bill(NOVEMBER, ("2563", date(2026, 11, 30)))
+        self.assertEqual(november.electricity_mode, RentEntry.ElectricityMode.METER)
+        self.assertEqual(november.electricity_units, Decimal("0"))
+        self.assertEqual(november.opening_reading.reading, november.closing_reading.reading)
+
     def test_tc08_the_same_stretch_is_not_billed_twice(self):
         october = self.bill(OCTOBER, ("2563", date(2026, 10, 31)))
         with self.assertRaises(ReadingAlreadyBilledError):
