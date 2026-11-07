@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatDateValue, formatMonthValue } from '@/utils/date'
+import { EMPTY_VALUE } from '@/utils/emptyValue'
 
 // Shown in the given order, with the figures the backend calculated. Receipts are issued per
 // payment, on the entry's details page. A void bill is muted and marked VOID: it counts for
@@ -28,7 +29,7 @@ const rows = computed(() =>
     id: entry.id,
     month: formatMonthValue(entry.billingMonth),
     // A bill from before due dates has none.
-    due: entry.dueDate ? formatDateValue(entry.dueDate) : '—',
+    due: entry.dueDate ? formatDateValue(entry.dueDate) : EMPTY_VALUE,
     totalDue: entry.totalDue,
     totalPaid: entry.totalPaid,
     outstanding: entry.outstanding,

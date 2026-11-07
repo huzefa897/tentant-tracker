@@ -15,6 +15,7 @@ const tenant: Tenant = {
   depositAmount: 90000,
   startDate: '2025-04-01',
   endDate: null,
+  meterBaseline: null,
 }
 
 let wrapper: VueWrapper | undefined
@@ -72,11 +73,11 @@ describe('RecordPaymentForm', () => {
   })
 
   describe('projected balance', () => {
-    it('shows — before an amount is entered', () => {
+    it('shows - before an amount is entered', () => {
       mountForm()
 
-      expect(text('preview-payment')).toBe('—')
-      expect(text('preview-remaining')).toBe('—')
+      expect(text('preview-payment')).toBe('-')
+      expect(text('preview-remaining')).toBe('-')
     })
 
     it('shows what will remain after the payment', async () => {
@@ -95,18 +96,18 @@ describe('RecordPaymentForm', () => {
       expect(text('preview-remaining')).toBe('₹0')
     })
 
-    it.each(['0', '-5', '10.005'])('shows — for an invalid amount (%s)', async (amount) => {
+    it.each(['0', '-5', '10.005'])('shows - for an invalid amount (%s)', async (amount) => {
       mountForm()
       await fill({ amount })
 
-      expect(text('preview-remaining')).toBe('—')
+      expect(text('preview-remaining')).toBe('-')
     })
 
-    it('shows — and an error straight away when the payment exceeds outstanding', async () => {
+    it('shows - and an error straight away when the payment exceeds outstanding', async () => {
       mountForm()
       await fill({ amount: '6000' })
 
-      expect(text('preview-remaining')).toBe('—')
+      expect(text('preview-remaining')).toBe('-')
       expect(wrapper!.get('#payment-amount-error').text()).toBe(
         'Amount cannot exceed the outstanding ₹5,750.',
       )

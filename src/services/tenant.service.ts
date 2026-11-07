@@ -1,5 +1,6 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
+import { parseMeterPoint, toMeterPoint, type MeterPointDto } from '@/services/meterReading.service'
 import type { Tenant, TenantPage } from '@/types/tenant'
 
 // The backend's tenancy, as GET /api/v1/properties/{propertyId}/tenancies/ returns it. Kept
@@ -18,6 +19,8 @@ export interface TenancyDto {
   startDate: string
   endDate: string | null
   status: 'upcoming' | 'current' | 'ended'
+  // {reading, readOn} once the meter is set up in admin, else null.
+  meterBaseline: MeterPointDto | null
 }
 
 const STATUSES: readonly TenancyDto['status'][] = ['upcoming', 'current', 'ended']
@@ -52,6 +55,7 @@ export function parseTenancy(value: unknown): TenancyDto {
     invalid('endDate')
   }
   if (!STATUSES.includes(value.status as TenancyDto['status'])) invalid('status')
+  parseMeterPoint(value.meterBaseline, 'meterBaseline', false)
 
   return value as unknown as TenancyDto
 }
@@ -70,6 +74,7 @@ export function toTenant(dto: TenancyDto): Tenant {
     depositAmount: Number(dto.depositAmount),
     startDate: dto.startDate,
     endDate: dto.endDate,
+    meterBaseline: toMeterPoint(dto.meterBaseline),
   }
 }
 

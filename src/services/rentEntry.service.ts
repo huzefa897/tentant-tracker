@@ -1,5 +1,7 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
+import { parseElectricity, toMeterPoint, type MeterPointDto } from '@/services/meterReading.service'
+import type { ElectricityMode } from '@/types/meterReading'
 import type {
   BillStatus,
   CorrectedEntry,
@@ -25,6 +27,10 @@ export interface RentEntryDto {
   electricityUnits: string // three decimals, "75.000"
   electricityRate: string
   electricityAmount: string
+  // A meter bill's readings ({id, reading, readOn}; the opening's id null for the baseline).
+  electricityMode: ElectricityMode
+  openingReading: MeterPointDto | null
+  closingReading: MeterPointDto | null
   waterAmount: string
   totalDue: string
   totalPaid: string
@@ -63,7 +69,13 @@ export interface CreateRentEntryDto {
   billingMonth: string
   // Left out to charge the tenancy's current rent.
   rentAmount?: string
-  electricityUnits: string
+  // Typed units: only for a tenancy without a meter baseline, with electricity included.
+  electricityUnits?: string
+  // Sent as false to leave electricity off the bill.
+  includeElectricity?: boolean
+  // A meter tenancy's closing reading, recorded with the bill.
+  closingReading?: { reading: string; readOn: string }
+  closingReadingId?: string
   waterAmount: string
   notes: string
   initialPayment?: {
@@ -116,6 +128,7 @@ export function parseRentEntry(value: unknown): RentEntryDto {
     invalid('electricityUnits')
   }
   if (typeof value.notes !== 'string') invalid('notes')
+  parseElectricity(value, true)
   if (!BILL_STATUSES.includes(value.status as BillStatus)) invalid('status')
   const isVoid = value.status === 'void'
   // A void bill has no payment status and records who voided it, when and why; an active one
@@ -160,6 +173,9 @@ export function toRentEntry(dto: RentEntryDto): RentEntry {
     electricityUnits: Number(dto.electricityUnits),
     electricityRate: Number(dto.electricityRate),
     electricityAmount: Number(dto.electricityAmount),
+    electricityMode: dto.electricityMode,
+    openingReading: toMeterPoint(dto.openingReading),
+    closingReading: toMeterPoint(dto.closingReading),
     waterAmount: Number(dto.waterAmount),
     totalDue: Number(dto.totalDue),
     totalPaid: Number(dto.totalPaid),
@@ -207,15 +223,29 @@ function parseCorrection(data: unknown): Omit<CorrectedEntry, 'replayed'> {
 
 // Decimal strings, so the backend never parses a float. Validation has already limited the
 // decimals (utils/rentEntryValidation.ts), so toFixed doesn't round anything away. An unedited
-// rent is left out, so the backend charges the tenancy's rent as it is now.
+// rent is left out, so the backend charges the tenancy's rent as it is now. Electricity is typed
+// units, a closing reading (the backend works out the units), or left off.
 export function toCreateRentEntryDto(
   input: RentEntryInput,
   initialPayment: NewRentEntrySubmission['initialPayment'] = null,
 ): CreateRentEntryDto {
+  const include = input.includeElectricity ?? true
   const dto: CreateRentEntryDto = {
     billingMonth: input.billingMonth,
     ...(input.useTenancyRent ? {} : { rentAmount: input.rentAmount.toFixed(2) }),
-    electricityUnits: input.electricityUnits.toFixed(3),
+    ...(include ? {} : { includeElectricity: false }),
+    ...(input.closingReading
+      ? {
+          closingReading: {
+            reading: input.closingReading.reading.toFixed(3),
+            readOn: input.closingReading.readOn,
+          },
+        }
+      : input.closingReadingId && include
+        ? { closingReadingId: input.closingReadingId }
+        : include
+          ? { electricityUnits: input.electricityUnits.toFixed(3) }
+          : {}),
     waterAmount: input.waterAmount.toFixed(2),
     notes: input.notes,
   }

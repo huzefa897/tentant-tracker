@@ -15,6 +15,7 @@ const tenant: Tenant = {
   depositAmount: 90000,
   startDate: '2025-04-01',
   endDate: null,
+  meterBaseline: null,
 }
 
 let wrapper: VueWrapper | undefined
@@ -83,13 +84,13 @@ describe('RentEntryForm', () => {
       expect(wrapper!.find('input#electricityRate').exists()).toBe(false)
     })
 
-    it('shows — for totals until electricity units are entered', () => {
+    it('shows - for totals until electricity units are entered', () => {
       mountForm()
 
-      expect(text('electricity-amount')).toBe('—')
-      expect(text('total-due')).toBe('—')
-      expect(text('outstanding')).toBe('—')
-      expect(text('status')).toBe('—')
+      expect(text('electricity-amount')).toBe('-')
+      expect(text('total-due')).toBe('-')
+      expect(text('outstanding')).toBe('-')
+      expect(text('status')).toBe('-')
     })
 
     it('disables the paid date while nothing is paid', () => {
@@ -141,20 +142,20 @@ describe('RentEntryForm', () => {
       expect(text('outstanding')).toBe('₹0')
     })
 
-    it('shows — instead of a misleading total when a charge is cleared', async () => {
+    it('shows - instead of a misleading total when a charge is cleared', async () => {
       mountForm()
       await fill({ electricityUnits: '75', rentAmount: '' })
 
-      expect(text('total-due')).toBe('—')
-      expect(text('outstanding')).toBe('—')
+      expect(text('total-due')).toBe('-')
+      expect(text('outstanding')).toBe('-')
     })
 
-    it('shows — for outstanding when the payment exceeds the total', async () => {
+    it('shows - for outstanding when the payment exceeds the total', async () => {
       mountForm()
       await fill({ electricityUnits: '75', waterAmount: '300', paymentAmount: '16000' })
 
-      expect(text('outstanding')).toBe('—')
-      expect(text('status')).toBe('—')
+      expect(text('outstanding')).toBe('-')
+      expect(text('status')).toBe('-')
     })
   })
 
@@ -251,6 +252,8 @@ describe('RentEntryForm', () => {
               waterAmount: 300,
               notes: '',
               useTenancyRent: true,
+              includeElectricity: true,
+              closingReading: null,
             },
             initialPayment: null,
           },
@@ -337,7 +340,10 @@ describe('RentEntryForm', () => {
   describe('cancel and changes', () => {
     it('emits cancel without saving', async () => {
       mountForm()
-      await wrapper!.get('button[type="button"]').trigger('click')
+      await wrapper!
+        .findAll('button')
+        .find((button) => button.text() === 'Cancel')!
+        .trigger('click')
 
       expect(wrapper!.emitted('cancel')).toHaveLength(1)
       expect(wrapper!.emitted('save')).toBeUndefined()
@@ -382,5 +388,220 @@ describe('RentEntryForm', () => {
       expect(cancel.attributes('disabled')).toBeDefined()
       expect(wrapper!.emitted('save')).toBeUndefined()
     })
+  })
+})
+
+describe('RentEntryForm electricity', () => {
+  const meterTenant: Tenant = {
+    ...tenant,
+    electricityRate: 8,
+    meterBaseline: { reading: 2400, readOn: '2026-08-31' },
+  }
+  const lastBilled = { id: 'reading-oct', reading: 2563, readOn: '2026-09-30' }
+
+  function mountMeter(props: Record<string, unknown> = {}) {
+    wrapper = mount(RentEntryForm, {
+      props: { tenant: meterTenant, lastBilled, ...props },
+      attachTo: document.body,
+    })
+    return wrapper
+  }
+
+  async function leaveElectricityOff() {
+    await wrapper!.get('#includeElectricity').trigger('click')
+  }
+
+  function emittedEntry() {
+    const saved = wrapper!.emitted('save') as [{ entry: Record<string, unknown> }][] | undefined
+    return saved?.[0]?.[0].entry
+  }
+
+  it('leaves electricity off a typed-units bill: no units, not charged', async () => {
+    mountForm()
+    await leaveElectricityOff()
+
+    expect(wrapper!.find('#electricityUnits').exists()).toBe(false)
+    expect(text('summary')).toContain('Not charged')
+    await fill({ waterAmount: '300' })
+    await save()
+
+    expect(emittedEntry()).toMatchObject({ includeElectricity: false, electricityUnits: 0 })
+    expect(text('total-due')).toBe('₹15,300')
+  })
+
+  it('measures a meter bill from the last billed reading, with no typed units', async () => {
+    mountMeter()
+
+    expect(wrapper!.find('#electricityUnits').exists()).toBe(false)
+    expect(text('opening-reading')).toContain('2,563')
+    await fill({ closingReading: '2985' })
+
+    expect(text('meter-units')).toBe('422')
+    expect(text('electricity-amount')).toBe('₹3,376')
+    await save()
+    expect(emittedEntry()).toMatchObject({
+      includeElectricity: true,
+      electricityUnits: 422,
+      closingReading: { reading: 2985, readOn: '2026-10-03' },
+    })
+  })
+
+  it('needs a closing reading to charge the meter', async () => {
+    mountMeter()
+    await save()
+
+    expect(wrapper!.get('#closingReading-error').text()).toContain(
+      'Enter the closing meter reading',
+    )
+    expect(wrapper!.emitted('save')).toBeUndefined()
+  })
+
+  it('refuses a closing reading below or on the day of the last billed one', async () => {
+    mountMeter()
+    await fill({ closingReading: '2500', readOn: '2026-09-30' })
+    await save()
+
+    expect(wrapper!.get('#closingReading-error').text()).toContain('below 2,563')
+    expect(wrapper!.get('#readOn-error').text()).toContain('must be after')
+  })
+
+  it('dates the reading as the payment received with the bill, unless changed', async () => {
+    mountMeter()
+    await fill({ closingReading: '2985', paymentAmount: '1000', paidDate: '2026-10-01' })
+
+    expect(wrapper!.get<HTMLInputElement>('#readOn').element.value).toBe('2026-10-01')
+  })
+
+  it('records a reading taken with electricity left off as a reading only', async () => {
+    mountMeter()
+    await leaveElectricityOff()
+    expect(text('electricity-choice-hint')).toContain('later bill')
+    await fill({ closingReading: '2876' })
+    await save()
+
+    expect(emittedEntry()).toMatchObject({
+      includeElectricity: false,
+      electricityUnits: 0,
+      closingReading: { reading: 2876, readOn: '2026-10-03' },
+    })
+  })
+
+  describe('with a recorded reading waiting to be billed', () => {
+    const unbilledReading = { id: 'reading-nov', reading: 2876, readOn: '2026-10-02' }
+    const latestReading = unbilledReading
+    const withRecorded = (props: Record<string, unknown> = {}) =>
+      mountMeter({ latestReading, unbilledReadings: [unbilledReading], ...props })
+
+    it('closes on it by default: no reading to type, and its id is sent', async () => {
+      withRecorded()
+
+      expect(wrapper!.find('#closingReading').exists()).toBe(false)
+      expect(text('recorded-reading')).toContain('2,876')
+      expect(text('meter-units')).toBe('313')
+      await save()
+
+      expect(emittedEntry()).toMatchObject({
+        includeElectricity: true,
+        electricityUnits: 313,
+        closingReading: null,
+        closingReadingId: 'reading-nov',
+      })
+    })
+
+    it('picks which recorded reading to close on, starting with the billing month’s', async () => {
+      const lateInMonth = { id: 'reading-oct', reading: 2650, readOn: '2026-09-30' }
+      const sep = { id: 'reading-sep', reading: 2590, readOn: '2026-09-15' }
+      withRecorded({ unbilledReadings: [unbilledReading, lateInMonth, sep], month: '2026-09' })
+      await wrapper!.setProps({ month: '2026-09' })
+
+      const picker = wrapper!.get<HTMLSelectElement>('[data-testid="recorded-reading-picker"]')
+      expect(picker.findAll('option')).toHaveLength(3)
+      // The picker takes the place of the locked display, so the reading isn't shown twice.
+      expect(wrapper!.find('[data-testid="recorded-reading"]').exists()).toBe(false)
+      // Dated in the billing month (the newest of them) rather than the newest overall.
+      expect(picker.element.value).toBe('reading-oct')
+      expect(text('meter-units')).toBe('87')
+
+      await picker.setValue('reading-sep')
+      expect(text('meter-units')).toBe('27')
+      await save()
+      expect(emittedEntry()).toMatchObject({
+        closingReadingId: 'reading-sep',
+        electricityUnits: 27,
+      })
+    })
+
+    it('shows no picker for a single recorded reading', () => {
+      withRecorded()
+      expect(wrapper!.find('[data-testid="recorded-reading-picker"]').exists()).toBe(false)
+    })
+
+    it('switches to a new reading and back', async () => {
+      withRecorded()
+      const instead = wrapper!.findAll('button').find((b) => b.text().includes('new reading'))!
+      await instead.trigger('click')
+
+      expect(wrapper!.find('[data-testid="recorded-reading"]').exists()).toBe(false)
+      await fill({ closingReading: '2985', readOn: '2026-10-03' })
+      await save()
+      expect(emittedEntry()).toMatchObject({
+        closingReading: { reading: 2985, readOn: '2026-10-03' },
+      })
+      expect(emittedEntry()).not.toHaveProperty('closingReadingId')
+
+      const back = wrapper!.findAll('button').find((b) => b.text().includes('recorded reading'))!
+      await back.trigger('click')
+      expect(text('meter-units')).toBe('313')
+    })
+
+    it('checks a new reading against the recorded one, not only the last billed', async () => {
+      withRecorded()
+      await wrapper!
+        .findAll('button')
+        .find((b) => b.text().includes('new reading'))!
+        .trigger('click')
+      await fill({ closingReading: '2700', readOn: '2026-10-02' })
+      await save()
+
+      expect(wrapper!.get('#closingReading-error').text()).toContain('below 2,876')
+      expect(wrapper!.get('#readOn-error').text()).toContain('must be after')
+      expect(wrapper!.emitted('save')).toBeUndefined()
+    })
+
+    it('leaves it for a later bill when electricity is off', async () => {
+      withRecorded()
+      await leaveElectricityOff()
+
+      expect(wrapper!.find('[data-testid="recorded-reading"]').exists()).toBe(false)
+      await save()
+      expect(emittedEntry()).toMatchObject({
+        includeElectricity: false,
+        closingReading: null,
+      })
+      expect(emittedEntry()).not.toHaveProperty('closingReadingId')
+    })
+  })
+
+  it('doesn’t date a reading on a payment date it can’t have', async () => {
+    mountMeter({ latestReading: { id: 'r', reading: 2876, readOn: '2026-10-02' } })
+    await fill({ closingReading: '2985', paymentAmount: '1000', paidDate: '2026-10-01' })
+
+    expect(wrapper!.get<HTMLInputElement>('#readOn').element.value).toBe('2026-10-03')
+    await wrapper!.get('#readOn').setValue('2026-10-03')
+    await fill({ paidDate: '2026-10-02' })
+    expect(wrapper!.get<HTMLInputElement>('#readOn').element.value).toBe('2026-10-03')
+  })
+
+  it('saves nothing while the meter can’t be loaded, and offers Retry', async () => {
+    mountMeter({ lastBilled: null, meterError: 'Couldn’t load the meter.' })
+    await fill({ closingReading: '2985' })
+    await save()
+
+    expect(wrapper!.emitted('save')).toBeUndefined()
+    await wrapper!
+      .findAll('button')
+      .find((button) => button.text() === 'Retry')!
+      .trigger('click')
+    expect(wrapper!.emitted('retryMeter')).toHaveLength(1)
   })
 })
