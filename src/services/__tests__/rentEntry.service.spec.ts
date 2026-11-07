@@ -228,6 +228,19 @@ describe('toCreateRentEntryDto', () => {
     )
   })
 
+  it('closes on a recorded reading by its id, without typed units', () => {
+    expect(toCreateRentEntryDto({ ...input, closingReadingId: 'reading-1' })).toMatchObject({
+      closingReadingId: 'reading-1',
+    })
+    expect(toCreateRentEntryDto({ ...input, closingReadingId: 'reading-1' })).not.toHaveProperty(
+      'electricityUnits',
+    )
+    // With electricity left off nothing is closed.
+    expect(
+      toCreateRentEntryDto({ ...input, includeElectricity: false, closingReadingId: 'reading-1' }),
+    ).not.toHaveProperty('closingReadingId')
+  })
+
   it('sends a payment received with the bill as initialPayment', () => {
     expect(
       toCreateRentEntryDto(input, { amount: 10000.5, paidDate: '2026-10-05', notes: 'Cash' }),

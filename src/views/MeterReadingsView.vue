@@ -266,7 +266,7 @@ const pageLoading = computed(
             <DialogDescription>
               {{
                 dialog?.kind === 'record'
-                  ? 'Recording a reading bills nothing: the next bill with electricity uses it.'
+                  ? 'Recording a reading bills nothing: the next bill with electricity can close on it.'
                   : 'The original stays in the list, marked void.'
               }}
             </DialogDescription>

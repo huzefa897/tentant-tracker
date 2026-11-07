@@ -115,6 +115,27 @@ describe('useMeterReadingStore', () => {
     expect(recordReading.mock.calls[2]![3]).not.toBe(first)
   })
 
+  it('sends changed input with a new key, even after an uncertain failure', async () => {
+    const store = await signedIn()
+    recordReading.mockRejectedValueOnce(new ApiError('network'))
+    await store
+      .recordReading(TENANT, { reading: 2600, readOn: '2026-10-15', notes: '' })
+      .catch(() => {})
+    await store.recordReading(TENANT, { reading: 2650, readOn: '2026-10-15', notes: '' })
+    const [first, second] = recordReading.mock.calls.map((call) => call[3])
+    expect(second).not.toBe(first)
+  })
+
+  it('reloads the readings when an earlier attempt saved a different reading', async () => {
+    const store = await signedIn()
+    recordReading.mockRejectedValueOnce(new ApiError('conflict', 'x', 'idempotency_conflict'))
+    await expect(
+      store.recordReading(TENANT, { reading: 2600, readOn: '2026-10-15', notes: '' }),
+    ).rejects.toThrow('have been reloaded')
+    await vi.waitFor(() => expect(getMeter).toHaveBeenCalledTimes(1))
+    expect(store.meterFor(TENANT).status).toBe('ready')
+  })
+
   it('explains a second reading on the same day', async () => {
     const store = await signedIn()
     setFakeMeter(TENANT, undefined, [makeReading({ reading: 2500, readOn: '2026-10-15' })])

@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useMeterReadingStore } from '@/stores/meterReading'
+import { latestReading, unbilledReading } from '@/utils/meterBilling'
 import { EntrySaveError, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
@@ -94,7 +95,9 @@ async function handleSave(submission: NewRentEntrySubmission) {
   try {
     savedEntry.value = await rentEntryStore.addEntry(submission, creationKey)
     // Its reading, if any, is the meter's newest, and a meter bill moves the last billed one.
-    if (submission.entry.closingReading) meterStore.forgetMeter(submission.entry.tenantId)
+    if (submission.entry.closingReading || submission.entry.closingReadingId) {
+      meterStore.forgetMeter(submission.entry.tenantId)
+    }
   } catch (error) {
     if (!(error instanceof EntrySaveError && error.uncertain)) creationKey = null
     saveError.value = error instanceof Error ? error.message : SAVE_ERROR_MESSAGE
@@ -346,6 +349,8 @@ function handleDialogOpenChange(open: boolean) {
           :save-error="saveError"
           :saving="saving"
           :last-billed="meterState?.meter?.lastBilled ?? null"
+          :latest-reading="meterState?.meter ? latestReading(meterState.meter) : null"
+          :unbilled-reading="meterState?.meter ? unbilledReading(meterState.meter) : null"
           :meter-loading="meterState?.status === 'loading'"
           :meter-error="meterState?.error ?? null"
           @retry-meter="meterStore.loadMeter(tenant.id)"

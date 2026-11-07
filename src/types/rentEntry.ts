@@ -31,6 +31,8 @@ export interface RentEntryInput {
   // With a meter baseline: the closing reading taken now (recorded with the bill), charged unless
   // electricity is left off.
   closingReading?: { reading: number; readOn: string } | null
+  // With a meter baseline: a reading already recorded and not yet billed, to close on instead.
+  closingReadingId?: string | null
   waterAmount: number
   notes: string
   // True while the rent is still the tenant's rent the form started with. The request then leaves

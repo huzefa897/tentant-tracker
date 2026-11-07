@@ -14,7 +14,11 @@ import { makeEntry, openPage } from '@/test/rentEntries'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
 import { fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
-import { resetMeterReadingService, setFakeMeter } from '@/test/mocks/meterReadingService'
+import {
+  makeReading,
+  resetMeterReadingService,
+  setFakeMeter,
+} from '@/test/mocks/meterReadingService'
 import { fakeTenancies, resetTenantService, testTenants } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
@@ -122,6 +126,24 @@ describe('NewRentEntryView', () => {
         closingReading: { reading: 2985, readOn: '2026-10-03' },
       })
       expect(savedSummary()['Electricity (2,563 → 2,985: 422 units × ₹6)']).toBe('₹2,532')
+    })
+
+    it('bills on a recorded reading by its id, and loads the meter again after', async () => {
+      setFakeMeter(
+        'tenant-001',
+        { reading: 2400, readOn: '2026-04-01' },
+        [makeReading({ id: 'r-nov', reading: 2876, readOn: '2026-10-02' })],
+        lastBilled,
+      )
+      await openEntryPage()
+      expect(app!.get('[data-testid="recorded-reading"]').text()).toContain('2,876')
+
+      await fill({ billingMonth: '2026-09', waterAmount: '300' })
+      await save()
+
+      expect(createEntry.mock.calls[0]![2].entry).toMatchObject({
+        closingReadingId: 'r-nov',
+      })
     })
 
     it('leaves electricity off, showing "Not charged" rather than ₹0', async () => {

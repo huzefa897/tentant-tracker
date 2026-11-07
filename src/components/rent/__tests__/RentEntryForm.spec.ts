@@ -486,6 +486,84 @@ describe('RentEntryForm electricity', () => {
     })
   })
 
+  describe('with a recorded reading waiting to be billed', () => {
+    const unbilledReading = { id: 'reading-nov', reading: 2876, readOn: '2026-10-02' }
+    const latestReading = unbilledReading
+    const withRecorded = (props: Record<string, unknown> = {}) =>
+      mountMeter({ latestReading, unbilledReading, ...props })
+
+    it('closes on it by default: no reading to type, and its id is sent', async () => {
+      withRecorded()
+
+      expect(wrapper!.find('#closingReading').exists()).toBe(false)
+      expect(text('recorded-reading')).toContain('2,876')
+      expect(text('meter-units')).toBe('313')
+      await save()
+
+      expect(emittedEntry()).toMatchObject({
+        includeElectricity: true,
+        electricityUnits: 313,
+        closingReading: null,
+        closingReadingId: 'reading-nov',
+      })
+    })
+
+    it('switches to a new reading and back', async () => {
+      withRecorded()
+      const instead = wrapper!.findAll('button').find((b) => b.text().includes('new reading'))!
+      await instead.trigger('click')
+
+      expect(wrapper!.find('[data-testid="recorded-reading"]').exists()).toBe(false)
+      await fill({ closingReading: '2985', readOn: '2026-10-03' })
+      await save()
+      expect(emittedEntry()).toMatchObject({
+        closingReading: { reading: 2985, readOn: '2026-10-03' },
+      })
+      expect(emittedEntry()).not.toHaveProperty('closingReadingId')
+
+      const back = wrapper!.findAll('button').find((b) => b.text().includes('recorded reading'))!
+      await back.trigger('click')
+      expect(text('meter-units')).toBe('313')
+    })
+
+    it('checks a new reading against the recorded one, not only the last billed', async () => {
+      withRecorded()
+      await wrapper!
+        .findAll('button')
+        .find((b) => b.text().includes('new reading'))!
+        .trigger('click')
+      await fill({ closingReading: '2700', readOn: '2026-10-02' })
+      await save()
+
+      expect(wrapper!.get('#closingReading-error').text()).toContain('below 2,876')
+      expect(wrapper!.get('#readOn-error').text()).toContain('must be after')
+      expect(wrapper!.emitted('save')).toBeUndefined()
+    })
+
+    it('leaves it for a later bill when electricity is off', async () => {
+      withRecorded()
+      await leaveElectricityOff()
+
+      expect(wrapper!.find('[data-testid="recorded-reading"]').exists()).toBe(false)
+      await save()
+      expect(emittedEntry()).toMatchObject({
+        includeElectricity: false,
+        closingReading: null,
+      })
+      expect(emittedEntry()).not.toHaveProperty('closingReadingId')
+    })
+  })
+
+  it('doesn’t date a reading on a payment date it can’t have', async () => {
+    mountMeter({ latestReading: { id: 'r', reading: 2876, readOn: '2026-10-02' } })
+    await fill({ closingReading: '2985', paymentAmount: '1000', paidDate: '2026-10-01' })
+
+    expect(wrapper!.get<HTMLInputElement>('#readOn').element.value).toBe('2026-10-03')
+    await wrapper!.get('#readOn').setValue('2026-10-03')
+    await fill({ paidDate: '2026-10-02' })
+    expect(wrapper!.get<HTMLInputElement>('#readOn').element.value).toBe('2026-10-03')
+  })
+
   it('saves nothing while the meter can’t be loaded, and offers Retry', async () => {
     mountMeter({ lastBilled: null, meterError: 'Couldn’t load the meter.' })
     await fill({ closingReading: '2985' })

@@ -51,6 +51,12 @@ const props = withDefaults(
     // reading, from the backend), and whether it's still loading or failed to load. Without it
     // a meter bill can't be previewed or saved.
     lastBilled?: MeterPoint | null
+    // The newest active reading, which a new reading must follow (the last billed one if the
+    // meter has none).
+    latestReading?: MeterPoint | null
+    // A recorded reading no bill closes on yet: the bill closes on it unless a new reading is
+    // chosen.
+    unbilledReading?: MeterPoint | null
     meterLoading?: boolean
     meterError?: string | null
   }>(),
@@ -59,6 +65,8 @@ const props = withDefaults(
     saveError: null,
     saving: false,
     lastBilled: null,
+    latestReading: null,
+    unbilledReading: null,
     meterLoading: false,
     meterError: null,
   },
@@ -91,15 +99,48 @@ const paymentNotes = ref('')
 // Electricity: charged (typed units, or the meter's closing reading) or left off this bill.
 const includeElectricity = ref(true)
 const closingReading = ref<NumberInputValue>('')
-// The day the meter was read: the payment's date while it has one, else today, until changed.
-const readOn = ref(today)
-const readOnEdited = ref(false)
+// A recorded reading waiting to be billed is used unless a new reading is chosen.
+const closingChoice = ref<'recorded' | 'new'>('recorded')
+// The day the meter was read: the payment's date while it has one (and the reading can be dated
+// then), else today, until changed.
+const readOnTyped = ref<string | null>(null)
 
 // The tenant's meter is set up (in admin): units come from readings, never typed.
 const hasMeter = computed(() => props.tenant.meterBaseline !== null)
 // A reading entered with electricity left off is recorded as a reading only.
 const readingEntered = computed(() => closingReading.value !== '')
-const meterUnits = computed(() => unitsBetween(props.lastBilled, closingReading.value))
+// The bill closes on the recorded reading: no reading is typed, and none is recorded with it.
+const useRecorded = computed(
+  () =>
+    hasMeter.value &&
+    includeElectricity.value &&
+    props.unbilledReading !== null &&
+    closingChoice.value === 'recorded',
+)
+// The reading a new one must follow.
+const followedReading = computed(() => props.latestReading ?? props.lastBilled)
+const meterUnits = computed(() =>
+  unitsBetween(
+    props.lastBilled,
+    useRecorded.value ? props.unbilledReading!.reading : closingReading.value,
+  ),
+)
+
+function canDateReadingOn(day: string): boolean {
+  const after = followedReading.value
+  if (!after) return true
+  return after.id ? day > after.readOn : day >= after.readOn
+}
+const readOn = computed({
+  get() {
+    if (readOnTyped.value !== null) return readOnTyped.value
+    const followed = paidDate.value || today
+    return canDateReadingOn(followed) ? followed : today
+  },
+  set(value: string) {
+    readOnTyped.value = value
+  },
+})
 
 // What the bill charges in units: none when left off, the readings' difference on a meter, or
 // the typed units. '' while it can't be worked out yet, so the total shows "—".
@@ -111,7 +152,6 @@ const effectiveUnits = computed<NumberInputValue>(() => {
 
 function setPaidDate(value: string) {
   paidDate.value = value
-  if (!readOnEdited.value) readOn.value = value || today
 }
 
 const draft = computed<RentEntryDraft>(() => ({
@@ -135,7 +175,7 @@ const isDirty = computed(
     rentAmount.value !== props.tenant.rentAmount ||
     electricityUnits.value !== '' ||
     !includeElectricity.value ||
-    readingEntered.value ||
+    (readingEntered.value && !useRecorded.value) ||
     waterAmount.value !== 0 ||
     notes.value !== '' ||
     paymentAmount.value !== 0 ||
@@ -200,15 +240,16 @@ type Field =
   keyof RentEntryDraft | 'paymentAmount' | 'paidDate' | 'paymentNotes' | 'closingReading' | 'readOn'
 
 // The closing reading: needed to charge a meter, optional (a reading only) with electricity left
-// off. Checked against the last billed reading; the backend checks the others too.
+// off. A new one is checked against the newest reading; the backend checks the others too.
 const meterErrors = computed<MeterReadingErrors & { meter?: string }>(() => {
   if (!hasMeter.value || (!includeElectricity.value && !readingEntered.value)) return {}
   if (!props.lastBilled) {
     return { meter: props.meterError ?? 'Loading the meter’s last billed reading…' }
   }
+  if (useRecorded.value) return {}
   const found = validateMeterReadingDraft(
     { reading: closingReading.value, readOn: readOn.value },
-    { after: props.lastBilled, today },
+    { after: followedReading.value, today },
   )
   if (includeElectricity.value && !readingEntered.value) {
     found.reading = 'Enter the closing meter reading, or leave electricity off this bill.'
@@ -278,7 +319,7 @@ async function handleSubmit() {
   const amount = paymentAmount.value as number
 
   const reading =
-    hasMeter.value && readingEntered.value
+    hasMeter.value && readingEntered.value && !useRecorded.value
       ? { reading: closingReading.value as number, readOn: readOn.value }
       : null
   emit('save', {
@@ -287,6 +328,7 @@ async function handleSubmit() {
       useTenancyRent: rentAmount.value === props.tenant.rentAmount,
       includeElectricity: includeElectricity.value,
       closingReading: reading,
+      ...(useRecorded.value ? { closingReadingId: props.unbilledReading!.id } : {}),
     },
     initialPayment:
       amount > 0 ? { amount, paidDate: paidDate.value, notes: paymentNotes.value.trim() } : null,
@@ -425,7 +467,33 @@ const lockedClass =
             <p class="text-xs text-muted-foreground">The last reading billed for electricity.</p>
           </div>
 
-          <div class="space-y-2">
+          <div v-if="useRecorded" class="space-y-2">
+            <p id="recordedReading-label" class="text-sm font-medium">Closing reading</p>
+            <div
+              :class="lockedClass"
+              aria-labelledby="recordedReading-label"
+              data-testid="recorded-reading"
+            >
+              <span>
+                {{ unbilledReading!.reading.toLocaleString('en-IN') }}
+                <span class="text-xs"> · {{ formatDateValue(unbilledReading!.readOn) }}</span>
+              </span>
+              <Lock class="size-4" aria-hidden="true" />
+            </div>
+            <p class="text-xs text-muted-foreground">
+              Already recorded.
+              <Button
+                type="button"
+                variant="link"
+                class="h-auto p-0 text-xs"
+                @click="closingChoice = 'new'"
+              >
+                Record a new reading instead
+              </Button>
+            </p>
+          </div>
+
+          <div v-else class="space-y-2">
             <Label for="closingReading">
               <template v-if="includeElectricity">Closing reading</template>
               <template v-else>
@@ -458,9 +526,20 @@ const lockedClass =
             >
               {{ errorFor('closingReading') }}
             </p>
+            <p v-if="includeElectricity && unbilledReading" class="text-xs">
+              <Button
+                type="button"
+                variant="link"
+                class="h-auto p-0 text-xs"
+                @click="closingChoice = 'recorded'"
+              >
+                Use the recorded reading ({{ unbilledReading.reading.toLocaleString('en-IN') }},
+                {{ formatDateValue(unbilledReading.readOn) }})
+              </Button>
+            </p>
           </div>
 
-          <div v-if="includeElectricity || readingEntered" class="space-y-2">
+          <div v-if="!useRecorded && (includeElectricity || readingEntered)" class="space-y-2">
             <Label for="readOn">Reading date</Label>
             <Input
               id="readOn"
@@ -469,7 +548,6 @@ const lockedClass =
               :max="today"
               :class="inputClass"
               v-bind="fieldAttrs('readOn')"
-              @input="readOnEdited = true"
             />
             <p
               v-if="errorFor('readOn')"

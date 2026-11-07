@@ -75,6 +75,7 @@ export interface CreateRentEntryDto {
   includeElectricity?: boolean
   // A meter tenancy's closing reading, recorded with the bill.
   closingReading?: { reading: string; readOn: string }
+  closingReadingId?: string
   waterAmount: string
   notes: string
   initialPayment?: {
@@ -240,9 +241,11 @@ export function toCreateRentEntryDto(
             readOn: input.closingReading.readOn,
           },
         }
-      : include
-        ? { electricityUnits: input.electricityUnits.toFixed(3) }
-        : {}),
+      : input.closingReadingId && include
+        ? { closingReadingId: input.closingReadingId }
+        : include
+          ? { electricityUnits: input.electricityUnits.toFixed(3) }
+          : {}),
     waterAmount: input.waterAmount.toFixed(2),
     notes: input.notes,
   }

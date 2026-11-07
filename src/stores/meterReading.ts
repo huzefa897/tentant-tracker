@@ -1,10 +1,9 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
+import { ApiError, isUncertainFailure, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { meterReadingService } from '@/services/meterReading.service'
 import { useAccessStore } from '@/stores/access'
-import { isUncertainFailure } from '@/stores/rentEntry'
 import type { MeterReadingInput, TenantMeter } from '@/types/meterReading'
 import { hasAtMostDecimals } from '@/utils/money'
 import { validateReason } from '@/utils/meterReadingValidation'
@@ -52,6 +51,12 @@ export function meterLoadErrorMessage(error: unknown): string {
   return METER_LOAD_ERROR_MESSAGE
 }
 
+// An idempotency key and the request it was first sent with.
+interface KeptKey {
+  key: string
+  fingerprint: string
+}
+
 function blockingEntriesOf(error: ApiError): BlockingEntry[] {
   const entries = error.details.entries
   if (!Array.isArray(entries)) return []
@@ -84,7 +89,7 @@ function writeError(err: unknown): MeterReadingError {
       return new MeterReadingError('This reading was already voided, for another reason.')
     case 'idempotency_conflict':
       return new MeterReadingError(
-        'An earlier attempt saved a different reading. Reload the readings and check them.',
+        'An earlier attempt saved a different reading. The readings have been reloaded: check them.',
       )
   }
   if (err.kind === 'invalid-request') {
@@ -119,9 +124,19 @@ export const useMeterReadingStore = defineStore('meterReading', () => {
   let generation = 0
   const loadSeq = new Map<string, number>()
   // Idempotency keys kept until a definite answer, so a retry after a lost response is one the
-  // backend recognises: the new reading per tenant, a correction per reading.
-  const recordKeys = new Map<string, string>()
-  const correctionKeys = new Map<string, string>()
+  // backend recognises: the new reading per tenant, a correction per reading. A key belongs to
+  // the input it was first sent with: changed input (a dialog that stayed editable, or was
+  // closed and reopened) gets a new key, so it isn't refused as a different request.
+  const recordKeys = new Map<string, KeptKey>()
+  const correctionKeys = new Map<string, KeptKey>()
+
+  function keyFor(keys: Map<string, KeptKey>, id: string, fingerprint: string): string {
+    const kept = keys.get(id)
+    if (kept && kept.fingerprint === fingerprint) return kept.key
+    const key = crypto.randomUUID()
+    keys.set(id, { key, fingerprint })
+    return key
+  }
 
   function nextSeq(tenantId: string) {
     const seq = (loadSeq.get(tenantId) ?? 0) + 1
@@ -183,22 +198,29 @@ export const useMeterReadingStore = defineStore('meterReading', () => {
     if (gen === generation) setMeter(tenantId, meter)
   }
 
+  // An idempotency conflict means the readings on screen aren't what the backend has: load
+  // them again, without waiting for a click.
+  function reloadAfterConflict(tenantId: string, err: unknown) {
+    if (err instanceof ApiError && err.code === 'idempotency_conflict') void loadMeter(tenantId)
+  }
+
   async function recordReading(tenantId: string, input: MeterReadingInput) {
     if (!validInput(input)) throw new MeterReadingError('This reading is not valid.')
-    let key = recordKeys.get(tenantId)
-    if (!key) {
-      key = crypto.randomUUID()
-      recordKeys.set(tenantId, key)
-    }
+    const key = keyFor(
+      recordKeys,
+      tenantId,
+      JSON.stringify([input.reading, input.readOn, input.notes]),
+    )
     try {
       await write(tenantId, async (propertyId) => {
-        const result = await meterReadingService.recordReading(propertyId, tenantId, input, key!)
+        const result = await meterReadingService.recordReading(propertyId, tenantId, input, key)
         return result.meter
       })
       recordKeys.delete(tenantId)
     } catch (err) {
       const error = err instanceof MeterReadingError ? err : writeError(err)
       if (!error.uncertain) recordKeys.delete(tenantId)
+      reloadAfterConflict(tenantId, err)
       throw error
     }
   }
@@ -229,11 +251,11 @@ export const useMeterReadingStore = defineStore('meterReading', () => {
     const problem = validateReason(input.reason, 'reading is being corrected')
     if (problem) throw new MeterReadingError(problem)
     if (!validInput(input)) throw new MeterReadingError('This reading is not valid.')
-    let key = correctionKeys.get(readingId)
-    if (!key) {
-      key = crypto.randomUUID()
-      correctionKeys.set(readingId, key)
-    }
+    const key = keyFor(
+      correctionKeys,
+      readingId,
+      JSON.stringify([input.reading, input.readOn, input.notes, input.reason.trim()]),
+    )
     try {
       await write(tenantId, async (propertyId) => {
         const result = await meterReadingService.correctReading(
@@ -241,7 +263,7 @@ export const useMeterReadingStore = defineStore('meterReading', () => {
           tenantId,
           readingId,
           { ...input, reason: input.reason.trim() },
-          key!,
+          key,
         )
         return result.meter
       })
@@ -249,6 +271,7 @@ export const useMeterReadingStore = defineStore('meterReading', () => {
     } catch (err) {
       const error = err instanceof MeterReadingError ? err : writeError(err)
       if (!error.uncertain) correctionKeys.delete(readingId)
+      reloadAfterConflict(tenantId, err)
       throw error
     }
   }
