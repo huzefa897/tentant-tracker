@@ -12,6 +12,7 @@ import type { EntryCorrectionInput, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
 import { electricityLabel, electricityValue } from '@/utils/electricity'
+import { EMPTY_VALUE } from '@/utils/emptyValue'
 import {
   NOTES_MAX_LENGTH,
   VOID_REASON_MAX_LENGTH,
@@ -214,7 +215,7 @@ const inputClass = 'h-11 bg-background'
           <div>
             <dt class="text-xs text-muted-foreground">Replacement</dt>
             <dd class="text-lg font-semibold tabular-nums" data-testid="replacement-total">
-              {{ replacementTotal === null ? '—' : formatINR(replacementTotal) }}
+              {{ replacementTotal === null ? EMPTY_VALUE : formatINR(replacementTotal) }}
             </dd>
           </div>
         </dl>

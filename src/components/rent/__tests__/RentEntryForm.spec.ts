@@ -84,13 +84,13 @@ describe('RentEntryForm', () => {
       expect(wrapper!.find('input#electricityRate').exists()).toBe(false)
     })
 
-    it('shows — for totals until electricity units are entered', () => {
+    it('shows - for totals until electricity units are entered', () => {
       mountForm()
 
-      expect(text('electricity-amount')).toBe('—')
-      expect(text('total-due')).toBe('—')
-      expect(text('outstanding')).toBe('—')
-      expect(text('status')).toBe('—')
+      expect(text('electricity-amount')).toBe('-')
+      expect(text('total-due')).toBe('-')
+      expect(text('outstanding')).toBe('-')
+      expect(text('status')).toBe('-')
     })
 
     it('disables the paid date while nothing is paid', () => {
@@ -142,20 +142,20 @@ describe('RentEntryForm', () => {
       expect(text('outstanding')).toBe('₹0')
     })
 
-    it('shows — instead of a misleading total when a charge is cleared', async () => {
+    it('shows - instead of a misleading total when a charge is cleared', async () => {
       mountForm()
       await fill({ electricityUnits: '75', rentAmount: '' })
 
-      expect(text('total-due')).toBe('—')
-      expect(text('outstanding')).toBe('—')
+      expect(text('total-due')).toBe('-')
+      expect(text('outstanding')).toBe('-')
     })
 
-    it('shows — for outstanding when the payment exceeds the total', async () => {
+    it('shows - for outstanding when the payment exceeds the total', async () => {
       mountForm()
       await fill({ electricityUnits: '75', waterAmount: '300', paymentAmount: '16000' })
 
-      expect(text('outstanding')).toBe('—')
-      expect(text('status')).toBe('—')
+      expect(text('outstanding')).toBe('-')
+      expect(text('status')).toBe('-')
     })
   })
 

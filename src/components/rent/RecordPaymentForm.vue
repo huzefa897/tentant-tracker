@@ -10,6 +10,7 @@ import type { PaymentInput } from '@/types/payment'
 import type { Tenant } from '@/types/tenant'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue, toDateValue } from '@/utils/date'
+import { EMPTY_VALUE } from '@/utils/emptyValue'
 import { hasAtMostTwoDecimals, toPaise } from '@/utils/money'
 import {
   type PaymentDraft,
@@ -36,7 +37,7 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-const PLACEHOLDER = '—'
+const PLACEHOLDER = EMPTY_VALUE
 
 // Local calendar date (not UTC), read once: the default and the "future" limit.
 const today = toDateValue(new Date())
@@ -55,7 +56,7 @@ const draft = computed<PaymentDraft>(() => ({
 const rules = computed(() => ({ today, outstanding: props.outstanding }))
 const errors = computed(() => validatePaymentDraft(draft.value, rules.value))
 
-// Preview. An empty or invalid amount shows "—" rather than a wrong balance.
+// Preview. An empty or invalid amount shows "-" rather than a wrong balance.
 const newPayment = computed(() => {
   const value = toAmount(amount.value)
   return value !== null && value > 0 && hasAtMostTwoDecimals(value) ? value : null

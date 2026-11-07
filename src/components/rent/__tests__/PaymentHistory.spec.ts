@@ -21,7 +21,7 @@ describe('PaymentHistory', () => {
 
     expect(cells(wrapper)).toEqual([
       ['10 Oct 2026', '₹3,000', 'Bank transfer'],
-      ['3 Oct 2026', '₹10,000', '—'],
+      ['3 Oct 2026', '₹10,000', '-'],
     ])
     expect(wrapper.find('[data-testid="download-receipt"]').exists()).toBe(false)
   })
@@ -38,7 +38,7 @@ describe('PaymentHistory', () => {
 
     expect(cells(wrapper)).toEqual([
       ['10 Oct 2026', '₹3,000', 'Bank transfer', 'Download receipt'],
-      ['3 Oct 2026', '₹10,000', '—', 'Issue receipt'],
+      ['3 Oct 2026', '₹10,000', '-', 'Issue receipt'],
     ])
   })
 

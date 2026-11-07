@@ -45,7 +45,7 @@ describe('RentEntryHistory', () => {
         'Paid',
         'Download receipt View bill',
       ],
-      ['August 2026', '—', '₹15,306.75', '₹0', '₹15,306.75', 'Unpaid', 'View bill'],
+      ['August 2026', '-', '₹15,306.75', '₹0', '₹15,306.75', 'Unpaid', 'View bill'],
     ])
   })
 

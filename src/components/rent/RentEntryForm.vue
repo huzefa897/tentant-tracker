@@ -18,6 +18,7 @@ import {
   unitsBetween,
   validateMeterReadingDraft,
 } from '@/utils/meterReadingValidation'
+import { EMPTY_VALUE } from '@/utils/emptyValue'
 import { toPaise } from '@/utils/money'
 import { type PaymentDraft, validatePaymentDraft } from '@/utils/paymentValidation'
 import {
@@ -79,7 +80,7 @@ const emit = defineEmits<{
   retryMeter: []
 }>()
 
-const PLACEHOLDER = '—'
+const PLACEHOLDER = EMPTY_VALUE
 
 // Read once: the form is short-lived, and these are only defaults and the "future" limit.
 const now = new Date()
@@ -152,7 +153,7 @@ const readOn = computed({
 })
 
 // What the bill charges in units: none when left off, the readings' difference on a meter, or
-// the typed units. '' while it can't be worked out yet, so the total shows "—".
+// the typed units. '' while it can't be worked out yet, so the total shows "-".
 const effectiveUnits = computed<NumberInputValue>(() => {
   if (!includeElectricity.value) return 0
   if (hasMeter.value) return meterUnits.value ?? ''
@@ -195,7 +196,7 @@ const isDirty = computed(
 // The parent owns navigation, so it needs to know whether leaving would lose changes.
 watch(isDirty, (dirty) => emit('dirtyChange', dirty))
 
-// Live summary. Anything that can't be calculated yet shows "—" rather than a wrong amount.
+// Live summary. Anything that can't be calculated yet shows "-" rather than a wrong amount.
 const paidAmount = computed(() => {
   const amount = toAmount(paymentAmount.value)
   return amount !== null && amount >= 0 ? amount : null
