@@ -490,7 +490,7 @@ describe('RentEntryForm electricity', () => {
     const unbilledReading = { id: 'reading-nov', reading: 2876, readOn: '2026-10-02' }
     const latestReading = unbilledReading
     const withRecorded = (props: Record<string, unknown> = {}) =>
-      mountMeter({ latestReading, unbilledReading, ...props })
+      mountMeter({ latestReading, unbilledReadings: [unbilledReading], ...props })
 
     it('closes on it by default: no reading to type, and its id is sent', async () => {
       withRecorded()
@@ -506,6 +506,32 @@ describe('RentEntryForm electricity', () => {
         closingReading: null,
         closingReadingId: 'reading-nov',
       })
+    })
+
+    it('picks which recorded reading to close on, starting with the billing month’s', async () => {
+      const lateInMonth = { id: 'reading-oct', reading: 2650, readOn: '2026-09-30' }
+      const sep = { id: 'reading-sep', reading: 2590, readOn: '2026-09-15' }
+      withRecorded({ unbilledReadings: [unbilledReading, lateInMonth, sep], month: '2026-09' })
+      await wrapper!.setProps({ month: '2026-09' })
+
+      const picker = wrapper!.get<HTMLSelectElement>('[data-testid="recorded-reading-picker"]')
+      expect(picker.findAll('option')).toHaveLength(3)
+      // Dated in the billing month (the newest of them) rather than the newest overall.
+      expect(picker.element.value).toBe('reading-oct')
+      expect(text('meter-units')).toBe('87')
+
+      await picker.setValue('reading-sep')
+      expect(text('meter-units')).toBe('27')
+      await save()
+      expect(emittedEntry()).toMatchObject({
+        closingReadingId: 'reading-sep',
+        electricityUnits: 27,
+      })
+    })
+
+    it('shows no picker for a single recorded reading', () => {
+      withRecorded()
+      expect(wrapper!.find('[data-testid="recorded-reading-picker"]').exists()).toBe(false)
     })
 
     it('switches to a new reading and back', async () => {

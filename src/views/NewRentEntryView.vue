@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useMeterReadingStore } from '@/stores/meterReading'
-import { latestReading, unbilledReading } from '@/utils/meterBilling'
+import { latestReading, unbilledReadings } from '@/utils/meterBilling'
 import { EntrySaveError, SAVE_ERROR_MESSAGE, useRentEntryStore } from '@/stores/rentEntry'
 import type { NewRentEntrySubmission, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
@@ -350,7 +350,7 @@ function handleDialogOpenChange(open: boolean) {
           :saving="saving"
           :last-billed="meterState?.meter?.lastBilled ?? null"
           :latest-reading="meterState?.meter ? latestReading(meterState.meter) : null"
-          :unbilled-reading="meterState?.meter ? unbilledReading(meterState.meter) : null"
+          :unbilled-readings="meterState?.meter ? unbilledReadings(meterState.meter) : []"
           :meter-loading="meterState?.status === 'loading'"
           :meter-error="meterState?.error ?? null"
           @retry-meter="meterStore.loadMeter(tenant.id)"

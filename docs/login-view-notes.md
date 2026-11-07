@@ -68,10 +68,7 @@ For a Django + DRF backend, this page should only own presentation and submit st
 The Three.js background is intentionally heavy. If laptops begin sounding like aircraft:
 
 ```vue
-<ParticleWhirlpoolBg
-  :particle-count="1400"
-  :blur="1.5"
-/>
+<ParticleWhirlpoolBg :particle-count="1400" :blur="1.5" />
 ```
 
 Also consider honoring `prefers-reduced-motion` before shipping to production.

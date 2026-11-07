@@ -10,13 +10,15 @@ export function latestReading(meter: TenantMeter): MeterPoint | null {
   return { id: latest.id, reading: latest.reading, readOn: latest.readOn }
 }
 
-// The recorded reading the next meter bill can close on: the newest active one, when no bill
-// closes on it yet and it's after the last billed reading (on its day too, for the baseline,
-// which has no day the meter was read). Null when there is none, and a new reading is needed.
-export function unbilledReading(meter: TenantMeter): MeterPoint | null {
-  const latest = meter.readings.find((reading) => reading.status === 'active')
+// The recorded readings a meter bill can close on, newest first: active ones no bill closes on
+// yet, after the last billed reading (on its day too, for the baseline, which has no day the
+// meter was read). A bill may close on any of them; the ones before it wait for a later bill
+// only if it closes on an earlier one. Empty when a new reading is needed.
+export function unbilledReadings(meter: TenantMeter): MeterPoint[] {
   const from = meter.lastBilled
-  if (!latest || latest.billedBy || !from) return null
-  const after = from.id ? latest.readOn > from.readOn : latest.readOn >= from.readOn
-  return after ? { id: latest.id, reading: latest.reading, readOn: latest.readOn } : null
+  if (!from) return []
+  return meter.readings
+    .filter((reading) => reading.status === 'active' && !reading.billedBy)
+    .filter((reading) => (from.id ? reading.readOn > from.readOn : reading.readOn >= from.readOn))
+    .map((reading) => ({ id: reading.id, reading: reading.reading, readOn: reading.readOn }))
 }

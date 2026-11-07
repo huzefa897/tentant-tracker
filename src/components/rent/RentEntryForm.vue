@@ -54,9 +54,9 @@ const props = withDefaults(
     // The newest active reading, which a new reading must follow (the last billed one if the
     // meter has none).
     latestReading?: MeterPoint | null
-    // A recorded reading no bill closes on yet: the bill closes on it unless a new reading is
-    // chosen.
-    unbilledReading?: MeterPoint | null
+    // The recorded readings no bill closes on yet, newest first: the bill closes on one of them
+    // unless a new reading is chosen.
+    unbilledReadings?: MeterPoint[]
     meterLoading?: boolean
     meterError?: string | null
   }>(),
@@ -66,7 +66,7 @@ const props = withDefaults(
     saving: false,
     lastBilled: null,
     latestReading: null,
-    unbilledReading: null,
+    unbilledReadings: () => [],
     meterLoading: false,
     meterError: null,
   },
@@ -101,6 +101,8 @@ const includeElectricity = ref(true)
 const closingReading = ref<NumberInputValue>('')
 // A recorded reading waiting to be billed is used unless a new reading is chosen.
 const closingChoice = ref<'recorded' | 'new'>('recorded')
+// Which of them, once picked; until then the one dated in the billing month, else the newest.
+const pickedReadingId = ref<string | null>(null)
 // The day the meter was read: the payment's date while it has one (and the reading can be dated
 // then), else today, until changed.
 const readOnTyped = ref<string | null>(null)
@@ -110,11 +112,18 @@ const hasMeter = computed(() => props.tenant.meterBaseline !== null)
 // A reading entered with electricity left off is recorded as a reading only.
 const readingEntered = computed(() => closingReading.value !== '')
 // The bill closes on the recorded reading: no reading is typed, and none is recorded with it.
+const recordedReading = computed<MeterPoint | null>(
+  () =>
+    props.unbilledReadings.find((reading) => reading.id === pickedReadingId.value) ??
+    props.unbilledReadings.find((reading) => reading.readOn.startsWith(billingMonth.value)) ??
+    props.unbilledReadings[0] ??
+    null,
+)
 const useRecorded = computed(
   () =>
     hasMeter.value &&
     includeElectricity.value &&
-    props.unbilledReading !== null &&
+    recordedReading.value !== null &&
     closingChoice.value === 'recorded',
 )
 // The reading a new one must follow.
@@ -122,7 +131,7 @@ const followedReading = computed(() => props.latestReading ?? props.lastBilled)
 const meterUnits = computed(() =>
   unitsBetween(
     props.lastBilled,
-    useRecorded.value ? props.unbilledReading!.reading : closingReading.value,
+    useRecorded.value ? recordedReading.value!.reading : closingReading.value,
   ),
 )
 
@@ -328,7 +337,7 @@ async function handleSubmit() {
       useTenancyRent: rentAmount.value === props.tenant.rentAmount,
       includeElectricity: includeElectricity.value,
       closingReading: reading,
-      ...(useRecorded.value ? { closingReadingId: props.unbilledReading!.id } : {}),
+      ...(useRecorded.value ? { closingReadingId: recordedReading.value!.id } : {}),
     },
     initialPayment:
       amount > 0 ? { amount, paidDate: paidDate.value, notes: paymentNotes.value.trim() } : null,
@@ -475,11 +484,24 @@ const lockedClass =
               data-testid="recorded-reading"
             >
               <span>
-                {{ unbilledReading!.reading.toLocaleString('en-IN') }}
-                <span class="text-xs"> · {{ formatDateValue(unbilledReading!.readOn) }}</span>
+                {{ recordedReading!.reading.toLocaleString('en-IN') }}
+                <span class="text-xs"> · {{ formatDateValue(recordedReading!.readOn) }}</span>
               </span>
               <Lock class="size-4" aria-hidden="true" />
             </div>
+            <select
+              v-if="unbilledReadings.length > 1"
+              id="recordedReadingId"
+              :value="recordedReading!.id"
+              aria-label="Recorded reading to close on"
+              :class="[inputClass, 'w-full rounded-lg border px-3 text-base']"
+              data-testid="recorded-reading-picker"
+              @change="pickedReadingId = ($event.target as HTMLSelectElement).value"
+            >
+              <option v-for="option in unbilledReadings" :key="option.id!" :value="option.id!">
+                {{ option.reading.toLocaleString('en-IN') }} · {{ formatDateValue(option.readOn) }}
+              </option>
+            </select>
             <p class="text-xs text-muted-foreground">
               Already recorded.
               <Button
@@ -526,15 +548,14 @@ const lockedClass =
             >
               {{ errorFor('closingReading') }}
             </p>
-            <p v-if="includeElectricity && unbilledReading" class="text-xs">
+            <p v-if="includeElectricity && recordedReading" class="text-xs">
               <Button
                 type="button"
                 variant="link"
                 class="h-auto p-0 text-xs"
                 @click="closingChoice = 'recorded'"
               >
-                Use the recorded reading ({{ unbilledReading.reading.toLocaleString('en-IN') }},
-                {{ formatDateValue(unbilledReading.readOn) }})
+                Use a recorded reading
               </Button>
             </p>
           </div>
