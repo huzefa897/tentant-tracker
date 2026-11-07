@@ -24,6 +24,7 @@ from billing.meter import (
 )
 from billing.models import MeterReading, Payment, Receipt, RentEntry
 from billing.services import (
+    IdempotencyConflictError,
     ElectricityNotCorrectableError,
     PaymentExceedsOutstandingError,
     correct_rent_entry,
@@ -276,6 +277,23 @@ class BillingTests(MeterBillTestCase):
             )
         october.closing_reading.refresh_from_db()
         self.assertEqual(october.closing_reading.status, MeterReading.Status.ACTIVE)
+
+    def test_a_bill_cannot_reuse_the_key_of_a_reading(self):
+        key = uuid.uuid4()
+        self.read("2563", date(2026, 10, 31), key=key)
+        with self.assertRaises(IdempotencyConflictError):
+            create_rent_entry(
+                tenancy=self.tenancy,
+                actor=self.owner,
+                validated_data={
+                    "billing_month": OCTOBER,
+                    "water_amount": Decimal("0.00"),
+                    "closing_reading": {"reading": Decimal("2600"), "read_on": date(2026, 11, 30)},
+                },
+                creation_key=key,
+            )
+        self.assertFalse(RentEntry.objects.filter(tenancy=self.tenancy).exists())
+        self.assertEqual(MeterReading.objects.filter(tenancy=self.tenancy).count(), 1)
 
     def test_the_first_bill_can_close_on_the_day_tracking_started(self):
         entry = self.bill(OCTOBER, ("2410", date(2026, 9, 30)))
