@@ -234,7 +234,7 @@ class TenancyAdminWithBillsTests(TestCase):
         # The form was loaded while the property was still editable.
         with mock.patch(
             "properties.admin.TenancyAdmin.get_readonly_fields",
-            return_value=("status", "id", "created_at", "updated_at"),
+            return_value=("status", "meter_baseline_recorded_at", "id", "created_at", "updated_at"),
         ), mock.patch.object(Tenancy, "clean"):
             response = self.post_with_property(self.annex)
 

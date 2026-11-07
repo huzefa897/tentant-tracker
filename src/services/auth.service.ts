@@ -1,39 +1,30 @@
 import {
+  GoogleAuthProvider,
   onAuthStateChanged,
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
+  signInWithPopup,
   signOut,
-  type ConfirmationResult,
   type User,
 } from 'firebase/auth'
 
 import { AuthError, type AuthErrorCode } from '@/services/authErrors'
 import { getFirebaseAuth } from '@/services/firebase'
-import type { AuthUser, SendOtpRequest, VerifyOtpRequest } from '@/types/auth'
-import { isValidOtpCode, isValidPhoneNumber } from '@/utils/authValidation'
+import type { AuthUser } from '@/types/auth'
 
-// Firebase phone auth. Firebase keeps the session itself (IndexedDB) and restores it
+// Firebase Google sign-in. Firebase keeps the session itself (IndexedDB) and restores it
 // asynchronously on load; listen with onAuthStateChanged rather than reading it synchronously.
 
-// Lives in memory only: a refresh on /verify can't resume, so the user requests a new code.
-let confirmation: ConfirmationResult | null = null
-
 const FIREBASE_ERROR_CODES: Record<string, AuthErrorCode> = {
-  'auth/invalid-phone-number': 'invalid-phone-number',
-  'auth/missing-phone-number': 'invalid-phone-number',
-  'auth/invalid-verification-code': 'invalid-code',
-  'auth/missing-verification-code': 'invalid-code',
-  'auth/code-expired': 'code-expired',
+  'auth/popup-closed-by-user': 'cancelled',
+  'auth/cancelled-popup-request': 'cancelled',
+  'auth/user-cancelled': 'cancelled',
+  'auth/popup-blocked': 'popup-blocked',
+  'auth/account-exists-with-different-credential': 'account-exists',
   'auth/too-many-requests': 'too-many-requests',
-  'auth/quota-exceeded': 'too-many-requests',
-  'auth/captcha-check-failed': 'captcha-failed',
-  'auth/invalid-app-credential': 'captcha-failed',
-  'auth/missing-app-credential': 'captcha-failed',
   'auth/network-request-failed': 'network',
   'auth/user-disabled': 'user-disabled',
-  // Phone sign-in disabled, SMS region not allowed, billing, bad API key or unlisted domain.
+  // Google sign-in disabled, bad API key, unlisted domain or a browser that can't do popups.
   'auth/operation-not-allowed': 'not-configured',
-  'auth/billing-not-enabled': 'not-configured',
+  'auth/operation-not-supported-in-this-environment': 'not-configured',
   'auth/invalid-api-key': 'not-configured',
   'auth/api-key-not-valid.-please-pass-a-valid-api-key.': 'not-configured',
   'auth/configuration-not-found': 'not-configured',
@@ -59,7 +50,7 @@ export function toAuthError(error: unknown): AuthError {
 }
 
 function toAuthUser(user: User): AuthUser {
-  return { id: user.uid, phoneNumber: user.phoneNumber ?? '' }
+  return { id: user.uid, email: user.email ?? '' }
 }
 
 export const authService = {
@@ -68,40 +59,14 @@ export const authService = {
     return onAuthStateChanged(getFirebaseAuth(), (user) => listener(user ? toAuthUser(user) : null))
   },
 
-  // recaptchaHost: an element in the calling page for Firebase's invisible reCAPTCHA. A fresh
-  // container is used per attempt and removed after, so retries never hit "already rendered".
-  async sendOtp(payload: SendOtpRequest, recaptchaHost: HTMLElement): Promise<void> {
-    if (!isValidPhoneNumber(payload.phoneNumber)) {
-      throw new AuthError('invalid-phone-number')
-    }
-
-    const auth = getFirebaseAuth()
-    const container = document.createElement('div')
-    recaptchaHost.append(container)
-    const verifier = new RecaptchaVerifier(auth, container, { size: 'invisible' })
+  // Opens Google's account chooser in a popup; call it straight from a click, or the browser
+  // may block it. Whether this account may use the app is the backend's call (/me).
+  async signInWithGoogle(): Promise<AuthUser> {
+    const provider = new GoogleAuthProvider()
+    provider.setCustomParameters({ prompt: 'select_account' })
 
     try {
-      confirmation = await signInWithPhoneNumber(auth, payload.phoneNumber, verifier)
-    } catch (error) {
-      throw toAuthError(error)
-    } finally {
-      verifier.clear()
-      container.remove()
-    }
-  },
-
-  async verifyOtp(payload: VerifyOtpRequest): Promise<AuthUser> {
-    if (!isValidOtpCode(payload.code)) {
-      throw new AuthError('invalid-code')
-    }
-
-    if (!confirmation) {
-      throw new AuthError('session-missing')
-    }
-
-    try {
-      const credential = await confirmation.confirm(payload.code)
-      confirmation = null
+      const credential = await signInWithPopup(getFirebaseAuth(), provider)
       return toAuthUser(credential.user)
     } catch (error) {
       throw toAuthError(error)
@@ -117,7 +82,6 @@ export const authService = {
   },
 
   async logout(): Promise<void> {
-    confirmation = null
     await signOut(getFirebaseAuth())
   },
 }

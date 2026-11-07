@@ -137,11 +137,12 @@ services:
       - path: /*
         name: X-Frame-Options
         value: DENY
-      # Report-only until phone sign-in has been checked against it (docs/deployment.md).
-      # frame-src names the Firebase project's auth domain (VITE_FIREBASE_AUTH_DOMAIN).
+      # Report-only until Google sign-in has been checked against it (docs/deployment.md).
+      # frame-src names the Firebase project's auth domain (VITE_FIREBASE_AUTH_DOMAIN). No
+      # Cross-Origin-Opener-Policy: same-origin would cut the app off from Google's popup.
       - path: /*
         name: Content-Security-Policy-Report-Only
-        value: "default-src 'self'; script-src 'self' https://www.google.com https://www.gstatic.com https://apis.google.com; frame-src https://www.google.com https://tenant-tracker-6b596.firebaseapp.com; connect-src 'self' https://rent-tracker-api-bcwo.onrender.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+        value: "default-src 'self'; script-src 'self' https://apis.google.com; frame-src https://tenant-tracker-6b596.firebaseapp.com; connect-src 'self' https://rent-tracker-api-bcwo.onrender.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     envVars:
       - key: NODE_VERSION
         value: 22.22.2

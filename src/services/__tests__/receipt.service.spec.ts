@@ -47,6 +47,9 @@ const receiptDto = {
     electricityUnits: '75.000',
     electricityRate: '6.00',
     electricityAmount: '450.00',
+    electricityMode: 'manual',
+    openingReading: null,
+    closingReading: null,
     waterAmount: '300.00',
   },
   totalDue: '15750.00',
@@ -105,6 +108,9 @@ describe('parseReceipt', () => {
         electricityUnits: 75,
         electricityRate: 6,
         electricityAmount: 450,
+        electricityMode: 'manual',
+        openingReading: null,
+        closingReading: null,
         waterAmount: 300,
       },
       totalDue: 15750,
@@ -137,6 +143,24 @@ describe('parseReceipt', () => {
       // The snapshot is unchanged.
       reference: receiptDto.reference,
       paymentAmount: 3000,
+    })
+  })
+
+  it('maps a meter receipt whose opening reading is where tracking started (no date)', () => {
+    const charges = {
+      ...receiptDto.charges,
+      electricityUnits: '134.000',
+      electricityAmount: '804.00',
+      electricityMode: 'meter',
+      openingReading: { reading: '567.000', readOn: null },
+      closingReading: { reading: '701.000', readOn: '2026-11-05' },
+    }
+
+    expect(toReceipt(parseReceipt({ ...receiptDto, charges })).charges).toMatchObject({
+      electricityMode: 'meter',
+      electricityUnits: 134,
+      openingReading: { reading: 567, readOn: null },
+      closingReading: { reading: 701, readOn: '2026-11-05' },
     })
   })
 

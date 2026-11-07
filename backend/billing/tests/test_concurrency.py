@@ -5,11 +5,16 @@ from datetime import date
 from decimal import Decimal
 from unittest import mock
 
-from django.db import connection, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import TransactionTestCase, skipUnlessDBFeature
 
 from billing.calculations import entry_amounts
-from billing.models import Payment, PaymentReversal, Receipt, RentEntry
+from billing.meter import (
+    DuplicateReadingDayError,
+    ReadingAlreadyBilledError,
+    record_meter_reading,
+)
+from billing.models import MeterReading, Payment, PaymentReversal, Receipt, RentEntry
 from billing.services import (
     DuplicateBillingMonthError,
     EntryVoidError,
@@ -24,7 +29,7 @@ from billing.services import (
 
 from properties.models import Property, PropertyMembership, Tenancy
 
-from .factories import make_property, make_tenancy, make_user
+from .factories import make_property, make_tenancy, make_user, recorded_on
 
 
 @skipUnlessDBFeature("has_select_for_update")
@@ -649,3 +654,173 @@ class ConcurrentBillCorrectionTests(TransactionTestCase):
         )
 
         self.assertEqual(outcomes, [True, "created"])
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class ConcurrentMeterBillTests(TransactionTestCase):
+    """TC-18: bills created at once never charge the same meter units twice."""
+
+    def setUp(self):
+        self.user = make_user()
+        self.tenancy = make_tenancy(
+            make_property(member=self.user),
+            meter_baseline_reading=Decimal("2400"),
+            meter_baseline_recorded_at=recorded_on(date(2026, 9, 30)),
+        )
+        patcher = mock.patch("billing.meter.business_date", return_value=date(2027, 1, 20))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.reading = record_meter_reading(
+            tenancy_id=self.tenancy.pk,
+            actor=self.user,
+            validated_data={"reading": Decimal("2563"), "read_on": date(2026, 10, 31)},
+            idempotency_key=uuid.uuid4(),
+        ).reading
+
+    def test_two_bills_closing_on_one_reading_make_one(self):
+        months = [date(2026, 10, 1), date(2026, 11, 1)]
+        barrier = threading.Barrier(len(months))
+        outcomes = []
+        lock = threading.Lock()
+
+        def create(month):
+            try:
+                barrier.wait()
+                create_rent_entry(
+                    tenancy=self.tenancy,
+                    actor=self.user,
+                    validated_data={
+                        "billing_month": month,
+                        "water_amount": Decimal("0"),
+                        "closing_reading_id": self.reading.pk,
+                    },
+                )
+                outcome = "created"
+            except ReadingAlreadyBilledError:
+                outcome = "already_billed"
+            except Exception as error:  # noqa: BLE001 - reported by the assertion below
+                outcome = repr(error)
+            finally:
+                connection.close()
+            with lock:
+                outcomes.append(outcome)
+
+        threads = [threading.Thread(target=create, args=(month,)) for month in months]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        self.assertEqual(sorted(outcomes), ["already_billed", "created"])
+        self.assertEqual(
+            RentEntry.objects.filter(closing_reading=self.reading, status="active").count(), 1
+        )
+
+
+    def test_the_database_refuses_a_void_racing_a_bill_that_isnt_committed_yet(self):
+        """The triggers (billing.0016) back up the app's lock for a script that doesn't take
+        it: a bill saved on a reading and a void of that reading, in two sessions at once. The
+        void waits for the bill, then sees it and is refused."""
+        inserted, proceed = threading.Event(), threading.Event()
+        outcome = []
+
+        def save_bill():
+            try:
+                with transaction.atomic():
+                    RentEntry.objects.create(
+                        tenancy=self.tenancy,
+                        billing_month=date(2026, 10, 1),
+                        rent_amount=Decimal("15000"),
+                        electricity_units=Decimal("163"),
+                        electricity_rate=Decimal("6"),
+                        water_amount=Decimal("0"),
+                        created_by=self.user,
+                        electricity_mode="meter",
+                        closing_reading=self.reading,
+                        meter_opening=Decimal("2400"),
+                        meter_opening_date=date(2026, 9, 30),
+                    )
+                    inserted.set()
+                    proceed.wait(timeout=30)
+            finally:
+                connection.close()
+
+        def void_reading():
+            try:
+                MeterReading.objects.filter(pk=self.reading.pk).update(
+                    status="void", voided_at=self.reading.created_at,
+                    voided_by=self.user, void_reason="Racing",
+                )
+                outcome.append("voided")
+            except IntegrityError:
+                outcome.append("refused")
+            except Exception as error:  # noqa: BLE001 - reported by the assertion below
+                outcome.append(repr(error))
+            finally:
+                connection.close()
+
+        bill = threading.Thread(target=save_bill)
+        bill.start()
+        self.assertTrue(inserted.wait(timeout=30))
+        void = threading.Thread(target=void_reading)
+        void.start()
+        time.sleep(1)
+        self.assertTrue(void.is_alive(), "the void should wait for the bill's transaction")
+        proceed.set()
+        bill.join(timeout=30)
+        void.join(timeout=30)
+
+        self.assertEqual(outcome, ["refused"])
+        self.reading.refresh_from_db()
+        self.assertEqual(self.reading.status, "active")
+        self.assertEqual(RentEntry.objects.filter(closing_reading=self.reading).count(), 1)
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class ConcurrentMeterReadingTests(TransactionTestCase):
+    """Two readings of one tenancy's meter for the same day, at once: one is recorded."""
+
+    def setUp(self):
+        self.user = make_user()
+        self.tenancy = make_tenancy(
+            make_property(member=self.user),
+            meter_baseline_reading=Decimal("2400"),
+            meter_baseline_recorded_at=recorded_on(date(2026, 9, 30)),
+        )
+        patcher = mock.patch("billing.meter.business_date", return_value=date(2027, 1, 20))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_two_readings_on_one_day_make_one(self):
+        values = [Decimal("2563"), Decimal("2570")]
+        barrier = threading.Barrier(len(values))
+        outcomes = []
+        lock = threading.Lock()
+
+        def record(value):
+            try:
+                barrier.wait()
+                record_meter_reading(
+                    tenancy_id=self.tenancy.pk,
+                    actor=self.user,
+                    validated_data={"reading": value, "read_on": date(2026, 10, 31)},
+                    idempotency_key=uuid.uuid4(),
+                )
+                outcome = "created"
+            except DuplicateReadingDayError:
+                outcome = "duplicate_day"
+            except Exception as error:  # noqa: BLE001 - reported by the assertion below
+                outcome = repr(error)
+            finally:
+                connection.close()
+            with lock:
+                outcomes.append(outcome)
+
+        threads = [threading.Thread(target=record, args=(value,)) for value in values]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        self.assertEqual(sorted(outcomes), ["created", "duplicate_day"])
+        self.assertEqual(MeterReading.objects.filter(tenancy=self.tenancy).count(), 1)

@@ -11,6 +11,8 @@ import type { Payment } from '@/types/payment'
 import type { EntryCorrectionInput, RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
 import { formatMonthValue } from '@/utils/date'
+import { electricityLabel, electricityValue } from '@/utils/electricity'
+import { EMPTY_VALUE } from '@/utils/emptyValue'
 import {
   NOTES_MAX_LENGTH,
   VOID_REASON_MAX_LENGTH,
@@ -79,7 +81,12 @@ const replacementTotal = computed(() =>
   }),
 )
 
-const chargeFields = [
+// A meter or not-charged bill's electricity follows its readings: it's kept as it is (the
+// original's units are sent back unchanged). Changing it means voiding the bill and creating
+// a new one.
+const electricityFixed = computed(() => props.original.electricityMode !== 'manual')
+
+const allChargeFields = [
   { field: 'rentAmount', label: 'Rent (₹)', original: () => formatINR(props.original.rentAmount) },
   {
     field: 'electricityUnits',
@@ -92,6 +99,9 @@ const chargeFields = [
     original: () => formatINR(props.original.waterAmount),
   },
 ] as const
+const chargeFields = computed(() =>
+  allChargeFields.filter((item) => !(electricityFixed.value && item.field === 'electricityUnits')),
+)
 
 const formRef = useTemplateRef<HTMLFormElement>('form')
 
@@ -121,6 +131,21 @@ const inputClass = 'h-11 bg-background'
           {{ formatMonthValue(original.billingMonth) }} · Electricity rate
           {{ formatINR(original.electricityRate) }} / unit, as on the original bill.
         </p>
+
+        <div
+          v-if="electricityFixed"
+          class="mb-4 rounded-lg bg-muted/50 p-3 text-sm"
+          data-testid="electricity-fixed"
+        >
+          <p class="flex flex-wrap justify-between gap-x-4">
+            <span>{{ electricityLabel(original) }}</span>
+            <span class="font-medium tabular-nums">{{ electricityValue(original) }}</span>
+          </p>
+          <p class="mt-1 text-muted-foreground">
+            Kept as on the original bill. To change the electricity, void this bill and create a new
+            one.
+          </p>
+        </div>
 
         <div class="space-y-4">
           <div v-for="item in chargeFields" :key="item.field" class="space-y-2">
@@ -190,7 +215,7 @@ const inputClass = 'h-11 bg-background'
           <div>
             <dt class="text-xs text-muted-foreground">Replacement</dt>
             <dd class="text-lg font-semibold tabular-nums" data-testid="replacement-total">
-              {{ replacementTotal === null ? '—' : formatINR(replacementTotal) }}
+              {{ replacementTotal === null ? EMPTY_VALUE : formatINR(replacementTotal) }}
             </dd>
           </div>
         </dl>

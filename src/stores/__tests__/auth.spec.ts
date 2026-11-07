@@ -9,9 +9,6 @@ import type { AuthUser } from '@/types/auth'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 
-const phoneNumber = '+918341413827'
-const host = () => document.createElement('div')
-
 beforeEach(() => {
   resetAuthService()
   setActivePinia(createPinia())
@@ -24,7 +21,6 @@ describe('auth store', () => {
 
       expect(store.ready).toBe(false)
       expect(store.isAuthenticated).toBe(false)
-      expect(store.pendingPhoneNumber).toBeNull()
     })
 
     it('becomes ready with the session Firebase restored', async () => {
@@ -82,126 +78,87 @@ describe('auth store', () => {
       expect(store.ready).toBe(true)
       expect(store.isAuthenticated).toBe(false)
       expect(store.loginNotice).toBe(
-        "Phone sign-in isn't available right now. Contact the property owner.",
+        "Google sign-in isn't available right now. Contact the property owner.",
       )
     })
   })
 
-  describe('sendOtp', () => {
-    it('passes the reCAPTCHA host and keeps the pending number on success', async () => {
+  describe('signInWithGoogle', () => {
+    it('signs in with the Google account', async () => {
       const store = useAuthStore()
-      const element = host()
 
-      await store.sendOtp(phoneNumber, element)
+      await store.signInWithGoogle()
 
-      expect(authService.sendOtp).toHaveBeenCalledWith({ phoneNumber }, element)
-      expect(store.pendingPhoneNumber).toBe(phoneNumber)
+      expect(authService.signInWithGoogle).toHaveBeenCalled()
+      expect(store.user).toEqual(testUser)
+      expect(store.error).toBeNull()
     })
 
-    it('sets loading while the request is in flight', async () => {
+    it('sets loading while Google is open', async () => {
       const store = useAuthStore()
 
-      const request = store.sendOtp(phoneNumber, host())
+      const request = store.signInWithGoogle()
       expect(store.loading).toBe(true)
 
       await request
       expect(store.loading).toBe(false)
     })
 
-    it('sets an error and rethrows on failure', async () => {
-      vi.mocked(authService.sendOtp).mockRejectedValue(new Error('down'))
+    it("closing Google's window is not an error", async () => {
+      vi.mocked(authService.signInWithGoogle).mockRejectedValue(new AuthError('cancelled'))
       const store = useAuthStore()
 
-      await expect(store.sendOtp(phoneNumber, host())).rejects.toThrow('down')
+      await expect(store.signInWithGoogle()).resolves.toBeUndefined()
 
-      expect(store.error).toBe('Unable to send verification code. Please try again.')
-      expect(store.pendingPhoneNumber).toBeNull()
+      expect(store.isAuthenticated).toBe(false)
+      expect(store.error).toBeNull()
       expect(store.loading).toBe(false)
     })
 
-    it('explains known failures', async () => {
-      vi.mocked(authService.sendOtp).mockRejectedValue(new AuthError('invalid-phone-number'))
-      const store = useAuthStore()
-
-      await store.sendOtp(phoneNumber, host()).catch(() => {})
-
-      expect(store.error).toBe('Enter a valid mobile number.')
-    })
-  })
-
-  describe('verifyOtp', () => {
-    it('throws when there is no pending number', async () => {
-      const store = useAuthStore()
-
-      await expect(store.verifyOtp('924636')).rejects.toThrow('Phone number missing')
-      expect(authService.verifyOtp).not.toHaveBeenCalled()
-    })
-
-    it('signs in and clears the pending number', async () => {
-      const store = useAuthStore()
-      await store.sendOtp(phoneNumber, host())
-
-      await store.verifyOtp('924636')
-
-      expect(authService.verifyOtp).toHaveBeenCalledWith({ code: '924636' })
-      expect(store.user).toEqual(testUser)
-      expect(store.pendingPhoneNumber).toBeNull()
-    })
-
     it.each([
-      ['invalid-code', 'Invalid verification code. Please try again.'],
-      ['code-expired', 'This code has expired. Request a new one.'],
-      ['session-missing', 'Your sign-in expired. Request a new code.'],
+      [
+        'popup-blocked',
+        'Your browser blocked the Google sign-in window. Allow pop-ups and try again.',
+      ],
+      [
+        'account-exists',
+        'This email is set up to sign in another way. Contact the property owner.',
+      ],
       ['user-disabled', 'This account has been disabled. Contact the property owner.'],
-    ] as const)('keeps the pending number and explains %s', async (code, message) => {
-      vi.mocked(authService.verifyOtp).mockRejectedValue(new AuthError(code))
+      ['network', 'No connection. Check your internet and try again.'],
+    ] as const)('explains %s and rethrows', async (code, message) => {
+      vi.mocked(authService.signInWithGoogle).mockRejectedValue(new AuthError(code))
       const store = useAuthStore()
-      await store.sendOtp(phoneNumber, host())
 
-      await expect(store.verifyOtp('111111')).rejects.toThrow(AuthError)
+      await expect(store.signInWithGoogle()).rejects.toThrow(AuthError)
 
       expect(store.error).toBe(message)
-      expect(store.pendingPhoneNumber).toBe(phoneNumber)
       expect(store.isAuthenticated).toBe(false)
+      expect(store.loading).toBe(false)
     })
 
     it('falls back to a general message for unexpected failures', async () => {
-      vi.mocked(authService.verifyOtp).mockRejectedValue(new Error('boom'))
+      vi.mocked(authService.signInWithGoogle).mockRejectedValue(new Error('boom'))
       const store = useAuthStore()
-      await store.sendOtp(phoneNumber, host())
 
-      await store.verifyOtp('111111').catch(() => {})
+      await store.signInWithGoogle().catch(() => {})
 
-      expect(store.error).toBe('Unable to verify the code. Please try again.')
+      expect(store.error).toBe('Unable to sign in. Please try again.')
     })
   })
 
-  it('resetOtpFlow clears the pending number and error', async () => {
-    vi.mocked(authService.sendOtp).mockRejectedValueOnce(new Error('down'))
+  it('clearError clears the error', async () => {
+    vi.mocked(authService.signInWithGoogle).mockRejectedValueOnce(new Error('down'))
     const store = useAuthStore()
-    await store.sendOtp(phoneNumber, host()).catch(() => {})
-    await store.sendOtp(phoneNumber, host())
-
-    store.resetOtpFlow()
-
-    expect(store.pendingPhoneNumber).toBeNull()
-    expect(store.error).toBeNull()
-  })
-
-  it('clearError only clears the error', async () => {
-    const store = useAuthStore()
-    await store.sendOtp(phoneNumber, host())
-    vi.mocked(authService.sendOtp).mockRejectedValueOnce(new Error('down'))
-    await store.sendOtp(phoneNumber, host()).catch(() => {})
+    await store.signInWithGoogle().catch(() => {})
 
     store.clearError()
 
     expect(store.error).toBeNull()
-    expect(store.pendingPhoneNumber).toBe(phoneNumber)
   })
 
   describe('logout', () => {
-    it('signs out of Firebase and clears the user and OTP flow', async () => {
+    it('signs out of Firebase and clears the user', async () => {
       signInAs()
       const store = useAuthStore()
       await store.init()
@@ -210,7 +167,6 @@ describe('auth store', () => {
 
       expect(authService.logout).toHaveBeenCalled()
       expect(store.user).toBeNull()
-      expect(store.pendingPhoneNumber).toBeNull()
     })
 
     it('endSession signs out and leaves a notice for the login page', async () => {
@@ -225,11 +181,11 @@ describe('auth store', () => {
       expect(store.loginNotice).toBe('Not registered.')
     })
 
-    it('sending a new code clears the notice', async () => {
+    it('signing in again clears the notice', async () => {
       const store = useAuthStore()
       await store.endSession('Not registered.')
 
-      await store.sendOtp(phoneNumber, host())
+      await store.signInWithGoogle()
 
       expect(store.loginNotice).toBeNull()
     })

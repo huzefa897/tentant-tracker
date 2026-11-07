@@ -1,15 +1,18 @@
 // What a receipt says, worked out from Django's saved snapshot only: nothing here reads current
 // tenant, issuer, bill or payment data, or recalculates a figure. The PDF (utils/receiptPdf.ts)
-// only lays this out.
+// only lays this out, section by section, in this order.
 
 import type { PaymentReceipt } from '@/types/receipt'
 import { formatAmount, formatINR, formatINRWithPaise } from '@/utils/currency'
 import {
+  formatDateValue,
   formatDateValueNumeric,
   formatMonthValue,
   formatOrdinal,
   formatTimestamp,
 } from '@/utils/date'
+import { formatReading, NOT_CHARGED } from '@/utils/electricity'
+import { toPaise } from '@/utils/money'
 import { formatPhoneNumber } from '@/utils/phone'
 
 export interface ReceiptField {
@@ -17,16 +20,32 @@ export interface ReceiptField {
   value: string
 }
 
+// One side of "Issued by" / "Received from": a name in bold, then its lines.
+export interface ReceiptParty {
+  heading: string
+  name: string
+  lines: string[]
+}
+
 export interface ReceiptChargeRow {
   description: string
-  details: string
+  details: string // printed after the description, in brackets; '' for none
   amount: string
 }
 
-export interface ReceiptTotalRow {
+// total: the bold, shaded Total due row. strong: a bold value. The tone colours a balance
+// still owed (never a zero one).
+export interface ReceiptSummaryRow {
   label: string
   value: string
+  style: 'row' | 'total' | 'strong'
   tone: 'default' | 'overdue' | 'previous'
+}
+
+// A meter bill's readings, as saved; null for typed units or electricity left off.
+export interface ReceiptConsumption {
+  fields: ReceiptField[] // opening, closing, units, rate
+  note: string // when each reading was taken
 }
 
 export interface ReceiptContent {
@@ -34,25 +53,27 @@ export interface ReceiptContent {
   // confirms. The rest of the receipt is the snapshot as issued.
   voided: { banner: string; details: string } | null
   fileName: string
+  propertyName: string
   title: string
   subtitle: string
   receiptNumber: string
-  receiptDate: string
-  paidInFull: boolean
   status: string
-  issuer: ReceiptField[]
-  tenant: ReceiptField[]
+  // Reference, receipt date, billing period, payment date.
+  facts: ReceiptField[]
+  issuedBy: ReceiptParty
+  receivedFrom: ReceiptParty
   rental: ReceiptField[]
   charges: ReceiptChargeRow[]
-  totals: ReceiptTotalRow[]
-  summary: { heading: string; message: string; amountLabel: string; amount: string }
-  // Paragraphs; the payment's own notes first, when there are any.
-  remarks: string[]
+  summary: ReceiptSummaryRow[]
+  consumption: ReceiptConsumption | null
+  // The payment's own notes, as written; null when it has none.
+  notes: string | null
+  // tick: a payment was received (false for a reversed one, which confirms nothing).
+  outcome: { heading: string; message: string; tick: boolean }
   authorizedBy: string
-  footer: string
 }
 
-const STANDARD_REMARKS = 'Thank you for your payment.\nPlease retain this receipt for your records.'
+const RETAIN = 'Please retain this receipt for your records.'
 
 // Characters most file systems reject.
 function toFileName(value: string): string {
@@ -62,56 +83,105 @@ function toFileName(value: string): string {
     .trim()
 }
 
-// Rows with nothing to show (an unset email, say) are left out.
-function present(fields: ReceiptField[]): ReceiptField[] {
-  return fields.filter((field) => field.value !== '')
+// Lines with nothing to show (an unset phone number, say) are left out.
+function present(lines: (string | false | null | undefined)[]): string[] {
+  return lines.filter((line): line is string => Boolean(line))
 }
 
 export const VOID_BANNER = 'VOID — Payment reversed'
+
+// The charges table's electricity row, as saved: units × rate, or "Not charged" (never ₹0,
+// which would read as paid). A meter bill's readings are in its consumption details.
+function electricityRow(charges: PaymentReceipt['charges']): ReceiptChargeRow {
+  if (charges.electricityMode === 'not_charged') {
+    return { description: 'Electricity', details: 'Not charged on this bill', amount: NOT_CHARGED }
+  }
+  return {
+    description: 'Electricity charge',
+    details: `${formatReading(charges.electricityUnits)} Units × ${formatINRWithPaise(charges.electricityRate)} per unit`,
+    amount: formatAmount(charges.electricityAmount),
+  }
+}
+
+// A meter bill's opening and closing readings, units and rate. The opening reading has no date
+// when it's where tracking started: that day isn't printed.
+function consumption(charges: PaymentReceipt['charges']): ReceiptConsumption | null {
+  const { openingReading: opening, closingReading: closing } = charges
+  if (charges.electricityMode !== 'meter' || !opening || !closing) return null
+  const units = formatReading(charges.electricityUnits)
+  return {
+    fields: [
+      { label: 'Opening reading', value: formatReading(opening.reading) },
+      { label: 'Closing reading', value: formatReading(closing.reading) },
+      { label: 'Units consumed', value: `${units} ${units === '1' ? 'unit' : 'units'}` },
+      { label: 'Rate per unit', value: formatINRWithPaise(charges.electricityRate) },
+    ],
+    note: [
+      opening.readOn === null
+        ? 'Opening reading: the starting reading'
+        : `Opening reading recorded: ${formatDateValue(opening.readOn)}`,
+      `Closing reading recorded: ${formatDateValue(closing.readOn)}`,
+    ].join(' · '),
+  }
+}
+
+// A balance still owed is coloured; a zero one isn't.
+function owed(value: number, tone: ReceiptSummaryRow['tone']): ReceiptSummaryRow['tone'] {
+  return value > 0 ? tone : 'default'
+}
 
 export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
   const { issuer, tenant, charges } = receipt
   const isVoid = receipt.status === 'void'
   const paidInFull = !isVoid && receipt.outstanding <= 0
   // Only differs from this payment's amount when earlier payments went towards the same bill.
-  const paidEarlier = receipt.totalPaid !== receipt.paymentAmount
+  const paidEarlier = toPaise(receipt.totalPaid) !== toPaise(receipt.paymentAmount)
   const month = formatMonthValue(receipt.billingMonth)
+  const notCharged = charges.electricityMode === 'not_charged'
 
   const chargeRows: ReceiptChargeRow[] = [
     {
-      description: 'Rent Amount',
+      description: 'Rent amount',
       details: 'Monthly Rent',
       amount: formatAmount(charges.rentAmount),
     },
-    {
-      description: 'Electricity Units',
-      details: 'Units Consumed',
-      amount: String(charges.electricityUnits),
-    },
-    {
-      description: 'Electricity Per Unit',
-      details: 'Rate per Unit',
-      amount: formatAmount(charges.electricityRate),
-    },
-    {
-      description: 'Electricity Charge',
-      details: `${charges.electricityUnits} Units × ${formatINR(charges.electricityRate)}`,
-      amount: formatAmount(charges.electricityAmount),
-    },
+    electricityRow(charges),
   ]
-
   if (charges.waterAmount > 0) {
     chargeRows.push({
-      description: 'Water Charge',
+      description: 'Water charge',
       details: 'Monthly Water',
       amount: formatAmount(charges.waterAmount),
     })
   }
 
-  const summaryAmount = {
-    amountLabel: paidEarlier ? 'THIS PAYMENT' : 'AMOUNT PAID',
-    amount: formatINRWithPaise(receipt.paymentAmount),
-  }
+  const row = (label: string, value: number): ReceiptSummaryRow => ({
+    label,
+    value: formatINRWithPaise(value),
+    style: 'row',
+    tone: 'default',
+  })
+
+  const summary: ReceiptSummaryRow[] = [
+    row('Rent amount', charges.rentAmount),
+    notCharged
+      ? { label: 'Electricity charge', value: NOT_CHARGED, style: 'row', tone: 'default' }
+      : row('Electricity charge', charges.electricityAmount),
+    ...(charges.waterAmount > 0 ? [row('Water charge', charges.waterAmount)] : []),
+    { ...row('Total due', receipt.totalDue), style: 'total' },
+    row(paidEarlier ? 'Total paid to date' : 'Amount paid', receipt.totalPaid),
+    ...(paidEarlier ? [row('This payment', receipt.paymentAmount)] : []),
+    {
+      ...row('Outstanding balance', receipt.outstanding),
+      style: 'strong',
+      tone: owed(receipt.outstanding, 'overdue'),
+    },
+    {
+      ...row('Previous month overdue', receipt.previousMonthOutstanding),
+      style: 'strong',
+      tone: owed(receipt.previousMonthOutstanding, 'previous'),
+    },
+  ]
 
   return {
     voided: isVoid
@@ -129,71 +199,60 @@ export function getReceiptContent(receipt: PaymentReceipt): ReceiptContent {
     // The reference already reads like the owners' receipt names: "Mirza_Baig_102_Rent_September 2026".
     // A void copy says so in its name too, so it isn't mistaken for the valid one.
     fileName: `${toFileName(receipt.reference)}${isVoid ? ' (VOID)' : ''}.pdf`,
-    title: 'PAYMENT RECEIPT',
-    subtitle: 'Rental / Tenant Payment Receipt',
+    propertyName: issuer.name,
+    title: 'Payment Receipt',
+    subtitle: 'Rental payment receipt',
     receiptNumber: receipt.reference,
-    receiptDate: formatDateValueNumeric(receipt.issuedDate),
-    paidInFull,
     status: isVoid ? 'VOID' : paidInFull ? 'PAID' : 'PARTIALLY PAID',
-    issuer: present([
-      { label: 'Received By', value: issuer.receivedBy },
-      { label: 'Property / Building Name', value: issuer.name },
-      { label: 'Address', value: issuer.address },
-      {
-        label: 'Contact Number',
-        value: issuer.contactNumber && formatPhoneNumber(issuer.contactNumber),
-      },
-    ]),
-    tenant: present([
-      { label: 'Tenant Name', value: tenant.name },
-      { label: 'Flat Number', value: tenant.flatNumber },
-      {
-        label: 'Tenant Mobile Number',
-        value: tenant.mobileNumber && formatPhoneNumber(tenant.mobileNumber),
-      },
-      { label: 'Tenant Deposit Amount', value: formatINR(tenant.depositAmount) },
-    ]),
+    facts: [
+      { label: 'Receipt reference', value: receipt.reference },
+      { label: 'Receipt date', value: formatDateValueNumeric(receipt.issuedDate) },
+      { label: 'Billing period', value: month },
+      { label: 'Payment date', value: formatDateValueNumeric(receipt.paidDate) },
+    ],
+    issuedBy: {
+      heading: 'Issued by',
+      name: issuer.name,
+      lines: present([
+        issuer.address,
+        issuer.contactNumber && formatPhoneNumber(issuer.contactNumber),
+        issuer.receivedBy && `Received by: ${issuer.receivedBy}`,
+      ]),
+    },
+    receivedFrom: {
+      heading: 'Received from (tenant)',
+      name: tenant.name,
+      lines: present([
+        `Flat ${tenant.flatNumber}`,
+        tenant.mobileNumber && formatPhoneNumber(tenant.mobileNumber),
+        `Security deposit: ${formatINR(tenant.depositAmount)}`,
+      ]),
+    },
     rental: [
-      { label: 'Billing Month', value: month },
-      { label: 'Rent Due Day', value: formatOrdinal(receipt.rentDueDay) },
-      { label: 'Paid Date', value: formatDateValueNumeric(receipt.paidDate) },
+      { label: 'Rent due day', value: formatOrdinal(receipt.rentDueDay) },
+      { label: 'Billing month', value: month },
     ],
     charges: chargeRows,
-    totals: [
-      { label: 'TOTAL DUE', value: formatAmount(receipt.totalDue), tone: 'default' },
-      {
-        label: paidEarlier ? 'TOTAL PAID TO DATE' : 'AMOUNT PAID',
-        value: formatAmount(receipt.totalPaid),
-        tone: 'default',
-      },
-      { label: 'OVERDUE AMOUNT', value: formatAmount(receipt.outstanding), tone: 'overdue' },
-      {
-        label: 'LAST MONTH OVERDUE',
-        value: formatAmount(receipt.previousMonthOutstanding),
-        tone: 'previous',
-      },
-    ],
-    summary: isVoid
+    summary,
+    consumption: consumption(charges),
+    notes: receipt.paymentNotes.trim() ? receipt.paymentNotes : null,
+    outcome: isVoid
       ? {
           heading: 'Payment reversed.',
           message: 'This payment was corrected after the receipt was issued. The receipt is void.',
-          ...summaryAmount,
+          tick: false,
         }
       : paidInFull
         ? {
             heading: 'Payment received in full.',
-            message: 'Thank you! Your payment has been received successfully.',
-            ...summaryAmount,
+            message: `Thank you for your payment. ${RETAIN}`,
+            tick: true,
           }
         : {
             heading: 'Part payment received.',
-            message: `${formatINRWithPaise(receipt.outstanding)} remains due for ${month}.`,
-            ...summaryAmount,
+            message: `${formatINRWithPaise(receipt.outstanding)} remains due for ${month}. ${RETAIN}`,
+            tick: true,
           },
-    remarks: receipt.paymentNotes.trim()
-      ? [receipt.paymentNotes, STANDARD_REMARKS]
-      : [STANDARD_REMARKS],
-    authorizedBy: `AUTHORIZED BY · ${issuer.authorizedBy || issuer.name}`,
-    footer: isVoid ? `${VOID_BANNER}.` : 'Thank you for your payment.',
+    authorizedBy: `Authorized by ${issuer.authorizedBy || issuer.name}`,
   }
 }

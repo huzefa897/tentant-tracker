@@ -37,3 +37,16 @@ const NON_RETRYABLE: ReadonlySet<ApiErrorKind> = new Set(['unauthorized', 'forbi
 export function isRetryableError(err: unknown): boolean {
   return !(err instanceof ApiError) || !NON_RETRYABLE.has(err.kind)
 }
+
+// No response, a server error or a response we couldn't read: the request may have been
+// carried out anyway. Retrying with the same idempotency key is safe; a new key isn't.
+const UNCERTAIN_KINDS: ReadonlySet<ApiErrorKind> = new Set([
+  'network',
+  'unavailable',
+  'invalid-response',
+  'unknown',
+])
+
+export function isUncertainFailure(error: unknown): boolean {
+  return UNCERTAIN_KINDS.has(error instanceof ApiError ? error.kind : 'unknown')
+}

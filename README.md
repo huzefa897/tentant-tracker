@@ -26,9 +26,10 @@ Sign-in needs the backend running too: `npm run dev` proxies `/api` to Django on
 
 ## Signing in
 
-Sign-in is Firebase phone auth. In the Firebase console (Authentication) the
-Phone provider must be enabled and the countries allowed under SMS region
-policy; add a test number with a fixed code to sign in without a real SMS.
+Sign-in is Google, through Firebase. In the Firebase console (Authentication >
+Sign-in method) enable the **Google** provider, and make sure `localhost` is under
+Settings > Authorized domains. Only people added in Django admin with their Google
+email can sign in (see "Granting access" in the backend README).
 
 Signing in only proves who you are. The app then asks the backend
 (`/api/v1/me/`) which properties you can access, and a new account has none:

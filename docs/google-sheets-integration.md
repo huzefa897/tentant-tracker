@@ -27,36 +27,36 @@ A details block at the top, then one row per month.
 **Details (rows 3–8):** labels in column A, values in column C, plus a few extra label/value
 pairs in columns D–G.
 
-| Label | Value | Notes |
-|---|---|---|
-| Name of Tenant | text | |
-| Rent Amount | number | the tenant's **current** rent |
-| Flat Number | D4 → F4 (G4 on one tab) | usually a number such as `202`, stored as `202.0`; one test tab has a street address |
-| Rent Due Day (of month) | number, text such as `11th `, or blank | |
-| Electricity Per Unit Cost | number | the **current** rate |
-| Tenant Mobile Number | text | not E.164: spaces, no country code, one 9-digit number, one Australian number |
-| Tenant Deposit Amount | number | |
-| Adhaar Card Number | D5 → F5, on most tabs | sensitive government ID |
-| Breakdown | e.g. `15000+2000 Maintainance` | rent split into rent and maintenance, as free text |
-| Tenant Email | read by the script, but not present on any tab | |
+| Label                     | Value                                          | Notes                                                                                |
+| ------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Name of Tenant            | text                                           |                                                                                      |
+| Rent Amount               | number                                         | the tenant's **current** rent                                                        |
+| Flat Number               | D4 → F4 (G4 on one tab)                        | usually a number such as `202`, stored as `202.0`; one test tab has a street address |
+| Rent Due Day (of month)   | number, text such as `11th `, or blank         |                                                                                      |
+| Electricity Per Unit Cost | number                                         | the **current** rate                                                                 |
+| Tenant Mobile Number      | text                                           | not E.164: spaces, no country code, one 9-digit number, one Australian number        |
+| Tenant Deposit Amount     | number                                         |                                                                                      |
+| Adhaar Card Number        | D5 → F5, on most tabs                          | sensitive government ID                                                              |
+| Breakdown                 | e.g. `15000+2000 Maintainance`                 | rent split into rent and maintenance, as free text                                   |
+| Tenant Email              | read by the script, but not present on any tab |                                                                                      |
 
 **Monthly rows:** header in row 10 (the script finds it by looking for `Month` in column A),
 data from row 11.
 
-| Column | Header | Content |
-|---|---|---|
-| A | Month | date, 1st of the billing month |
-| B | Rent Amount | usually `=$C$4` (the current rent), sometimes typed in |
-| C | Status | formula: `Paid` if Paid Date isn't empty, else `Overdue` after the due day, else `Unpaid` |
-| D | Units Used | typed in |
-| E | Electricity Charge | `=D × $C$6` (the current rate) |
-| F | Water Bill | typed in, often blank |
-| G | Total Due | rent + water + electricity **+ last month's Overdue Amount** (carry-forward) |
-| H | Total Paid | one number per month |
-| I | Paid Date | one date per month |
-| J | Notes | free text |
-| K | Email Trigger | checkbox that forces the receipt to be re-sent |
-| L | Overdue Amount | `=SUM(G − H)` |
+| Column | Header             | Content                                                                                   |
+| ------ | ------------------ | ----------------------------------------------------------------------------------------- |
+| A      | Month              | date, 1st of the billing month                                                            |
+| B      | Rent Amount        | usually `=$C$4` (the current rent), sometimes typed in                                    |
+| C      | Status             | formula: `Paid` if Paid Date isn't empty, else `Overdue` after the due day, else `Unpaid` |
+| D      | Units Used         | typed in                                                                                  |
+| E      | Electricity Charge | `=D × $C$6` (the current rate)                                                            |
+| F      | Water Bill         | typed in, often blank                                                                     |
+| G      | Total Due          | rent + water + electricity **+ last month's Overdue Amount** (carry-forward)              |
+| H      | Total Paid         | one number per month                                                                      |
+| I      | Paid Date          | one date per month                                                                        |
+| J      | Notes              | free text                                                                                 |
+| K      | Email Trigger      | checkbox that forces the receipt to be re-sent                                            |
+| L      | Overdue Amount     | `=SUM(G − H)`                                                                             |
 
 Header positions vary between tabs; the script reads by header label, not fixed column.
 
@@ -105,7 +105,7 @@ outside the spreadsheet can call it.
 - **Duplicate guard tied to row numbers:** inserting, deleting or sorting rows points
   the guard at the wrong month.
 - **Personal details hard-coded in `CONFIG`:** owner emails, phone number and address.
-  *Done in the repo copy:* they're read from Script Properties now; the live project still
+  _Done in the repo copy:_ they're read from Script Properties now; the live project still
   has them until the first `clasp push`.
 - **User text not escaped in the receipt HTML:** tenant name and notes go into the HTML
   unescaped. Low risk, since only the owners edit the sheet, but escape them.
@@ -114,16 +114,16 @@ outside the spreadsheet can call it.
 
 ## How the sheet maps to the app
 
-| Spreadsheet | App (Phase 7) | Gap |
-|---|---|---|
-| Tenant tab details | `Tenant` | need a stable `id` (tab names change); mobile → E.164; due day → number; flat number → string without `.0` |
-| Aadhaar, Breakdown | — | **don't import Aadhaar.** Breakdown could become rent + maintenance fields later |
-| Monthly row: Month, Rent, Units, Rate, Water | `RentEntry` (bill) | the sheet's rent and rate are *current* values, not historical; copy the values shown at import time |
-| Total Paid + Paid Date | `Payment` | one per month today. Import as one payment, like the v1 → v2 migration (`legacy-payment:<entryId>`) |
-| Total Due with carry-forward | derived | the app's bill holds **only this month's charges**. Strip the carry-forward, or the debt is counted twice |
-| Overdue Amount | derived | not stored in the app |
-| Status: Paid / Unpaid / Overdue | `PaymentStatus`: paid / partially_paid / unpaid | the app has no "Overdue" (past due day) and the sheet has no "Partially paid" |
-| Email Trigger, Email Log | — | belongs to the receipt feature (Phase 8) |
+| Spreadsheet                                  | App (Phase 7)                                   | Gap                                                                                                        |
+| -------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Tenant tab details                           | `Tenant`                                        | need a stable `id` (tab names change); mobile → E.164; due day → number; flat number → string without `.0` |
+| Aadhaar, Breakdown                           | —                                               | **don't import Aadhaar.** Breakdown could become rent + maintenance fields later                           |
+| Monthly row: Month, Rent, Units, Rate, Water | `RentEntry` (bill)                              | the sheet's rent and rate are _current_ values, not historical; copy the values shown at import time       |
+| Total Paid + Paid Date                       | `Payment`                                       | one per month today. Import as one payment, like the v1 → v2 migration (`legacy-payment:<entryId>`)        |
+| Total Due with carry-forward                 | derived                                         | the app's bill holds **only this month's charges**. Strip the carry-forward, or the debt is counted twice  |
+| Overdue Amount                               | derived                                         | not stored in the app                                                                                      |
+| Status: Paid / Unpaid / Overdue              | `PaymentStatus`: paid / partially_paid / unpaid | the app has no "Overdue" (past due day) and the sheet has no "Partially paid"                              |
+| Email Trigger, Email Log                     | —                                               | belongs to the receipt feature (Phase 8)                                                                   |
 
 Product decisions this raises (the app doesn't do these yet):
 

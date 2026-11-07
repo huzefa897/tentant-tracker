@@ -31,6 +31,9 @@ const dto = {
   electricityUnits: '75.000',
   electricityRate: '6.00',
   electricityAmount: '450.00',
+  electricityMode: 'manual',
+  openingReading: null,
+  closingReading: null,
   waterAmount: '300.00',
   totalDue: '15750.00',
   totalPaid: '0.00',
@@ -117,6 +120,9 @@ describe('toRentEntry', () => {
       electricityUnits: 75,
       electricityRate: 6,
       electricityAmount: 450,
+      electricityMode: 'manual',
+      openingReading: null,
+      closingReading: null,
       waterAmount: 300,
       totalDue: 15750,
       totalPaid: 0,
@@ -220,6 +226,19 @@ describe('toCreateRentEntryDto', () => {
       'rentAmount',
       '15000.00',
     )
+  })
+
+  it('closes on a recorded reading by its id, without typed units', () => {
+    expect(toCreateRentEntryDto({ ...input, closingReadingId: 'reading-1' })).toMatchObject({
+      closingReadingId: 'reading-1',
+    })
+    expect(toCreateRentEntryDto({ ...input, closingReadingId: 'reading-1' })).not.toHaveProperty(
+      'electricityUnits',
+    )
+    // With electricity left off nothing is closed.
+    expect(
+      toCreateRentEntryDto({ ...input, includeElectricity: false, closingReadingId: 'reading-1' }),
+    ).not.toHaveProperty('closingReadingId')
   })
 
   it('sends a payment received with the bill as initialPayment', () => {

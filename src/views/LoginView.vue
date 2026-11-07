@@ -1,28 +1,29 @@
 <script setup lang="ts">
-import { onMounted, useTemplateRef } from 'vue'
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
-import PhoneNumberForm from '@/components/auth/PhoneNumberForm.vue'
+import GoogleSignInButton from '@/components/auth/GoogleSignInButton.vue'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 const router = useRouter()
-// Firebase's invisible reCAPTCHA renders here (see authService.sendOtp).
-const recaptchaHost = useTemplateRef<HTMLElement>('recaptcha-host')
 
 onMounted(() => {
   authStore.clearError()
 })
 
-async function handleSubmit(phoneNumber: string) {
-  if (!recaptchaHost.value) return
-
+async function handleSignIn() {
   try {
-    await authStore.sendOtp(phoneNumber, recaptchaHost.value)
-    await router.push({ name: 'verify' })
+    await authStore.signInWithGoogle()
   } catch {
-    // authStore.error is shown by the form
+    // authStore.error is shown under the button
+    return
+  }
+
+  // Not signed in when the person closed Google's window.
+  if (authStore.isAuthenticated) {
+    await router.replace({ name: 'dashboard' })
   }
 }
 </script>
@@ -42,11 +43,14 @@ async function handleSubmit(phoneNumber: string) {
       {{ authStore.loginNotice }}
     </p>
 
-    <PhoneNumberForm :loading="authStore.loading" :error="authStore.error" @submit="handleSubmit" />
-    <div ref="recaptcha-host" />
+    <GoogleSignInButton
+      :loading="authStore.loading"
+      :error="authStore.error"
+      @sign-in="handleSignIn"
+    />
 
     <p class="mt-6 text-center text-sm text-muted-foreground">
-      We'll send a verification code to your phone.
+      Sign in with the Google account the property owner added.
     </p>
   </AuthLayout>
 </template>

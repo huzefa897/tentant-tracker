@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import type { Payment } from '@/types/payment'
 import { formatINR } from '@/utils/currency'
 import { formatDateValue, formatTimestamp } from '@/utils/date'
+import { EMPTY_VALUE } from '@/utils/emptyValue'
 
 // Shown in the given order (the backend's: newest paid date first). Reversed payments stay,
 // marked, and don't count towards the bill.
@@ -101,7 +102,7 @@ function reversedBy(payment: Payment): string {
               class="py-2.5 pr-4 break-words whitespace-pre-wrap text-muted-foreground max-sm:col-span-2 max-sm:py-1 max-sm:pr-0"
               role="cell"
             >
-              {{ payment.notes.trim() ? payment.notes : '—' }}
+              {{ payment.notes.trim() ? payment.notes : EMPTY_VALUE }}
               <p
                 v-if="payment.reversal"
                 class="mt-1.5 border-l-2 border-destructive/40 pl-2 text-xs"

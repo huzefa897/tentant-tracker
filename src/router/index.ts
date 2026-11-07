@@ -4,7 +4,6 @@ import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
 import DashboardView from '@/views/DashboardView.vue'
 import LoginView from '@/views/LoginView.vue'
-import VerifyOtpView from '@/views/VerifyOtpView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -26,12 +25,6 @@ const router = createRouter({
       path: '/login',
       name: 'login',
       component: LoginView,
-      meta: { guestOnly: true },
-    },
-    {
-      path: '/verify',
-      name: 'verify',
-      component: VerifyOtpView,
       meta: { guestOnly: true },
     },
     {
@@ -85,6 +78,13 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresProperty: true },
     },
     {
+      path: '/tenants/:tenantId/meter',
+      name: 'meter-readings',
+      component: () => import('@/views/MeterReadingsView.vue'),
+      props: true,
+      meta: { requiresAuth: true, requiresProperty: true },
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'login' },
     },
@@ -107,16 +107,11 @@ router.beforeEach(async (to) => {
     return { name: 'dashboard' }
   }
 
-  // /verify only makes sense mid-flow; the pending code doesn't survive a refresh.
-  if (to.name === 'verify' && !authStore.pendingPhoneNumber) {
-    return { name: 'login' }
-  }
-
   if (to.meta.requiresProperty) {
     const accessStore = useAccessStore()
     await accessStore.load()
 
-    // The backend refused this number and the session was ended.
+    // The backend refused this account and the session was ended.
     if (!authStore.isAuthenticated) {
       return { name: 'login' }
     }

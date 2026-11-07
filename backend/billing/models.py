@@ -25,6 +25,10 @@ def tenancy_covers_month(tenancy: Tenancy, billing_month: date) -> bool:
 
 MONEY = DecimalField(max_digits=12, decimal_places=2)
 
+# The constraints that keep each stretch of a tenancy's meter billed once (RentEntry.Meta).
+METER_CLOSING_CONSTRAINT = "unique_active_entry_closing_reading"
+METER_OPENING_CONSTRAINT = "unique_active_entry_opening_reading"
+METER_FROM_BASELINE_CONSTRAINT = "unique_active_meter_entry_from_baseline"
 
 # The one definition of a bill's amounts in SQL, shared by bill lists, their filters and the
 # dashboard; billing/calculations.py is the same rule in Python. Payments are summed in a
@@ -121,6 +125,15 @@ class RentEntry(models.Model):
         ACTIVE = "active", "Active"
         VOID = "void", "Void"
 
+    class ElectricityMode(models.TextChoices):
+        # Units typed in: every bill from before meter readings, the Sheet import, and
+        # tenancies whose meter isn't set up.
+        MANUAL = "manual", "Typed units"
+        # Units measured between two readings (opening_reading, closing_reading).
+        METER = "meter", "Meter readings"
+        # Electricity left off this bill: units 0, and the unbilled readings wait for a later one.
+        NOT_CHARGED = "not_charged", "Not charged"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # PROTECT: removing an occupant must never erase their billing history.
     tenancy = models.ForeignKey(
@@ -133,6 +146,30 @@ class RentEntry(models.Model):
     electricity_units = models.DecimalField(max_digits=10, decimal_places=3)
     electricity_rate = models.DecimalField(max_digits=8, decimal_places=2)
     water_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    # How electricity_units was arrived at. For a meter bill the units are the closing reading
+    # less the opening one (the tenancy's baseline when opening_reading is empty), worked out by
+    # billing/meter.py and stored like any bill's, so totals never depend on the readings.
+    electricity_mode = models.CharField(
+        max_length=11, choices=ElectricityMode.choices, default=ElectricityMode.MANUAL
+    )
+    opening_reading = models.ForeignKey(
+        "MeterReading",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="opened_entries",
+    )
+    closing_reading = models.ForeignKey(
+        "MeterReading",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="closed_entries",
+    )
+    # A meter bill's opening reading and its date as they were when it was created: the opening
+    # reading's, or the tenancy's baseline (which can change once nothing is measured from it).
+    meter_opening = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    meter_opening_date = models.DateField(null=True, blank=True)
     # A bounded column (varchar), so the database enforces the 500-character limit too.
     notes = models.CharField(max_length=500, blank=True)
     created_by = models.ForeignKey(
@@ -225,6 +262,53 @@ class RentEntry(models.Model):
             models.UniqueConstraint(
                 fields=["creation_key"],
                 name="unique_rent_entry_creation_key",
+            ),
+            # A meter bill closes on a reading; other bills name none. Not charged is 0 units.
+            models.CheckConstraint(
+                condition=Q(
+                    electricity_mode="meter",
+                    closing_reading__isnull=False,
+                    meter_opening__isnull=False,
+                    meter_opening_date__isnull=False,
+                )
+                | Q(
+                    electricity_mode="manual",
+                    opening_reading__isnull=True,
+                    closing_reading__isnull=True,
+                    meter_opening__isnull=True,
+                    meter_opening_date__isnull=True,
+                )
+                | Q(
+                    electricity_mode="not_charged",
+                    opening_reading__isnull=True,
+                    closing_reading__isnull=True,
+                    meter_opening__isnull=True,
+                    meter_opening_date__isnull=True,
+                    electricity_units=0,
+                ),
+                name="rent_entry_electricity_mode_readings",
+            ),
+            models.CheckConstraint(
+                condition=Q(opening_reading__isnull=True) | ~Q(opening_reading=F("closing_reading")),
+                name="rent_entry_readings_differ",
+            ),
+            # Each stretch of the meter is billed once: among active bills a reading closes at
+            # most one and opens at most one, and one bill starts from the baseline. With the
+            # tenancy's lock (billing/meter.py) the active meter bills form one chain.
+            models.UniqueConstraint(
+                fields=["closing_reading"],
+                condition=Q(status="active"),
+                name=METER_CLOSING_CONSTRAINT,
+            ),
+            models.UniqueConstraint(
+                fields=["opening_reading"],
+                condition=Q(status="active"),
+                name=METER_OPENING_CONSTRAINT,
+            ),
+            models.UniqueConstraint(
+                fields=["tenancy"],
+                condition=Q(status="active", electricity_mode="meter", opening_reading__isnull=True),
+                name=METER_FROM_BASELINE_CONSTRAINT,
             ),
         ]
 
@@ -513,6 +597,17 @@ class Receipt(models.Model):
     electricity_units = models.DecimalField(max_digits=10, decimal_places=3)
     electricity_rate = models.DecimalField(max_digits=8, decimal_places=2)
     electricity_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    # The bill's electricity mode and, for a meter bill, the readings it was measured between.
+    # Receipts issued before meter readings are "manual" with no readings.
+    electricity_mode = models.CharField(
+        max_length=11,
+        choices=RentEntry.ElectricityMode.choices,
+        default=RentEntry.ElectricityMode.MANUAL,
+    )
+    opening_reading = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    opening_read_on = models.DateField(null=True, blank=True)
+    closing_reading = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    closing_read_on = models.DateField(null=True, blank=True)
     water_amount = models.DecimalField(max_digits=10, decimal_places=2)
     total_due = models.DecimalField(max_digits=12, decimal_places=2)
     total_paid = models.DecimalField(
@@ -572,6 +667,26 @@ class Receipt(models.Model):
                 condition=Q(billing_month__day=1),
                 name="receipt_billing_month_first_day",
             ),
+            # Readings exactly on a meter bill's receipt. The opening's date is left out when it's
+            # the baseline (the day tracking started isn't printed).
+            models.CheckConstraint(
+                condition=Q(
+                    electricity_mode="meter",
+                    opening_reading__isnull=False,
+                    closing_reading__isnull=False,
+                    closing_read_on__isnull=False,
+                )
+                | (
+                    ~Q(electricity_mode="meter")
+                    & Q(
+                        opening_reading__isnull=True,
+                        opening_read_on__isnull=True,
+                        closing_reading__isnull=True,
+                        closing_read_on__isnull=True,
+                    )
+                ),
+                name="receipt_meter_readings_with_meter_mode",
+            ),
         ]
 
     def __str__(self):
@@ -588,6 +703,108 @@ def receipt_reference(tenant_name: str, flat_number: str, billing_month: date) -
         return "_".join(cleaned.split())
 
     return f"{part(tenant_name)}_{part(flat_number)}_Rent_{billing_month:%B %Y}"
+
+
+class MeterReadingQuerySet(models.QuerySet):
+    def active(self):
+        """Readings that count: a void one is kept as history and measures nothing."""
+        return self.filter(status=MeterReading.Status.ACTIVE)
+
+
+class MeterReading(models.Model):
+    """One reading of a tenancy's electricity meter, on the day it was taken.
+
+    Measured from the tenancy's baseline (Tenancy.meter_baseline_reading, set in admin): a
+    reading is never before the baseline's date or below it, and readings never go down over
+    time. Missing months need nothing: the next reading simply covers them. Recording a reading
+    never creates, changes or settles a bill: a bill that charges electricity names the
+    readings it's measured between (billing/meter.py).
+
+    Never edited or deleted. One taken wrongly is voided (status, voided_*), or voided and
+    replaced (replaces_reading), through billing/meter.py, while no active bill is measured
+    from it. Every reading belongs to one tenancy: another tenancy's readings never count,
+    even for the same flat.
+    """
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        VOID = "void", "Void"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenancy = models.ForeignKey(
+        Tenancy, on_delete=models.PROTECT, related_name="meter_readings"
+    )
+    reading = models.DecimalField(max_digits=10, decimal_places=3)
+    read_on = models.DateField(help_text="The day the meter was read.")
+    notes = models.CharField(max_length=500, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    # One intended reading (the Idempotency-Key header): a retry returns this reading. The
+    # fingerprint is the original request, so a retry with other details is refused.
+    idempotency_key = models.UUIDField(editable=False)
+    fingerprint = models.CharField(max_length=64, editable=False)
+
+    status = models.CharField(max_length=6, choices=Status.choices, default=Status.ACTIVE)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    void_reason = models.CharField(max_length=500, blank=True)
+    # The void reading this one corrects. One-to-one: a reading is replaced at most once.
+    replaces_reading = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="replaced_by",
+    )
+
+    objects = MeterReadingQuerySet.as_manager()
+
+    class Meta:
+        ordering = ("-read_on", "-created_at")
+        constraints = [
+            # One active reading per tenancy and day, so readings have one order.
+            models.UniqueConstraint(
+                fields=["tenancy", "read_on"],
+                condition=Q(status="active"),
+                name="unique_active_meter_reading_per_day",
+            ),
+            models.UniqueConstraint(
+                fields=["idempotency_key"], name="unique_meter_reading_idempotency_key"
+            ),
+            models.CheckConstraint(
+                condition=Q(reading__gte=0), name="meter_reading_not_negative"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        status="active",
+                        voided_at__isnull=True,
+                        voided_by__isnull=True,
+                        void_reason="",
+                    )
+                    | (
+                        Q(status="void", voided_at__isnull=False, voided_by__isnull=False)
+                        & ~Q(void_reason="")
+                    )
+                ),
+                name="meter_reading_void_details_match_status",
+            ),
+            models.CheckConstraint(
+                condition=~Q(replaces_reading=F("id")),
+                name="meter_reading_not_replacing_itself",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.reading} on {self.read_on:%d %b %Y} — {self.tenancy}"
 
 
 class LegacyRecord(models.Model):

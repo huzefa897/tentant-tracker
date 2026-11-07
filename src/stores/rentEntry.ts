@@ -1,7 +1,7 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 
-import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
+import { ApiError, isUncertainFailure, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { outstandingFromConflict, paymentService } from '@/services/payment.service'
 import { receiptConfigurationProblem, receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
@@ -67,14 +67,6 @@ export const VOID_CONFLICT_MESSAGE =
   'This bill was already voided for another reason. It has been refreshed.'
 export const CORRECTION_KEY_CONFLICT_MESSAGE =
   'Your earlier attempt was already saved with different details. The bill has been refreshed: check it before correcting it again.'
-
-// No response, a server error or a response we couldn't read: the request may have been
-// carried out anyway. Retrying with the same idempotency key is safe; a new key isn't.
-const UNCERTAIN_KINDS = new Set(['network', 'unavailable', 'invalid-response', 'unknown'])
-
-export function isUncertainFailure(error: unknown): boolean {
-  return UNCERTAIN_KINDS.has(error instanceof ApiError ? error.kind : 'unknown')
-}
 
 export function entryLoadErrorMessage(error: unknown): string {
   const kind = error instanceof ApiError ? error.kind : 'unknown'

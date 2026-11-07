@@ -14,54 +14,36 @@ from properties.models import PropertyMembership
 
 from .firebase import FirebaseUnavailableError
 from .models import User
-from .services import PhoneNumberInUseError, check_firebase_identity, link_firebase_identity
+from .services import unlink_if_email_changed
 
 # Django's groups grant admin-portal permissions across every property, so they can't
 # express property roles (those live on PropertyMembership). Hidden until back-office
 # staff need them.
 admin.site.unregister(Group)
 
-IN_USE_MESSAGE = "This number's app sign-in already belongs to another person."
-UNAVAILABLE_MESSAGE = "Couldn't reach Firebase to set up app sign-in. Nothing was saved; try again."
+UNAVAILABLE_MESSAGE = "Couldn't reach Firebase to sign this person out. Nothing was saved; try again."
 
 
 class FirebaseSyncError(Exception):
-    """Firebase refused or failed while saving; raised to roll the admin's transaction back."""
+    """Firebase failed while saving; raised to roll the admin's transaction back."""
 
 
-class FirebaseLinkMixin:
-    """Checks (read-only) that the person's number can be used for app sign-in, and
-    reports problems on the number field. Firebase is only changed once the whole
-    page has validated: see PersonAdmin.save_related."""
-
-    def _post_clean(self):
-        super()._post_clean()
-        if self.errors:
-            return
-        try:
-            check_firebase_identity(self.instance, self.initial.get("phone_number") or "")
-        except PhoneNumberInUseError:
-            self.add_error("phone_number", IN_USE_MESSAGE)
-        except FirebaseUnavailableError:
-            self.add_error("phone_number", UNAVAILABLE_MESSAGE)
-
-
-class PersonChangeForm(FirebaseLinkMixin, UserChangeForm):
+class PersonChangeForm(UserChangeForm):
     class Meta(UserChangeForm.Meta):
         model = User
 
 
-class PersonCreationForm(FirebaseLinkMixin, forms.ModelForm):
-    """Adds an app user: the mobile number is what lets them sign in. They get an
+class PersonCreationForm(forms.ModelForm):
+    """Adds an app user: their Google email is what lets them sign in. They get an
     internal username and no password (admin access is granted separately)."""
 
     class Meta:
         model = User
-        fields = ("name", "phone_number", "email")
+        fields = ("name", "email", "phone_number")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["phone_number"].required = True
+        self.fields["email"].required = True
         self.instance.username = f"app-{uuid.uuid4().hex}"
 
     def save(self, commit=True):
@@ -85,13 +67,19 @@ class AppSignInFilter(admin.SimpleListFilter):
     parameter_name = "app_sign_in"
 
     def lookups(self, request, model_admin):
-        return (("yes", "Can sign in"), ("no", "Can't sign in"))
+        return (
+            ("yes", "Can sign in"),
+            ("waiting", "Not signed in yet"),
+            ("no", "Can't sign in"),
+        )
 
     def queryset(self, request, queryset):
         if self.value() == "yes":
-            return queryset.filter(firebase_uid__isnull=False).exclude(phone_number="")
+            return queryset.exclude(email="")
+        if self.value() == "waiting":
+            return queryset.exclude(email="").filter(firebase_uid__isnull=True)
         if self.value() == "no":
-            return queryset.exclude(firebase_uid__isnull=False, phone_number__gt="")
+            return queryset.filter(email="")
         return queryset
 
 
@@ -122,6 +110,7 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
     list_display = (
         "display_name",
         "can_sign_in",
+        "linked_to_google",
         "property_access",
         "is_staff",
         "is_active",
@@ -130,11 +119,11 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
     list_display_links = ("display_name",)
     list_filter = (AppSignInFilter, PropertyAccessFilter, "is_staff", "is_active")
     search_fields = ("name", "phone_number", "email", "username", "firebase_uid")
-    ordering = ("name", "phone_number", "username")
+    ordering = ("name", "email", "username")
     readonly_fields = ("firebase_uid", "last_login", "date_joined")
 
     fieldsets = (
-        ("Profile", {"fields": ("name", "phone_number", "email")}),
+        ("Profile", {"fields": ("name", "email", "phone_number")}),
         (
             "Status",
             {
@@ -147,7 +136,7 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
             {
                 "classes": ("collapse",),
                 "fields": ("is_staff", "is_superuser", "password"),
-                "description": "Signing in here uses a username and password, never the phone.",
+                "description": "Signing in here uses a username and password, never Google.",
             },
         ),
         (
@@ -162,9 +151,10 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
         (
             None,
             {
-                "fields": ("name", "phone_number", "email"),
+                "fields": ("name", "email", "phone_number"),
                 "description": (
-                    "Only numbers added here can sign in to the app. "
+                    "Only Google emails added here can sign in to the app; their first "
+                    "sign-in links the Google account. "
                     "After saving, give them access to a property below."
                 ),
             },
@@ -182,16 +172,13 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
     def save_related(self, request, form, formsets, change):
         """Changes Firebase last, after the person and their property access have
         validated and been written, inside the admin's transaction. A Firebase failure
-        rolls everything back. If the commit itself failed after Firebase changed, the
-        next save (or the person's next sign-in, which syncs the number) repairs it."""
+        rolls everything back."""
         super().save_related(request, form, formsets, change)
 
         user = form.instance
         linked_uid = user.firebase_uid
         try:
-            link_firebase_identity(user, form.initial.get("phone_number") or "")
-        except PhoneNumberInUseError:
-            raise FirebaseSyncError(f"{IN_USE_MESSAGE} Nothing was saved.") from None
+            unlink_if_email_changed(user, form.initial.get("email") or "")
         except FirebaseUnavailableError:
             raise FirebaseSyncError(UNAVAILABLE_MESSAGE) from None
 
@@ -217,7 +204,11 @@ class PersonAdmin(GrantedByMixin, UserAdmin):
 
     @admin.display(description="App sign-in", boolean=True)
     def can_sign_in(self, obj):
-        return bool(obj.firebase_uid and obj.phone_number)
+        return bool(obj.email)
+
+    @admin.display(description="Signed in with Google", boolean=True)
+    def linked_to_google(self, obj):
+        return bool(obj.email and obj.firebase_uid)
 
     @admin.display(description="Properties")
     def property_access(self, obj):

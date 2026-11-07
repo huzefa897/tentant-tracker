@@ -12,12 +12,12 @@ class AuthenticationUnavailable(exceptions.APIException):
 
 
 class NotRegistered(exceptions.APIException):
-    """A real Firebase sign-in for a number nobody has added. The code lets the app
-    tell this apart from other refusals."""
+    """A real Firebase sign-in for a Google account nobody has added. The code lets
+    the app tell this apart from other refusals."""
 
     status_code = status.HTTP_403_FORBIDDEN
     default_detail = {
-        "detail": "This phone number isn't registered. Contact the property owner.",
+        "detail": "This Google account isn't registered. Contact the property owner.",
         "code": "not_registered",
     }
     default_code = "not_registered"

@@ -22,6 +22,7 @@ const dto = {
   startDate: '2026-01-01',
   endDate: null,
   status: 'current',
+  meterBaseline: null,
 }
 
 function page(results: unknown[], next: string | null = null) {
@@ -49,7 +50,15 @@ describe('toTenant', () => {
       depositAmount: 90000,
       startDate: '2026-01-01',
       endDate: null,
+      meterBaseline: null,
     })
+  })
+
+  it('maps a meter baseline set in admin', () => {
+    const tenant = toTenant(
+      parseTenancy({ ...dto, meterBaseline: { reading: '2804.000', readOn: '2026-01-01' } }),
+    )
+    expect(tenant.meterBaseline).toEqual({ reading: 2804, readOn: '2026-01-01' })
   })
 })
 

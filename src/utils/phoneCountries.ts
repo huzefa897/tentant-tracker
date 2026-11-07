@@ -1,5 +1,6 @@
-// Countries supported for phone sign-in. Validation, input formatting and display all read
-// from this table, so adding a country is one entry here (plus its flag in CountryFlag).
+// Countries whose mobile numbers the app accepts (people's and properties' contact numbers,
+// tenants' mobiles). Validation and display read from this table, so adding a country is one
+// entry here (and in the backend's accounts/phone.py, which mirrors it).
 
 export type PhoneCountryCode = 'IN' | 'AU' | 'US'
 

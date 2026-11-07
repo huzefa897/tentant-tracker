@@ -39,6 +39,29 @@ describe('LatestEntryCard', () => {
     expect(wrapper.text()).toContain('Unpaid')
   })
 
+  it('shows a meter bill’s readings, and "Not charged" for electricity left off', () => {
+    const meter = mount(LatestEntryCard, {
+      props: {
+        entry: makeEntry({
+          electricityMode: 'meter',
+          electricityUnits: 422,
+          electricityRate: 8,
+          openingReading: { id: null, reading: 2563, readOn: '2026-10-31' },
+          closingReading: { id: 'r2', reading: 2985, readOn: '2026-12-31' },
+        }),
+      },
+    })
+    expect(rows(meter, 'latest-entry-charges')[1]).toEqual([
+      'Electricity (2,563 → 2,985: 422 units × ₹8)',
+      '₹3,376',
+    ])
+
+    const off = mount(LatestEntryCard, {
+      props: { entry: makeEntry({ electricityMode: 'not_charged', electricityUnits: 0 }) },
+    })
+    expect(rows(off, 'latest-entry-charges')[1]).toEqual(['Electricity', 'Not charged'])
+  })
+
   it('emits view with the entry id', async () => {
     const wrapper = mount(LatestEntryCard, { props: { entry: makeEntry() } })
 

@@ -11,12 +11,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { formatPhoneNumber } from '@/utils/phone'
 
 const props = defineProps<{
-  // Empty when nobody has set it in admin: the phone number stands in.
+  // Empty when nobody has set it in admin: the email stands in.
   name: string
-  phoneNumber: string
+  // The Google account they're signed in with.
+  email: string
   canSwitchProperty?: boolean
 }>()
 
@@ -25,8 +25,7 @@ const emit = defineEmits<{
   logout: []
 }>()
 
-const phone = computed(() => (props.phoneNumber ? formatPhoneNumber(props.phoneNumber) : ''))
-const displayName = computed(() => props.name.trim() || phone.value || 'Account')
+const displayName = computed(() => props.name.trim() || props.email || 'Account')
 
 // "Huzefa Saleem" → "HS"; one name gives one letter, no name shows an icon instead.
 const initials = computed(() =>
@@ -67,11 +66,8 @@ const initials = computed(() =>
     <DropdownMenuContent align="end" class="w-60 p-1.5">
       <DropdownMenuLabel class="px-2 py-1.5">
         <p class="truncate text-sm font-semibold text-foreground">{{ displayName }}</p>
-        <p
-          v-if="name.trim() && phone"
-          class="truncate text-xs font-normal text-muted-foreground tabular-nums"
-        >
-          {{ phone }}
+        <p v-if="name.trim() && email" class="truncate text-xs font-normal text-muted-foreground">
+          {{ email }}
         </p>
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
