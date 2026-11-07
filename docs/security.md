@@ -79,7 +79,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 9. Validate form inputs
 
-- Validated on both sides. The app's validation (`utils/*Validation.ts`) is for UX; the backend is the authority: serializers with explicit fields, model `clean()`, and database constraints behind both.
+- Validated on both sides. The app's validation (`utils/*Validation.ts`) is for UX; the backend is the authority: serializers with explicit fields, model `clean()`, and database constraints behind both (and, for records that are never edited, triggers: meter readings, [meter-readings.md](meter-readings.md)). Raw SQL stays in migrations.
 - Serializers refuse unknown, server-assigned and derived fields rather than ignoring them. Money is `Decimal` on the server, with limits matching the columns.
 
 ## 10. Block XSS

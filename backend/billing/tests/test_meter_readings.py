@@ -237,6 +237,87 @@ class CorrectionTests(MeterTestCase):
             void_meter_reading(**kwargs, reason="Other")
 
 
+class ReadingGuardTests(MeterTestCase):
+    """The database refuses what billing/meter.py never does, so a queryset update, a shell
+    session or a script can't rewrite a reading either."""
+
+    def assert_refused(self, action):
+        # A refused statement aborts its transaction, so each runs in a savepoint.
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            action()
+
+    def test_what_was_read_is_never_edited(self):
+        reading = self.read("2563", date(2026, 10, 31))
+        other = make_tenancy(
+            self.property, flat_number="303", meter_baseline_reading=Decimal("0")
+        )
+        for change in (
+            {"reading": Decimal("2000")},
+            {"read_on": date(2026, 10, 30)},
+            {"notes": "Changed"},
+            {"tenancy": other},
+            {"created_by": make_user("other")},
+        ):
+            self.assert_refused(lambda change=change: MeterReading.objects.filter(pk=reading.pk).update(**change))
+        reading.refresh_from_db()
+        self.assertEqual(reading.reading, Decimal("2563"))
+        self.assertEqual(reading.read_on, date(2026, 10, 31))
+
+    def test_a_reading_is_never_deleted(self):
+        reading = self.read("2563", date(2026, 10, 31))
+        self.assert_refused(lambda: MeterReading.objects.filter(pk=reading.pk).delete())
+        self.assert_refused(reading.delete)
+        self.assertTrue(MeterReading.objects.filter(pk=reading.pk).exists())
+
+    def test_voiding_still_works_and_a_void_reading_stays_void(self):
+        reading = self.read("2563", date(2026, 10, 31))
+        void_meter_reading(
+            tenancy_id=self.tenancy.pk, reading_id=reading.pk, actor=self.owner, reason="Twice"
+        )
+        self.assert_refused(
+            lambda: MeterReading.objects.filter(pk=reading.pk).update(
+                status=MeterReading.Status.ACTIVE, voided_at=None, voided_by=None, void_reason=""
+            )
+        )
+        self.assert_refused(
+            lambda: MeterReading.objects.filter(pk=reading.pk).update(void_reason="Another reason")
+        )
+        reading.refresh_from_db()
+        self.assertEqual(reading.status, MeterReading.Status.VOID)
+        self.assertEqual(reading.void_reason, "Twice")
+
+    def replacement_of(self, original, **overrides):
+        values = {
+            "tenancy": self.tenancy,
+            "reading": Decimal("2570"),
+            "read_on": date(2026, 11, 1),
+            "created_by": self.owner,
+            "idempotency_key": uuid.uuid4(),
+            "fingerprint": "x",
+            "replaces_reading": original,
+        }
+        return MeterReading.objects.create(**{**values, **overrides})
+
+    def test_a_replacement_replaces_a_void_reading_of_the_same_tenancy(self):
+        active = self.read("2563", date(2026, 10, 31))
+        self.assert_refused(lambda: self.replacement_of(active))
+
+        void = self.read("2600", date(2026, 11, 15))
+        void_meter_reading(
+            tenancy_id=self.tenancy.pk, reading_id=void.pk, actor=self.owner, reason="Wrong"
+        )
+        void.refresh_from_db()
+        other = make_tenancy(
+            self.property,
+            flat_number="303",
+            meter_baseline_reading=Decimal("0"),
+            meter_baseline_recorded_at=recorded_on(date(2026, 9, 30)),
+        )
+        self.assert_refused(lambda: self.replacement_of(void, tenancy=other))
+
+        self.assertEqual(self.replacement_of(void).replaces_reading, void)
+
+
 class MeterApiTests(MeterTestCase):
     def setUp(self):
         super().setUp()
