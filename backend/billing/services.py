@@ -27,6 +27,7 @@ from .models import (
     tenancy_covers_month,
 )
 from .meter import (
+    READING_KEY_CONSTRAINT,
     ElectricityCharge,
     ReadingAlreadyBilledError,
     check_meter_bill_can_be_voided,
@@ -468,6 +469,10 @@ def create_rent_entry(
         if constraint in METER_CHAIN_CONSTRAINTS:
             # The last guard behind the tenancy's lock: these readings are already billed.
             raise ReadingAlreadyBilledError(None) from error
+        if constraint == READING_KEY_CONSTRAINT:
+            # The bill's key also keys the reading it records, and another reading or
+            # correction already used it. (A retry of this bill was replayed above.)
+            raise IdempotencyConflictError() from error
         if constraint == CREATION_KEY_CONSTRAINT:
             # The same key, simultaneously, for another tenancy (which holds another lock).
             return _replay_entry(
