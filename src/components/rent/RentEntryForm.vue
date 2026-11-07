@@ -479,6 +479,7 @@ const lockedClass =
           <div v-if="useRecorded" class="space-y-2">
             <p id="recordedReading-label" class="text-sm font-medium">Closing reading</p>
             <div
+              v-if="unbilledReadings.length <= 1"
               :class="lockedClass"
               aria-labelledby="recordedReading-label"
               data-testid="recorded-reading"
@@ -490,10 +491,10 @@ const lockedClass =
               <Lock class="size-4" aria-hidden="true" />
             </div>
             <select
-              v-if="unbilledReadings.length > 1"
+              v-else
               id="recordedReadingId"
               :value="recordedReading!.id"
-              aria-label="Recorded reading to close on"
+              aria-labelledby="recordedReading-label"
               :class="[inputClass, 'w-full rounded-lg border px-3 text-base']"
               data-testid="recorded-reading-picker"
               @change="pickedReadingId = ($event.target as HTMLSelectElement).value"

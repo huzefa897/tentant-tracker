@@ -516,6 +516,8 @@ describe('RentEntryForm electricity', () => {
 
       const picker = wrapper!.get<HTMLSelectElement>('[data-testid="recorded-reading-picker"]')
       expect(picker.findAll('option')).toHaveLength(3)
+      // The picker takes the place of the locked display, so the reading isn't shown twice.
+      expect(wrapper!.find('[data-testid="recorded-reading"]').exists()).toBe(false)
       // Dated in the billing month (the newest of them) rather than the newest overall.
       expect(picker.element.value).toBe('reading-oct')
       expect(text('meter-units')).toBe('87')
