@@ -19,7 +19,7 @@ export interface MeterState {
   error: string | null
 }
 
-// A bill measured from a reading, which must be voided before the reading can change.
+// A bill that must be voided before a reading can change.
 export interface BlockingEntry {
   id: string
   billingMonth: string // YYYY-MM
@@ -27,7 +27,7 @@ export interface BlockingEntry {
 
 // A reading that couldn't be recorded, voided or corrected: nothing changed, unless uncertain
 // (no usable response), when it may have; trying again is safe (the same key or reason).
-// blockingEntries: the bills measured from the reading (reading_in_use).
+// blockingEntries: every bill to void first, newest first (reading_in_use).
 export class MeterReadingError extends Error {
   constructor(
     message: string,
@@ -74,7 +74,7 @@ function writeError(err: unknown): MeterReadingError {
       )
     case 'reading_in_use':
       return new MeterReadingError(
-        'Bills are measured from this reading. Void them first, newest first, then try again.',
+        'Bills are measured from this reading. Void the bills listed, in that order, then try again.',
         false,
         blockingEntriesOf(err),
       )

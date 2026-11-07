@@ -277,7 +277,7 @@ const pageLoading = computed(
             class="rounded-lg bg-warning/10 p-3 text-sm"
             data-testid="blocking-bills"
           >
-            <p>These bills are measured from it. Void them first, newest first:</p>
+            <p>Void these bills first, in this order (newest first):</p>
             <ul class="mt-2 space-y-1">
               <li v-for="bill in blocking" :key="bill.id">
                 <button

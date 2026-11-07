@@ -261,7 +261,7 @@ export const meterReadingService = {
   },
 
   // Voids a reading recorded by mistake. A retry with the same reason is safe. Errors:
-  // 'conflict' with code 'reading_in_use' (details.entries: the bills measured from it) or
+  // 'conflict' with code 'reading_in_use' (details.entries: every bill to void first, newest first) or
   // 'reading_void_conflict'.
   voidReading(
     propertyId: string,
