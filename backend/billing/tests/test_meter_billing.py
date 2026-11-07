@@ -214,6 +214,69 @@ class BillingTests(MeterBillTestCase):
                 meter_opening_date=date(2026, 9, 30),
             )
 
+    def test_the_database_keeps_a_bill_on_its_own_tenancys_active_readings(self):
+        other = make_tenancy(
+            self.property,
+            flat_number="303",
+            electricity_rate=Decimal("8.00"),
+            meter_baseline_reading=Decimal("100"),
+            meter_baseline_recorded_at=recorded_on(date(2026, 9, 30)),
+        )
+        theirs = self.read("150", date(2026, 10, 31), tenancy=other)
+        october = self.bill(OCTOBER, ("2563", date(2026, 10, 31)))
+
+        def bill_on(reading, **extra):
+            return RentEntry.objects.create(
+                tenancy=self.tenancy,
+                billing_month=NOVEMBER,
+                rent_amount=Decimal("15000"),
+                electricity_units=Decimal("0"),
+                electricity_rate=Decimal("8"),
+                water_amount=Decimal("0"),
+                created_by=self.owner,
+                electricity_mode="meter",
+                closing_reading=reading,
+                meter_opening=Decimal("2400"),
+                meter_opening_date=date(2026, 9, 30),
+                **extra,
+            )
+
+        # Another tenancy's reading, as the closing or the opening one.
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            bill_on(theirs)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            bill_on(self.read("2700", date(2026, 11, 30)), opening_reading=theirs)
+        # A void reading under an active bill, but not under a void one.
+        void = self.read("2800", date(2026, 12, 15))
+        void_meter_reading(
+            tenancy_id=self.tenancy.pk, reading_id=void.pk, actor=self.owner, reason="Wrong"
+        )
+        void.refresh_from_db()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            bill_on(void)
+        voided = bill_on(
+            void,
+            status=RentEntry.Status.VOID,
+            voided_at=void.voided_at,
+            voided_by=self.owner,
+            void_reason="Wrong",
+        )
+        self.assertEqual(voided.closing_reading, void)
+        # The bill already saved still points at its own tenancy's reading.
+        self.assertEqual(october.closing_reading.tenancy_id, self.tenancy.pk)
+
+    def test_the_database_refuses_to_void_a_reading_under_an_active_bill(self):
+        october = self.bill(OCTOBER, ("2563", date(2026, 10, 31)))
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            MeterReading.objects.filter(pk=october.closing_reading_id).update(
+                status=MeterReading.Status.VOID,
+                voided_at=october.created_at,
+                voided_by=self.owner,
+                void_reason="Sneaky",
+            )
+        october.closing_reading.refresh_from_db()
+        self.assertEqual(october.closing_reading.status, MeterReading.Status.ACTIVE)
+
     def test_the_first_bill_can_close_on_the_day_tracking_started(self):
         entry = self.bill(OCTOBER, ("2410", date(2026, 9, 30)))
         self.assertEqual(entry.electricity_units, Decimal("10"))

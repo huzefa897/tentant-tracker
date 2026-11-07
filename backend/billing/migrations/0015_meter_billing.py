@@ -16,7 +16,7 @@ def refuse_meter_bills(apps, schema_editor):
     receipts = Receipt.objects.exclude(electricity_mode="manual").count()
     if bills or receipts:
         raise IrreversibleError(
-            f"Can't undo billing.0014: {bills} meter or not-charged bill(s) and {receipts} "
+            f"Can't undo billing.0015: {bills} meter or not-charged bill(s) and {receipts} "
             "such receipt(s) would be lost."
         )
 
@@ -24,7 +24,7 @@ def refuse_meter_bills(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('billing', '0013_meter_readings'),
+        ('billing', '0014_meter_reading_guards'),
         ('properties', '0007_tenancy_meter_baseline'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
