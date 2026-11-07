@@ -15,7 +15,8 @@ BEGIN
     END IF;
 
     IF TG_OP = 'INSERT' THEN
-        -- A replacement corrects a void reading of the same tenancy.
+        -- A replacement corrects a void reading of the same tenancy. A replaced id that
+        -- doesn't exist is refused here too (the foreign key would refuse it as well).
         IF NEW.replaces_reading_id IS NOT NULL THEN
             SELECT * INTO original FROM billing_meterreading WHERE id = NEW.replaces_reading_id;
             IF original.status IS DISTINCT FROM 'void'

@@ -30,7 +30,6 @@ METER_CLOSING_CONSTRAINT = "unique_active_entry_closing_reading"
 METER_OPENING_CONSTRAINT = "unique_active_entry_opening_reading"
 METER_FROM_BASELINE_CONSTRAINT = "unique_active_meter_entry_from_baseline"
 
-
 # The one definition of a bill's amounts in SQL, shared by bill lists, their filters and the
 # dashboard; billing/calculations.py is the same rule in Python. Payments are summed in a
 # subquery per bill, never joined, so adding up many bills never counts a bill once per payment.

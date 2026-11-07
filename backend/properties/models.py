@@ -205,6 +205,9 @@ class TenancyHasBillsError(ValidationError):
     """A tenancy with bills was saved with another property (two admins at once)."""
 
 
+# The columns of a tenancy's meter baseline: a save that writes either stamps its time.
+BASELINE_FIELDS = frozenset({"meter_baseline_reading", "meter_baseline_recorded_at"})
+
 TENANCY_BASELINE_LOCKED_MESSAGE = (
     "This tenancy has meter readings, so meter tracking stays on and its initial reading can't "
     "change: they're measured from it. Void the readings in the app first."
@@ -407,12 +410,19 @@ class Tenancy(models.Model):
                 raise TenancyHasReadingsError(
                     {"meter_baseline_reading": TENANCY_BASELINE_LOCKED_MESSAGE}
                 )
-            self._stamp_meter_baseline()
+            fields = kwargs.get("update_fields")
+            if fields is None or BASELINE_FIELDS & set(fields):
+                self._stamp_meter_baseline()
+                if fields is not None:
+                    # The time follows the reading, so it is saved with it.
+                    kwargs["update_fields"] = {*fields, "meter_baseline_recorded_at"}
             super().save(*args, **kwargs)
 
     def _stamp_meter_baseline(self):
         """The baseline's recorded time is the server's: now, whenever the reading is entered or
-        changed, and cleared with it. A time set by the caller (an import, a test) is kept."""
+        changed, and cleared with it. A time set by the caller (an import, a test) is kept.
+        Only runs when the save writes the baseline (save() decides), so a save of something
+        else, say with update_fields, makes no extra query."""
         if self.meter_baseline_reading is None:
             self.meter_baseline_recorded_at = None
             return
@@ -424,8 +434,10 @@ class Tenancy(models.Model):
                 .first()
             )
         stored_reading, stored_at = stored or (None, None)
-        if self.meter_baseline_recorded_at != stored_at and self.meter_baseline_recorded_at:
+        # A time the caller set, different from the stored one, wins.
+        if self.meter_baseline_recorded_at and self.meter_baseline_recorded_at != stored_at:
             return
+        # Otherwise the reading being entered or changed is recorded now.
         if self.meter_baseline_reading != stored_reading or stored_at is None:
             self.meter_baseline_recorded_at = timezone.now()
 

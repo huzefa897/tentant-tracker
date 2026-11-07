@@ -101,6 +101,43 @@ class BaselineTests(MeterTestCase):
         tenancy.save()
         self.assertIsNone(tenancy.meter_baseline_recorded_at)
 
+    def test_a_time_the_caller_sets_is_kept(self):
+        tenancy = make_tenancy(self.property, flat_number="301")
+        set_by_caller = recorded_on(date(2026, 1, 1))
+        tenancy.meter_baseline_reading = Decimal("671")
+        tenancy.meter_baseline_recorded_at = set_by_caller
+        now = recorded_on(date(2026, 11, 6))
+        with mock.patch("properties.models.timezone.now", return_value=now):
+            tenancy.save()
+        tenancy.refresh_from_db()
+        self.assertEqual(tenancy.meter_baseline_recorded_at, set_by_caller)
+
+    def test_saving_other_fields_leaves_the_baseline_time_alone(self):
+        tenancy = make_tenancy(self.property, flat_number="301")
+        first, later = recorded_on(date(2026, 11, 6)), recorded_on(date(2026, 11, 7))
+        tenancy.meter_baseline_reading = Decimal("671")
+        with mock.patch("properties.models.timezone.now", return_value=first):
+            tenancy.save()
+
+        # A save that doesn't write the baseline doesn't stamp it, even with the reading
+        # changed in memory.
+        tenancy.name = "Mohammed Yusuf"
+        tenancy.meter_baseline_reading = Decimal("675")
+        with mock.patch("properties.models.timezone.now", return_value=later):
+            tenancy.save(update_fields=["name"])
+        tenancy.refresh_from_db()
+        self.assertEqual(tenancy.name, "Mohammed Yusuf")
+        self.assertEqual(tenancy.meter_baseline_reading, Decimal("671"))
+        self.assertEqual(tenancy.meter_baseline_recorded_at, first)
+
+        # One that does, saves the time with the reading.
+        tenancy.meter_baseline_reading = Decimal("675")
+        with mock.patch("properties.models.timezone.now", return_value=later):
+            tenancy.save(update_fields=["meter_baseline_reading"])
+        tenancy.refresh_from_db()
+        self.assertEqual(tenancy.meter_baseline_reading, Decimal("675"))
+        self.assertEqual(tenancy.meter_baseline_recorded_at, later)
+
     def test_the_database_needs_both_or_neither(self):
         tenancy = make_tenancy(self.property, flat_number="301")
         with self.assertRaises(IntegrityError), transaction.atomic():
@@ -123,6 +160,28 @@ class BaselineTests(MeterTestCase):
         )
         self.tenancy.meter_baseline_reading = Decimal("2000")
         self.tenancy.save()
+    def test_a_new_baseline_after_every_reading_is_void_starts_the_meter_again(self):
+        old = self.read("2563", date(2026, 10, 31))
+        void_meter_reading(
+            tenancy_id=self.tenancy.pk, reading_id=old.pk, actor=self.owner, reason="Typo"
+        )
+        self.tenancy.meter_baseline_reading = Decimal("2000")
+        with mock.patch(
+            "properties.models.timezone.now", return_value=recorded_on(date(2027, 1, 10))
+        ):
+            self.tenancy.save()
+
+        # Dated from the new baseline's day, and measured from it.
+        with self.assertRaises(InvalidReadingError):
+            self.read("2100", date(2026, 12, 31))
+        with self.assertRaises(InvalidReadingError):
+            self.read("1999", date(2027, 1, 10))
+        new = self.read("2100", date(2027, 1, 10))
+        self.assertEqual(new.reading, Decimal("2100"))
+        # The void reading stays as it was: history, measuring nothing.
+        old.refresh_from_db()
+        self.assertEqual((old.status, old.reading), (MeterReading.Status.VOID, Decimal("2563")))
+
     def test_admin_keeps_tracking_on_once_readings_exist(self):
         self.read("2563", date(2026, 10, 31))
         admin = make_user("admin", is_staff=True, is_superuser=True)
