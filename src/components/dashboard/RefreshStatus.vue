@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { RotateCw } from '@lucide/vue'
+import { PhArrowClockwise } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import { formatClockTime, formatTimeAgo } from '@/utils/date'
@@ -56,7 +56,7 @@ const shownFrom = computed(() => (props.loadedAt === null ? '' : formatClockTime
       data-testid="refresh"
       @click="emit('refresh')"
     >
-      <RotateCw :class="{ 'motion-safe:animate-spin': refreshing }" aria-hidden="true" />
+      <PhArrowClockwise :class="{ 'motion-safe:animate-spin': refreshing }" aria-hidden="true" />
       Refresh
     </Button>
   </div>

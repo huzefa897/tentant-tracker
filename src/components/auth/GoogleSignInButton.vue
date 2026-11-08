@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LoaderCircle } from '@lucide/vue'
+import { PhSpinnerGap } from '@phosphor-icons/vue'
 
 import GoogleLogo from '@/components/brand/GoogleLogo.vue'
 import { Button } from '@/components/ui/button'
@@ -26,7 +26,7 @@ const emit = defineEmits<{
       :aria-describedby="error ? 'sign-in-error' : undefined"
       @click="emit('signIn')"
     >
-      <LoaderCircle v-if="loading" class="size-5! animate-spin" aria-hidden="true" />
+      <PhSpinnerGap v-if="loading" class="size-5! animate-spin" aria-hidden="true" />
       <GoogleLogo v-else class="size-5!" />
       {{ loading ? 'Signing in…' : 'Continue with Google' }}
     </Button>

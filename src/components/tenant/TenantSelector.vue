@@ -5,7 +5,7 @@ export const SEARCH_DEBOUNCE_MS = 300
 
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { Check, ChevronDown, LoaderCircle, Search } from '@lucide/vue'
+import { PhCaretDown, PhCheck, PhMagnifyingGlass, PhSpinnerGap } from '@phosphor-icons/vue'
 import type { AcceptableValue } from 'reka-ui'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -110,12 +110,12 @@ const emptySearch = () => ''
           class="h-11 w-full justify-start gap-3 rounded-lg px-4 font-normal"
           aria-label="Select tenant"
         >
-          <Search class="text-muted-foreground" aria-hidden="true" />
+          <PhMagnifyingGlass class="text-muted-foreground" aria-hidden="true" />
           <span v-if="selectedTenant" class="truncate">
             {{ selectedTenant.name }} · Flat {{ selectedTenant.flatNumber }}
           </span>
           <span v-else class="truncate text-muted-foreground">Search or select tenant...</span>
-          <ChevronDown class="ml-auto text-muted-foreground" aria-hidden="true" />
+          <PhCaretDown class="ml-auto text-muted-foreground" aria-hidden="true" />
         </Button>
       </ComboboxTrigger>
     </ComboboxAnchor>
@@ -168,7 +168,7 @@ const emptySearch = () => ''
             <p class="text-xs text-muted-foreground">Flat {{ tenant.flatNumber }}</p>
           </div>
           <ComboboxItemIndicator>
-            <Check />
+            <PhCheck />
           </ComboboxItemIndicator>
         </ComboboxItem>
       </ComboboxViewport>
@@ -189,7 +189,7 @@ const emptySearch = () => ''
           :disabled="loadingMore"
           @click="emit('load-more')"
         >
-          <LoaderCircle v-if="loadingMore" class="animate-spin" aria-hidden="true" />
+          <PhSpinnerGap v-if="loadingMore" class="animate-spin" aria-hidden="true" />
           {{ loadingMore ? 'Loading…' : 'Load more' }}
         </Button>
       </div>

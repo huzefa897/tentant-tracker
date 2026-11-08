@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronRight } from '@lucide/vue'
+import { PhCaretRight } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import type { OverdueBill, OverdueTenant } from '@/types/dashboard'
@@ -178,7 +178,7 @@ const groups = computed(() =>
                   {{ formatINR(row.bill.paidAmount) }} paid
                 </span>
               </span>
-              <ChevronRight class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <PhCaretRight class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             </button>
           </li>
         </ul>

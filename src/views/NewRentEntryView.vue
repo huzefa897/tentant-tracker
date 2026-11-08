@@ -8,7 +8,7 @@ import {
   type RouteLocationNormalized,
   type RouteLocationRaw,
 } from 'vue-router'
-import { ChevronRight, CircleCheck, User } from '@lucide/vue'
+import { PhCaretRight, PhCheckCircle, PhUser } from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -252,7 +252,7 @@ function handleDialogOpenChange(open: boolean) {
           class="mb-4 flex size-16 items-center justify-center rounded-full bg-success/10 text-success"
           aria-hidden="true"
         >
-          <CircleCheck class="size-9" />
+          <PhCheckCircle class="size-9" />
         </div>
         <h1 id="entry-saved-heading" class="text-2xl font-bold tracking-tight sm:text-3xl">
           Bill saved
@@ -330,7 +330,7 @@ function handleDialogOpenChange(open: boolean) {
           @click="viewEntry(savedSummary.entry.id)"
         >
           View Entry
-          <ChevronRight aria-hidden="true" />
+          <PhCaretRight aria-hidden="true" />
         </Button>
         <Button class="mt-3 h-12 w-full text-base" @click="goToDashboard">Go to dashboard</Button>
       </section>
@@ -343,7 +343,7 @@ function handleDialogOpenChange(open: boolean) {
             class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
             data-testid="tenant-chip"
           >
-            <User class="size-4" aria-hidden="true" />
+            <PhUser class="size-4" aria-hidden="true" />
             {{ tenant.name }} · Flat {{ tenant.flatNumber }}
           </p>
         </header>
@@ -359,7 +359,7 @@ function handleDialogOpenChange(open: boolean) {
           </p>
           <Button variant="outline" class="h-10 shrink-0" @click="viewEntry(existingEntry.id)">
             Open saved entry
-            <ChevronRight aria-hidden="true" />
+            <PhCaretRight aria-hidden="true" />
           </Button>
         </div>
 

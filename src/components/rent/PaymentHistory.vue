@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Download, ReceiptIndianRupee, Undo2 } from '@lucide/vue'
+import { PhArrowUUpLeft, PhDownloadSimple, PhReceipt } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import type { Payment } from '@/types/payment'
@@ -128,8 +128,8 @@ function reversedBy(payment: Payment): string {
                   data-testid="download-receipt"
                   @click="emit('download-receipt', payment.id)"
                 >
-                  <Download v-if="payment.receipt" aria-hidden="true" />
-                  <ReceiptIndianRupee v-else aria-hidden="true" />
+                  <PhDownloadSimple v-if="payment.receipt" aria-hidden="true" />
+                  <PhReceipt v-else aria-hidden="true" />
                   {{ receiptLabel(payment) }}
                 </Button>
                 <Button
@@ -141,7 +141,7 @@ function reversedBy(payment: Payment): string {
                   data-testid="reverse-payment"
                   @click="emit('reverse-payment', payment.id)"
                 >
-                  <Undo2 aria-hidden="true" />
+                  <PhArrowUUpLeft aria-hidden="true" />
                   Reverse
                 </Button>
               </div>

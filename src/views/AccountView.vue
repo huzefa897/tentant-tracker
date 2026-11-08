@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeftRight, Building2, LogOut, User } from '@lucide/vue'
+import { PhArrowsLeftRight, PhBuildings, PhSignOut, PhUser } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import { useLogout } from '@/composables/useLogout'
@@ -40,7 +40,7 @@ function switchProperty() {
             class="flex size-12 shrink-0 items-center justify-center rounded-full bg-secondary text-primary"
             aria-hidden="true"
           >
-            <User class="size-6" />
+            <PhUser class="size-6" />
           </div>
           <div class="min-w-0">
             <h2 id="account-name" class="truncate text-lg font-semibold" data-testid="account-name">
@@ -55,7 +55,7 @@ function switchProperty() {
         <dl v-if="accessStore.selectedProperty" class="mt-5 border-t pt-5">
           <dt class="text-sm text-muted-foreground">Property</dt>
           <dd class="mt-0.5 flex items-center gap-2 font-semibold" data-testid="account-property">
-            <Building2 class="size-4 text-muted-foreground" aria-hidden="true" />
+            <PhBuildings class="size-4 text-muted-foreground" aria-hidden="true" />
             {{ accessStore.selectedProperty.name }}
           </dd>
         </dl>
@@ -68,11 +68,11 @@ function switchProperty() {
             data-testid="account-switch-property"
             @click="switchProperty"
           >
-            <ArrowLeftRight aria-hidden="true" />
+            <PhArrowsLeftRight aria-hidden="true" />
             Switch property
           </Button>
           <Button variant="outline" class="h-11 px-6" data-testid="account-logout" @click="logout">
-            <LogOut aria-hidden="true" />
+            <PhSignOut aria-hidden="true" />
             Logout
           </Button>
         </div>

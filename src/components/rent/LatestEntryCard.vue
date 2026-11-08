@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronRight, Download } from '@lucide/vue'
+import { PhCaretRight, PhDownloadSimple } from '@phosphor-icons/vue'
 
 import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
 import { Button } from '@/components/ui/button'
@@ -60,7 +60,7 @@ const charges = computed(() => [
           data-testid="download-entry-receipt"
           @click="emit('download-receipt', entry.id)"
         >
-          <Download aria-hidden="true" />
+          <PhDownloadSimple aria-hidden="true" />
           {{ downloadingReceipt ? 'Preparing…' : 'Download receipt' }}
         </Button>
         <Button
@@ -70,7 +70,7 @@ const charges = computed(() => [
           @click="emit('view', entry.id)"
         >
           View bill
-          <ChevronRight aria-hidden="true" />
+          <PhCaretRight aria-hidden="true" />
         </Button>
       </div>
     </div>

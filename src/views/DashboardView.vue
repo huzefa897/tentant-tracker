@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChevronLeft, ChevronRight } from '@lucide/vue'
+import { PhCaretLeft, PhCaretRight } from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -507,7 +507,7 @@ useAutoRetry(
                 :disabled="!periods.hasPrevious"
                 @click="dashboardStore.goToPage(periods.page - 1)"
               >
-                <ChevronLeft aria-hidden="true" />
+                <PhCaretLeft aria-hidden="true" />
                 Previous
               </Button>
               <p class="text-sm text-muted-foreground" data-testid="periods-page-position">
@@ -521,7 +521,7 @@ useAutoRetry(
                 @click="dashboardStore.goToPage(periods.page + 1)"
               >
                 Next
-                <ChevronRight aria-hidden="true" />
+                <PhCaretRight aria-hidden="true" />
               </Button>
             </nav>
           </template>

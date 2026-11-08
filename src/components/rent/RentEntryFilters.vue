@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CalendarDays, ChevronDown, CircleCheck, X } from '@lucide/vue'
+import { PhCalendarDots, PhCaretDown, PhCheckCircle, PhX } from '@phosphor-icons/vue'
 
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import { Button } from '@/components/ui/button'
@@ -29,7 +29,7 @@ const filters = computed(() => [
   {
     id: 'filter-year',
     label: 'Billing period',
-    icon: CalendarDays,
+    icon: PhCalendarDots,
     selected: year.value,
     shown: year.value === 'all' ? 'All' : year.value,
     options: [
@@ -40,7 +40,7 @@ const filters = computed(() => [
   {
     id: 'filter-status',
     label: 'Status',
-    icon: CircleCheck,
+    icon: PhCheckCircle,
     selected: status.value,
     shown: status.value === 'all' ? 'All' : formatEntryStatusFilter(status.value),
     options: [
@@ -79,7 +79,7 @@ function clear() {
           <span class="text-muted-foreground">{{ `${filter.label}: ` }}</span>
           <span class="font-semibold">{{ filter.shown }}</span>
         </span>
-        <ChevronDown class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <PhCaretDown class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <select
           :id="filter.id"
           :value="filter.selected"
@@ -93,7 +93,7 @@ function clear() {
         </select>
       </div>
       <Button v-if="active" variant="ghost" class="h-11 w-fit" @click="clear">
-        <X aria-hidden="true" />
+        <PhX aria-hidden="true" />
         Clear filters
       </Button>
     </div>
