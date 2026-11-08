@@ -8,8 +8,8 @@ import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
 import { resetAccessService } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
-import { resetRentEntryService } from '@/test/mocks/rentEntryService'
-import { resetTenantService } from '@/test/mocks/tenantService'
+import { rentEntryService, resetRentEntryService } from '@/test/mocks/rentEntryService'
+import { fakeTenancies, resetTenantService, tenantService } from '@/test/mocks/tenantService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
@@ -349,6 +349,54 @@ describe('AppLayout', () => {
         expect(router.currentRoute.value.query.quick).toBeUndefined()
         await flushPromises()
         expect(body.find('[role="dialog"]').exists()).toBe(false)
+      })
+
+      it('stays on the confirm step while a save is in flight, then opens the bill', async () => {
+        const create = rentEntryService.createEntry.getMockImplementation()!
+        let release = () => {}
+        rentEntryService.createEntry.mockImplementation(
+          (...args: unknown[]) =>
+            new Promise((resolve) => {
+              release = () => resolve(create(...args))
+            }),
+        )
+        await openQuickEntry()
+        await body.get('[data-testid="quick-bill"]').trigger('click')
+        await flushPromises()
+        await chooseTenant(1)
+        await body.get('#quick-month').setValue('2026-11')
+        await body.get('[data-testid="quick-month-step"]').trigger('submit')
+        await flushPromises()
+        await body.get('#electricityUnits').setValue('100')
+        await body.get('[data-testid="quick-bill-steps"] form').trigger('submit')
+        await flushPromises()
+        await body.get('[data-testid="quick-bill-steps"] form').trigger('submit')
+        await flushPromises()
+        await body.get('[data-testid="quick-bill-steps"] form').trigger('submit')
+        await flushPromises()
+
+        await body.get('[data-testid="quick-back"]').trigger('click')
+        await body.get('[data-slot="dialog-close"]').trigger('click')
+        router.back()
+        await flushPromises()
+
+        expect(router.currentRoute.value.query.step).toBe('confirm')
+        expect(body.find('[role="dialog"]').exists()).toBe(true)
+
+        release()
+        await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
+      })
+
+      it('restores a reloaded bill step for a tenant the first search page does not hold', async () => {
+        fakeTenancies.pageSize = 1
+
+        await mountSignedIn(
+          '/dashboard?quick=bill&step=charges&quickTenant=tenant-002&quickMonth=2026-11',
+        )
+        await flushPromises()
+
+        expect(tenantService.getTenant).toHaveBeenCalled()
+        expect(body.get('[role="dialog"]').text()).toContain('Rent and utilities')
       })
 
       it('opens the tenant’s bills to take a payment on one', async () => {

@@ -117,6 +117,17 @@ const defaultMonth = computed(() => {
   return summary.latest ? nextMonthValue(summary.latest.billingMonth) : toMonthValue(new Date())
 })
 
+// A reloaded or shared URL names its tenant; one the first search page does not hold is fetched by id.
+watch(
+  () => queryText(route.query.quickTenant),
+  (tenantId) => {
+    if (tenantId && !tenantStore.getTenant(tenantId)) {
+      void tenantStore.loadTenant(tenantId).catch(() => null)
+    }
+  },
+  { immediate: true },
+)
+
 watch(
   () => (quickStep.value === 'month' ? billTenant.value?.id : null),
   (tenantId) => {
@@ -157,6 +168,7 @@ function chooseKind(kind: RecordKind) {
 
 function closeQuickEntry() {
   if (!quickOpen.value) return
+  if (quickBill.saving.value) return
   if (openedHere) {
     const depth = STEP_DEPTH[quickStep.value]
     openedHere = false
@@ -191,6 +203,7 @@ function chooseMonth(tenantId: string, month: string) {
 // The back arrow is the browser's back; after a reload there is nothing of ours behind it, so it
 // moves to the step before in place.
 function goBack() {
+  if (quickBill.saving.value) return
   if (openedHere) {
     router.back()
     return
@@ -217,6 +230,13 @@ watch(
   () => [billTenant.value?.id, quickMonth.value],
   () => quickBill.reset(),
 )
+
+// While a bill is being saved the sheet stays put: closing it, stepping back or leaving would
+// end in the saved bill opening unasked. Signing out is the one way out.
+const removeSaveGuard = router.beforeEach((to) => {
+  if (quickBill.saving.value && to.name !== 'login') return false
+})
+onBeforeUnmount(removeSaveGuard)
 
 function advanceBill() {
   const next = billWizard.value === 'charges' ? 'payment' : 'confirm'
