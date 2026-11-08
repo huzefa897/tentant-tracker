@@ -190,7 +190,6 @@ describe('RentEntryCorrectionView', () => {
     await openCorrection()
     await submitCorrection()
 
-    expect(button('Back to the bill').attributes('disabled')).toBeDefined()
     await router.push('/tenants/tenant-001/entries')
     await flushPromises()
     expect(router.currentRoute.value.name).toBe('rent-entry-correct')

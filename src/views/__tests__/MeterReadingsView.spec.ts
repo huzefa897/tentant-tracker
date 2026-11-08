@@ -112,6 +112,23 @@ describe('MeterReadingsView', () => {
     expect(body.find('#meter-reading').exists()).toBe(false)
   })
 
+  it('opens Record reading by itself when opened to record one (?record=1)', async () => {
+    withMeter()
+    setFakeMeter('tenant-001', baseline)
+    view = await openPage('/tenants/tenant-001/meter?record=1')
+
+    expect(body.get('[role="dialog"]').text()).toContain('Record reading')
+    expect(body.find('#meter-reading').exists()).toBe(true)
+  })
+
+  it('waits to be asked without ?record=1', async () => {
+    withMeter()
+    setFakeMeter('tenant-001', baseline)
+    await openMeter()
+
+    expect(body.find('[role="dialog"]').exists()).toBe(false)
+  })
+
   it('lists the bills that block voiding a billed reading, keeping the dialog open', async () => {
     withMeter()
     setFakeMeter('tenant-001', baseline, [

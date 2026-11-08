@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
-import { ArrowLeft, Ban, CircleCheck, Link2, PencilLine, Plus, User } from '@lucide/vue'
+import { Ban, CircleCheck, Link2, PencilLine, Plus, User } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -35,7 +35,6 @@ import {
   PaymentSaveError,
   useRentEntryStore,
 } from '@/stores/rentEntry'
-import { useTenantStore } from '@/stores/tenant'
 import type { Payment, PaymentInput } from '@/types/payment'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
@@ -46,8 +45,6 @@ import { formatPaymentTiming } from '@/utils/rentCalculations'
 const props = defineProps<{
   tenantId: string
   entryId: string
-  // Where the page was opened from, so the back button returns there.
-  from?: 'dashboard' | 'history'
   // Opened as the replacement just made by correcting a bill.
   corrected?: boolean
   // Opened to record a payment: the dialog opens once the bill has loaded, if it takes one.
@@ -55,7 +52,6 @@ const props = defineProps<{
 }>()
 
 const rentEntryStore = useRentEntryStore()
-const tenantStore = useTenantStore()
 const accessStore = useAccessStore()
 const router = useRouter()
 
@@ -335,18 +331,10 @@ function electricityRows(value: RentEntry) {
   ]
 }
 
-function goToDashboard() {
-  router.push({ name: 'dashboard' })
+function goToTenants() {
+  router.push({ name: 'tenants' })
 }
 
-// Back to the dashboard with this tenant selected, as it was when the summary was opened (a
-// refresh clears the selection).
-function backToDashboard() {
-  if (tenant.value) tenantStore.selectTenant(tenant.value.id)
-  goToDashboard()
-}
-
-// Explicit route, not router.back(): a direct link has no in-app page to go back to.
 function goToHistory() {
   router.push({ name: 'rent-entry-history', params: { tenantId: props.tenantId } })
 }
@@ -354,29 +342,6 @@ function goToHistory() {
 
 <template>
   <AppLayout>
-    <template #back>
-      <Button
-        v-if="tenant && from !== 'dashboard'"
-        variant="ghost"
-        class="-ml-3 h-11 text-primary hover:text-primary"
-        :disabled="busy()"
-        @click="goToHistory"
-      >
-        <ArrowLeft aria-hidden="true" />
-        Back to bills
-      </Button>
-      <Button
-        v-else
-        variant="ghost"
-        class="-ml-3 h-11 text-primary hover:text-primary"
-        :disabled="busy()"
-        @click="backToDashboard"
-      >
-        <ArrowLeft aria-hidden="true" />
-        Back to dashboard
-      </Button>
-    </template>
-
     <!-- The page's own shape while it loads, so nothing jumps when the bill arrives. -->
     <LoadingRegion v-if="pageLoading" label="Loading entry…" data-testid="entry-loading">
       <header class="mb-6">
@@ -410,9 +375,9 @@ function goToHistory() {
     >
       <h1 class="text-lg font-semibold">Tenant not found</h1>
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
-        This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
+        This tenant doesn't exist or has been removed. Choose one from Tenants.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToTenants">Go to tenants</Button>
     </div>
 
     <SlowLoadScreen
@@ -430,7 +395,7 @@ function goToHistory() {
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
         This bill doesn't exist for {{ tenant.name }}, Flat {{ tenant.flatNumber }}.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToHistory">Back to bills</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToHistory">Go to bills</Button>
     </div>
 
     <template v-else>

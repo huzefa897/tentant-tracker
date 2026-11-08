@@ -221,10 +221,9 @@ describe('NewRentEntryView', () => {
     expect(app!.text()).toContain('Tenant not found')
     expect(app!.find('form').exists()).toBe(false)
 
-    await button('Back to dashboard').trigger('click')
-    await flushPromises()
+    await button('Go to tenants').trigger('click')
 
-    expect(router.currentRoute.value.name).toBe('dashboard')
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('tenants'))
   })
 
   it('starts on the month in the URL, as from a missing bill', async () => {
@@ -332,7 +331,7 @@ describe('NewRentEntryView', () => {
     await fill(validEntry)
     await save()
 
-    await button('Back to dashboard').trigger('click')
+    await button('Go to dashboard').trigger('click')
     await flushPromises()
 
     expect(router.currentRoute.value.name).toBe('dashboard')
@@ -373,7 +372,6 @@ describe('NewRentEntryView', () => {
     await app!.get('form').trigger('submit')
 
     expect(button('Cancel').attributes('disabled')).toBeDefined()
-    expect(button('Back to dashboard').attributes('disabled')).toBeDefined()
     // Any other navigation (a link, Back) is refused without offering to discard.
     await router.push('/dashboard')
     await flushPromises()
@@ -383,7 +381,6 @@ describe('NewRentEntryView', () => {
     finish()
     await flushPromises()
     expect(app!.get('#entry-saved-heading').text()).toBe('Bill saved')
-    expect(button('Back to dashboard').attributes('disabled')).toBeUndefined()
   })
 
   it('still lets signing out leave while a save is in flight', async () => {
@@ -537,7 +534,7 @@ describe('NewRentEntryView', () => {
       await openEntryPage()
       await fill({ notes: 'Paid via UPI' })
 
-      await button('Back to dashboard').trigger('click')
+      await router.push('/dashboard')
       await flushPromises()
 
       expect(router.currentRoute.value.name).toBe('rent-entry-new')

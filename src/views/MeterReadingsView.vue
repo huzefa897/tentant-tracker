@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArrowLeft, Gauge, Plus, User } from '@lucide/vue'
+import { Gauge, Plus, User } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -30,7 +30,11 @@ import { formatReading } from '@/utils/electricity'
 
 // A tenant's meter: its baseline, the last billed reading, and every reading with its
 // consumption. Readings are recorded, corrected and voided here; none of it bills anything.
-const props = defineProps<{ tenantId: string }>()
+const props = defineProps<{
+  tenantId: string
+  // Open Record reading as soon as the meter is shown (from the + Record button).
+  record?: boolean
+}>()
 
 const router = useRouter()
 const accessStore = useAccessStore()
@@ -121,12 +125,24 @@ function handleVoid(reason: string) {
   run(() => meterStore.voidReading(props.tenantId, current.reading.id, reason))
 }
 
+// Once, when the meter first shows and the user may record.
+let recordOpened = false
+watch(
+  () => !!meter.value && canEdit.value,
+  (ready) => {
+    if (!ready || !props.record || recordOpened) return
+    recordOpened = true
+    open({ kind: 'record' })
+  },
+  { immediate: true },
+)
+
 function openBill(entryId: string) {
   router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
 }
 
-function goToDashboard() {
-  router.push({ name: 'dashboard' })
+function goToTenants() {
+  router.push({ name: 'tenants' })
 }
 
 const pageLoading = computed(
@@ -138,17 +154,6 @@ const pageLoading = computed(
 
 <template>
   <AppLayout>
-    <template #back>
-      <Button
-        variant="ghost"
-        class="-ml-3 h-11 text-primary hover:text-primary"
-        @click="goToDashboard"
-      >
-        <ArrowLeft aria-hidden="true" />
-        Back to dashboard
-      </Button>
-    </template>
-
     <LoadingRegion v-if="pageLoading" label="Loading meter readings…" data-testid="meter-loading">
       <header class="mb-6">
         <Skeleton class="h-9 w-64 sm:h-10" />
@@ -173,9 +178,9 @@ const pageLoading = computed(
     >
       <h1 class="text-lg font-semibold">Tenant not found</h1>
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
-        This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
+        This tenant doesn't exist or has been removed. Choose one from Tenants.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToTenants">Go to tenants</Button>
     </div>
 
     <template v-else>

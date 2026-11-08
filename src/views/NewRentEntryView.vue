@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
-import { ArrowLeft, ChevronRight, CircleCheck, User } from '@lucide/vue'
+import { ChevronRight, CircleCheck, User } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -151,6 +151,10 @@ function goToDashboard() {
   router.push({ name: 'dashboard' })
 }
 
+function goToTenants() {
+  router.push({ name: 'tenants' })
+}
+
 function viewEntry(entryId: string) {
   router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
 }
@@ -169,18 +173,6 @@ function handleDialogOpenChange(open: boolean) {
 
 <template>
   <AppLayout>
-    <template #back>
-      <Button
-        variant="ghost"
-        class="-ml-3 h-11 text-primary hover:text-primary"
-        :disabled="saving"
-        @click="goToDashboard"
-      >
-        <ArrowLeft aria-hidden="true" />
-        Back to dashboard
-      </Button>
-    </template>
-
     <!-- The form's own shape while the tenant loads, so nothing jumps when it arrives. -->
     <LoadingRegion
       v-if="tenantStatus === 'loading'"
@@ -213,9 +205,9 @@ function handleDialogOpenChange(open: boolean) {
       >
         <h1 class="text-lg font-semibold">Tenant not found</h1>
         <p class="mt-1 max-w-sm text-sm text-muted-foreground">
-          This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
+          This tenant doesn't exist or has been removed. Choose one from Tenants.
         </p>
-        <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
+        <Button class="mt-6 h-11 px-6" @click="goToTenants">Go to tenants</Button>
       </div>
     </template>
 
@@ -310,7 +302,7 @@ function handleDialogOpenChange(open: boolean) {
           <ChevronRight aria-hidden="true" />
         </Button>
         <Button class="mt-3 h-12 w-full text-base" @click="goToDashboard">
-          Back to dashboard
+          Go to dashboard
         </Button>
       </section>
 

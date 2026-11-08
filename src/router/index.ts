@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
+import type { NavSection } from '@/types/nav'
 import DashboardView from '@/views/DashboardView.vue'
 import LoginView from '@/views/LoginView.vue'
 
@@ -11,6 +12,8 @@ declare module 'vue-router' {
     guestOnly?: boolean
     // Needs a selected property the user has access to (implies requiresAuth).
     requiresProperty?: boolean
+    // The bottom nav section the screen belongs to, lit up while it is shown.
+    section?: NavSection
   }
 }
 
@@ -31,7 +34,7 @@ const router = createRouter({
       path: '/dashboard',
       name: 'dashboard',
       component: DashboardView,
-      meta: { requiresAuth: true, requiresProperty: true },
+      meta: { requiresAuth: true, requiresProperty: true, section: 'home' },
     },
     // Loading, no-access and multi-property selection after sign-in.
     {
@@ -41,48 +44,66 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/account',
+      name: 'account',
+      component: () => import('@/views/AccountView.vue'),
+      meta: { requiresAuth: true, section: 'account' },
+    },
+    {
+      path: '/tenants',
+      name: 'tenants',
+      component: () => import('@/views/TenantsView.vue'),
+      meta: { requiresAuth: true, requiresProperty: true, section: 'tenants' },
+    },
+    {
       path: '/tenants/:tenantId/entries/new',
       name: 'rent-entry-new',
       component: () => import('@/views/NewRentEntryView.vue'),
       props: true,
-      meta: { requiresAuth: true, requiresProperty: true },
+      meta: { requiresAuth: true, requiresProperty: true, section: 'tenants' },
     },
     {
       path: '/tenants/:tenantId/entries',
       name: 'rent-entry-history',
       component: () => import('@/views/RentEntryHistoryView.vue'),
       props: true,
-      meta: { requiresAuth: true, requiresProperty: true },
+      meta: { requiresAuth: true, requiresProperty: true, section: 'tenants' },
     },
     // After /entries/new, so "new" reads as its own route rather than an entry id.
     {
       path: '/tenants/:tenantId/entries/:entryId',
       name: 'rent-entry-details',
       component: () => import('@/views/RentEntryDetailsView.vue'),
-      // ?from=dashboard sends the back button to the dashboard; anything else, to the history.
       // ?corrected=1: it's the replacement just made by correcting a bill.
       // ?pay=1 opens Record payment once the bill has loaded (the dashboard's Record payment).
       props: (route) => ({
         ...route.params,
-        from: route.query.from === 'dashboard' ? 'dashboard' : 'history',
         corrected: route.query.corrected === '1',
         pay: route.query.pay === '1',
       }),
-      meta: { requiresAuth: true, requiresProperty: true },
+      meta: { requiresAuth: true, requiresProperty: true, section: 'tenants' },
     },
     {
       path: '/tenants/:tenantId/entries/:entryId/correct',
       name: 'rent-entry-correct',
       component: () => import('@/views/RentEntryCorrectionView.vue'),
       props: true,
-      meta: { requiresAuth: true, requiresProperty: true },
+      meta: { requiresAuth: true, requiresProperty: true, section: 'tenants' },
     },
     {
       path: '/tenants/:tenantId/meter',
       name: 'meter-readings',
       component: () => import('@/views/MeterReadingsView.vue'),
+      // ?record=1 opens Record reading once the meter has loaded (the + Record button's).
+      props: (route) => ({ ...route.params, record: route.query.record === '1' }),
+      meta: { requiresAuth: true, requiresProperty: true, section: 'tenants' },
+    },
+    {
+      path: '/tenants/:tenantId',
+      name: 'tenant',
+      component: () => import('@/views/TenantView.vue'),
       props: true,
-      meta: { requiresAuth: true, requiresProperty: true },
+      meta: { requiresAuth: true, requiresProperty: true, section: 'tenants' },
     },
     {
       path: '/:pathMatch(.*)*',

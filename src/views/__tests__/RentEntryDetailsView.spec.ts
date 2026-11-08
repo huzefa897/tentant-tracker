@@ -12,7 +12,6 @@ import {
   PAYMENT_UNCONFIRMED_MESSAGE,
   RECEIPT_UNCONFIRMED_MESSAGE,
 } from '@/stores/rentEntry'
-import { useTenantStore } from '@/stores/tenant'
 import { makeEntry, makePayment, openPage } from '@/test/rentEntries'
 import { accessService } from '@/services/access.service'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
@@ -211,7 +210,7 @@ describe('RentEntryDetailsView', () => {
     expect(view!.get('[role="alert"]').text()).toContain('Bill not found')
     expect(view!.text()).not.toContain('₹14,000')
 
-    await button('Back to bills').trigger('click')
+    await button('Go to bills').trigger('click')
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
     expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
   })
@@ -227,9 +226,8 @@ describe('RentEntryDetailsView', () => {
 
     expect(view!.get('[role="alert"]').text()).toContain('Tenant not found')
 
-    await button('Back to dashboard').trigger('click')
-    await flushPromises()
-    expect(router.currentRoute.value.name).toBe('dashboard')
+    await button('Go to tenants').trigger('click')
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('tenants'))
   })
 
   it('shows the slow-load screen rather than Bill not found, then auto-retries', async () => {
@@ -251,33 +249,11 @@ describe('RentEntryDetailsView', () => {
     }
   })
 
-  it('goes back to the tenant’s history by route, not browser history', async () => {
+  it('leaves the way back to the browser', async () => {
     await openDetails('tenant-001', 'sep')
-    const back = vi.spyOn(router, 'back')
 
-    await button('Back to bills').trigger('click')
-
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
-    expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
-    expect(back).not.toHaveBeenCalled()
-  })
-
-  it('goes back to the dashboard, with the tenant selected, when opened from there', async () => {
-    await openDetails('tenant-001', 'sep', '?from=dashboard')
-
-    expect(view!.text()).not.toContain('Back to bills')
-    await button('Back to dashboard').trigger('click')
-
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('dashboard'))
-    expect(useTenantStore().selectedTenantId).toBe('tenant-001')
-  })
-
-  it('ignores an unknown entry point and goes back to the history', async () => {
-    await openDetails('tenant-001', 'sep', '?from=elsewhere')
-
-    await button('Back to bills').trigger('click')
-
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
+    expect(view!.find('[data-testid="app-toolbar"]').exists()).toBe(false)
+    expect(view!.text()).not.toContain('Back to')
   })
 })
 
@@ -352,7 +328,7 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
     }
 
     it('opens Record payment by itself when opened to record one (?pay=1)', async () => {
-      await openDetails('tenant-001', 'sep', '?from=dashboard&pay=1')
+      await openDetails('tenant-001', 'sep', '?pay=1')
 
       expect(dialog().text()).toContain('Record payment')
 
@@ -508,7 +484,6 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       await dialog().get('form').trigger('submit')
       await flushPromises()
 
-      expect(button('Back to bills').attributes('disabled')).toBeDefined()
       await router.push('/tenants/tenant-001/entries/aug')
       await router.push('/tenants/tenant-001/entries')
       await flushPromises()
@@ -522,7 +497,6 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
       fail()
       await flushPromises()
       expect(dialog().get('[role="alert"]').text()).toBe(PAYMENT_UNCONFIRMED_MESSAGE)
-      expect(button('Back to bills').attributes('disabled')).toBeUndefined()
 
       await dialog().get('form').trigger('submit')
       await flushPromises()
@@ -848,7 +822,6 @@ describe('RentEntryDetailsView when tenants fail to load', () => {
         await dialog().get('form').trigger('submit')
         await flushPromises()
 
-        expect(button('Back to bills').attributes('disabled')).toBeDefined()
         await router.push('/tenants/tenant-001/entries/aug')
         await flushPromises()
         expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'sep' })
