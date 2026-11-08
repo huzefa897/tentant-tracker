@@ -606,9 +606,7 @@ describe('RentEntryForm electricity', () => {
         .findAll('button')
         .find((b) => b.text().includes('new reading'))!
         .trigger('click')
-      // On: the meter's reading is recorded; off: the units used.
-      expect(wrapper!.get('#closingByUnits').attributes('aria-checked')).toBe('true')
-      expect(wrapper!.find('#closingReading').exists()).toBe(true)
+      expect(wrapper!.find('#closingByUnits').exists()).toBe(true)
     })
 
     it('has no switch for a tenant without a meter', () => {

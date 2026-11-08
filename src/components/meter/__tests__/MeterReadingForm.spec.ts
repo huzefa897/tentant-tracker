@@ -70,7 +70,9 @@ describe('MeterReadingForm', () => {
     await wrapper.get('form').trigger('submit')
 
     expect(wrapper.emitted('submit')).toBeUndefined()
-    expect(wrapper.get('#meter-readOn-error').text()).toContain('Units are added to the reading of')
+    expect(wrapper.get('#meter-readOn-error').text()).toContain(
+      'Units are added to the reading of',
+    )
     wrapper.unmount()
   })
 
