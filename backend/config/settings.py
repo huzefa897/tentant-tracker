@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from corsheaders.defaults import default_headers
+from django.core.exceptions import ImproperlyConfigured
 
 from dotenv import load_dotenv
 
@@ -48,6 +49,25 @@ SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
+
+# Local development only: DJANGO_ENV=dev turns on "dev login" (accounts/authentication.py
+# DevAuthentication), which signs in as an existing person by email, no Google. It refuses to
+# start unless DEBUG is on and every allowed host is this machine (or the compose network), so a
+# production setting can't switch it on by accident (docs/security.md).
+DEV_LOGIN = os.getenv("DJANGO_ENV", "").strip().lower() == "dev"
+DEV_LOGIN_HOSTS = {"localhost", "127.0.0.1", "[::1]", "testserver", "backend"}
+if DEV_LOGIN:
+    _open_hosts = [
+        host
+        for host in ALLOWED_HOSTS
+        if host not in DEV_LOGIN_HOSTS and not host.endswith(".localhost")
+    ]
+    if not DEBUG or _open_hosts:
+        raise ImproperlyConfigured(
+            "DJANGO_ENV=dev (dev login, no Google) needs DJANGO_DEBUG=True and "
+            "DJANGO_ALLOWED_HOSTS limited to local hosts"
+            + (f"; not allowed: {', '.join(_open_hosts)}." if _open_hosts else ".")
+        )
 
 # HTTPS. Off by default for plain-http development and tests; production turns them on in its
 # environment (`manage.py check --deploy` lists what's missing). Behind a proxy that ends TLS,
@@ -244,6 +264,8 @@ REST_FRAMEWORK = {
     # Firebase ID tokens only (Authorization: Bearer). Django admin keeps its own session login.
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "accounts.authentication.FirebaseAuthentication",
+        # Only when DJANGO_ENV=dev (see DEV_LOGIN above): absent from every other environment.
+        *(["accounts.authentication.DevAuthentication"] if DEV_LOGIN else []),
     ],
     # Every API request is rate limited (config/throttling.py): per address before
     # authentication (ApiRateLimitMiddleware, "address"), then per signed-in person, with writes

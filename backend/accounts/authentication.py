@@ -1,7 +1,9 @@
+from django.conf import settings
 from rest_framework import exceptions, status
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 
 from .firebase import FirebaseUnavailableError, InvalidFirebaseTokenError, verify_firebase_token
+from .models import User, normalize_email
 from .services import NotRegisteredError, get_registered_user
 
 
@@ -21,6 +23,40 @@ class NotRegistered(exceptions.APIException):
         "code": "not_registered",
     }
     default_code = "not_registered"
+
+
+class DevAuthentication(BaseAuthentication):
+    """Local development only: `Authorization: Dev <email>` signs in as the existing, active
+    person with that email, with no Google or Firebase. It is installed only when
+    DJANGO_ENV=dev (config/settings.py, which also refuses to start unless DEBUG is on and the
+    hosts are local), and checks the setting again on every request. It never creates anyone
+    and grants no access by itself: property access still comes from memberships."""
+
+    keyword = b"dev"
+
+    def authenticate(self, request):
+        header = get_authorization_header(request).split()
+
+        if not header or header[0].lower() != self.keyword:
+            return None
+
+        if not (settings.DEV_LOGIN and settings.DEBUG):
+            raise exceptions.AuthenticationFailed("Dev login is off.")
+
+        if len(header) != 2:
+            raise exceptions.AuthenticationFailed("Invalid Authorization header. Expected 'Dev <email>'.")
+
+        email = normalize_email(header[1].decode(errors="replace"))
+        user = User.objects.filter(email__iexact=email).exclude(email="").first() if email else None
+        if user is None:
+            raise NotRegistered()
+        if not user.is_active:
+            raise exceptions.AuthenticationFailed("User inactive or deleted.")
+
+        return user, {"uid": user.firebase_uid or "", "email": user.email, "dev": True}
+
+    def authenticate_header(self, request):
+        return "Dev"
 
 
 class FirebaseAuthentication(BaseAuthentication):

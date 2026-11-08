@@ -7,6 +7,13 @@ import {
 } from 'firebase/auth'
 
 import { AuthError, type AuthErrorCode } from '@/services/authErrors'
+import {
+  devLoginEmail,
+  endDevSession,
+  readDevSession,
+  startDevSession,
+  subscribeToDevSession,
+} from '@/services/devLogin'
 import { getFirebaseAuth } from '@/services/firebase'
 import type { AuthUser } from '@/types/auth'
 
@@ -56,7 +63,40 @@ function toAuthUser(user: User): AuthUser {
 export const authService = {
   // Called once with the restored session (or null), then on every sign-in/out.
   onAuthStateChanged(listener: (user: AuthUser | null) => void): () => void {
-    return onAuthStateChanged(getFirebaseAuth(), (user) => listener(user ? toAuthUser(user) : null))
+    if (!devLoginEmail()) {
+      return onAuthStateChanged(getFirebaseAuth(), (user) =>
+        listener(user ? toAuthUser(user) : null),
+      )
+    }
+
+    // Dev login (local development only): a saved dev session needs no Firebase, and without
+    // one Firebase is optional, so a machine with no config can still reach the login page.
+    const stopDev = subscribeToDevSession(listener)
+    const session = readDevSession()
+    if (session) {
+      listener(session)
+      return stopDev
+    }
+    try {
+      const stopFirebase = onAuthStateChanged(getFirebaseAuth(), (user) =>
+        listener(user ? toAuthUser(user) : null),
+      )
+      return () => {
+        stopDev()
+        stopFirebase()
+      }
+    } catch {
+      listener(null)
+      return stopDev
+    }
+  },
+
+  // The email dev login signs in as, or null when it's off (always in production builds).
+  devLoginEmail,
+
+  // Local development only: signs in as devLoginEmail() without Google.
+  signInAsDev(): AuthUser {
+    return startDevSession()
   },
 
   // Opens Google's account chooser in a popup; call it straight from a click, or the browser
@@ -81,7 +121,19 @@ export const authService = {
     return auth.currentUser ? auth.currentUser.getIdToken() : null
   },
 
+  // The Authorization header for the API: a dev session's email, else the Firebase ID token.
+  async getAuthorization(): Promise<string | null> {
+    const dev = readDevSession()
+    if (dev) return `Dev ${dev.email}`
+    const token = await this.getIdToken()
+    return token ? `Bearer ${token}` : null
+  },
+
   async logout(): Promise<void> {
+    if (readDevSession()) {
+      endDevSession()
+      return
+    }
     await signOut(getFirebaseAuth())
   },
 }

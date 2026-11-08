@@ -43,8 +43,14 @@ describe('api client', () => {
     expect((await sentHeaders()).get('Authorization')).toBe('Bearer test-id-token')
   })
 
+  it('sends whatever Authorization the auth service gives, e.g. a dev login', async () => {
+    vi.mocked(authService.getAuthorization).mockResolvedValue('Dev owner@example.test')
+
+    expect((await sentHeaders()).get('Authorization')).toBe('Dev owner@example.test')
+  })
+
   it('sends no Authorization header when signed out', async () => {
-    vi.mocked(authService.getIdToken).mockResolvedValue(null)
+    vi.mocked(authService.getAuthorization).mockResolvedValue(null)
 
     expect((await sentHeaders()).has('Authorization')).toBe(false)
   })

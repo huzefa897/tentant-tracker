@@ -75,6 +75,13 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // Local development only (dev login, no Google); the backend must run with DJANGO_ENV=dev.
+  function signInAsDev() {
+    error.value = null
+    loginNotice.value = null
+    user.value = authService.signInAsDev()
+  }
+
   function clearError() {
     error.value = null
   }
@@ -101,6 +108,8 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     init,
     signInWithGoogle,
+    signInAsDev,
+    devLoginEmail: authService.devLoginEmail,
     clearError,
     logout,
     endSession,

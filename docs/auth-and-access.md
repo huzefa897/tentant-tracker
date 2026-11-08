@@ -22,6 +22,16 @@ Logout (`composables/useLogout.ts`) clears the selected tenant, property access 
 - **Ending sign-in:** changing or removing a linked person's email in admin unlinks them and revokes their Firebase sessions (`unlink_if_email_changed`, the last step of the admin save, inside its transaction: if Firebase is unreachable nothing is saved). The API also refuses anyone without an email, so an older token stops working. Making the person inactive blocks them too.
 - **The move from phone sign-in** (migration `accounts.0005`) set each person's phone identity aside in `legacy_phone_firebase_uid` and cleared `firebase_uid`, so everyone links again at their first Google sign-in; reversing the migration puts the phone identities back. If two people share an email ignoring case (nothing prevented it before), it stops before changing anything and names them by id, never by email. Reversing needs the old phone users to still exist in Firebase, so they're kept until the rollback window closes. The column is temporary: drop it when that window closes, then delete the old phone users ([deployment.md](deployment.md), "Moving to Google sign-in").
 
+## Dev login (local development only)
+
+To work locally without Google (or without any Firebase config), sign in as an existing person by email:
+
+1. `backend/.env`: `DJANGO_ENV=dev`. Settings refuse to start with it unless `DJANGO_DEBUG=True` and `DJANGO_ALLOWED_HOSTS` lists only local hosts ([security.md](security.md#14-production-settings-debug-off)).
+2. `.env.local`: `VITE_DEV_LOGIN_EMAIL=<email of a person in the database>`, e.g. the one given to `seed_dev_data --email` (backend README). Restart `npm run dev`.
+3. The login page shows **Dev sign-in as …** under the Google button.
+
+How it works: `services/devLogin.ts` keeps the email in `localStorage` (only when it matches `VITE_DEV_LOGIN_EMAIL`), and `authService` reports that person as signed in without touching Firebase, sends `Authorization: Dev <email>` from `getAuthorization()` instead of a Bearer token, and ends the session on logout. With dev login on and no dev session, Firebase is optional: missing config just leaves the app signed out. The backend's `accounts/authentication.py` `DevAuthentication` (installed only with `DJANGO_ENV=dev`) finds the active person with that email, ignoring case, and never creates one: an unknown email is 403 `not_registered`, as with Google. Property access still comes from memberships. In a production build `import.meta.env.DEV` is false, so none of it runs, and without `DJANGO_ENV=dev` the backend answers a `Dev` header with 401.
+
 ## Property access
 
 **Signing in is not access.** Access comes only from an active `PropertyMembership` of an active `Property`, granted in admin (which records `granted_by`). Memberships are ended (inactive), never deleted. Admin portal access (`is_staff`) and app sign-in are separate permissions on one person; admins get no API access without a membership. Granting access is manual (backend README "Granting access"): sign in once, then add an owner membership in Django admin.

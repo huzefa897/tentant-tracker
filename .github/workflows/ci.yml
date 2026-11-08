@@ -31,6 +31,8 @@ jobs:
       - run: npm run lint:check
       - run: npm test
       - run: npm run build
+      # Dev login (no Google) must never ship: docs/security.md.
+      - run: bash scripts/check-no-dev-login.sh
 
   # Layout tests in headless Chromium: what jsdom can't see, such as amounts overlapping at
   # narrow widths. A job of its own, so the browser download doesn't slow the main checks.

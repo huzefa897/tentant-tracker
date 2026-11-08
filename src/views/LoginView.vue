@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { defineAsyncComponent, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 import GoogleSignInButton from '@/components/auth/GoogleSignInButton.vue'
@@ -8,6 +8,12 @@ import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 const router = useRouter()
+
+// Local development only: a production build drops it (import.meta.env.DEV is false).
+const DevSignInButton = import.meta.env.DEV
+  ? defineAsyncComponent(() => import('@/components/auth/DevSignInButton.vue'))
+  : null
+const devLoginEmail = DevSignInButton ? authStore.devLoginEmail() : null
 
 onMounted(() => {
   authStore.clearError()
@@ -25,6 +31,11 @@ async function handleSignIn() {
   if (authStore.isAuthenticated) {
     await router.replace({ name: 'dashboard' })
   }
+}
+
+async function handleDevSignIn() {
+  authStore.signInAsDev()
+  await router.replace({ name: 'dashboard' })
 }
 </script>
 
@@ -47,6 +58,13 @@ async function handleSignIn() {
       :loading="authStore.loading"
       :error="authStore.error"
       @sign-in="handleSignIn"
+    />
+
+    <component
+      :is="DevSignInButton"
+      v-if="DevSignInButton && devLoginEmail"
+      :email="devLoginEmail"
+      @sign-in="handleDevSignIn"
     />
 
     <p class="mt-6 text-center text-sm text-muted-foreground">

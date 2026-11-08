@@ -83,6 +83,19 @@ describe('auth store', () => {
     })
   })
 
+  describe('signInAsDev', () => {
+    it('signs in through the auth service and clears old messages', () => {
+      const store = useAuthStore()
+      store.loginNotice = 'old notice'
+
+      store.signInAsDev()
+
+      expect(authService.signInAsDev).toHaveBeenCalled()
+      expect(store.user).toEqual(testUser)
+      expect(store.loginNotice).toBeNull()
+    })
+  })
+
   describe('signInWithGoogle', () => {
     it('signs in with the Google account', async () => {
       const store = useAuthStore()

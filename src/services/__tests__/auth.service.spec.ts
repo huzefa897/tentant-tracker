@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth'
 
 import { authService, toAuthError } from '@/services/auth.service'
@@ -97,6 +97,72 @@ describe('authService', () => {
     await authService.logout()
 
     expect(signOut).toHaveBeenCalledWith(fakeAuth)
+  })
+})
+
+describe('getAuthorization', () => {
+  it('is a Bearer token, or null when signed out', async () => {
+    fakeAuth.currentUser = { getIdToken: async () => 'abc' }
+    await expect(authService.getAuthorization()).resolves.toBe('Bearer abc')
+
+    fakeAuth.currentUser = null
+    await expect(authService.getAuthorization()).resolves.toBeNull()
+  })
+})
+
+describe('dev login', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    vi.stubEnv('VITE_DEV_LOGIN_EMAIL', 'dev@example.test')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('signs in without Firebase, sends a Dev authorization and signs out without Firebase', async () => {
+    const listener = vi.fn()
+    authService.onAuthStateChanged(listener)
+
+    const user = authService.signInAsDev()
+
+    expect(user.email).toBe('dev@example.test')
+    expect(listener).toHaveBeenLastCalledWith(user)
+    await expect(authService.getAuthorization()).resolves.toBe('Dev dev@example.test')
+
+    await authService.logout()
+
+    expect(listener).toHaveBeenLastCalledWith(null)
+    expect(signOut).not.toHaveBeenCalled()
+    await expect(authService.getAuthorization()).resolves.toBeNull()
+  })
+
+  it('restores a saved dev session without touching Firebase', () => {
+    authService.signInAsDev()
+    const listener = vi.fn()
+
+    authService.onAuthStateChanged(listener)
+
+    expect(listener).toHaveBeenCalledWith({ id: 'dev:dev@example.test', email: 'dev@example.test' })
+    expect(onAuthStateChanged).not.toHaveBeenCalled()
+  })
+
+  it('reaches the login page with no Firebase config', () => {
+    vi.mocked(onAuthStateChanged).mockImplementation(() => {
+      throw new AuthError('not-configured')
+    })
+    const listener = vi.fn()
+
+    authService.onAuthStateChanged(listener)
+
+    expect(listener).toHaveBeenCalledWith(null)
+  })
+
+  it('is off in a production build', () => {
+    vi.stubEnv('DEV', false)
+
+    expect(authService.devLoginEmail()).toBeNull()
+    expect(() => authService.signInAsDev()).toThrow()
   })
 })
 
