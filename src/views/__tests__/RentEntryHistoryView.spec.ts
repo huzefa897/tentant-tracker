@@ -427,13 +427,10 @@ describe('RentEntryHistoryView', () => {
     expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001', entryId: 'oct' })
   })
 
-  it('goes back to the dashboard', async () => {
+  it('leaves the way back to the browser', async () => {
     await openHistory()
 
-    await button('Back to dashboard').trigger('click')
-    await flushPromises()
-
-    expect(router.currentRoute.value.name).toBe('dashboard')
+    expect(view!.text()).not.toContain('Back to dashboard')
   })
 })
 

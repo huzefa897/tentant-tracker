@@ -6,8 +6,6 @@ import router from '@/router'
 import { accessService } from '@/services/access.service'
 import { ApiError } from '@/services/apiError'
 import { dashboardService } from '@/services/dashboard.service'
-import { receiptService } from '@/services/receipt.service'
-import { rentEntryService } from '@/services/rentEntry.service'
 import { tenantService } from '@/services/tenant.service'
 import { authService } from '@/services/auth.service'
 import { useAccessStore } from '@/stores/access'
@@ -17,10 +15,8 @@ import { useTenantStore } from '@/stores/tenant'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
 import { openUserMenu } from '@/test/userMenu'
-import { fakeReceipts } from '@/test/mocks/receiptService'
-import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
-import { makeEntry, makePayment } from '@/test/rentEntries'
-import { downloadReceiptPdf } from '@/utils/receiptDownload'
+import { fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
+import { makeEntry } from '@/test/rentEntries'
 import DashboardView from '@/views/DashboardView.vue'
 import { SEARCH_DEBOUNCE_MS } from '@/components/tenant/TenantSelector.vue'
 import { resetTenantService } from '@/test/mocks/tenantService'
@@ -75,7 +71,7 @@ afterEach(() => {
 })
 
 describe('DashboardView', () => {
-  it('loads tenants but opens on rent due until one is selected', async () => {
+  it('loads tenants for the search and opens on rent due', async () => {
     await mountView()
 
     expect(useTenantStore().results).toHaveLength(3)
@@ -84,47 +80,17 @@ describe('DashboardView', () => {
       'Rent due',
       'Overdue bills',
     ])
-    expect(view!.find('#tenant-name').exists()).toBe(false)
   })
 
-  it('shows tenant details after choosing a tenant', async () => {
+  it('opens the tenant’s page when one is chosen in the search', async () => {
     await mountView()
 
     await view!.get('button[aria-label="Select tenant"]').trigger('click')
     await flushPromises()
     await body.findAll('[role="option"]')[0]!.trigger('click')
-    await flushPromises()
 
-    expect(useTenantStore().selectedTenantId).toBe('tenant-001')
-    expect(view!.get('#tenant-name').text()).toBe('Shaik Zahid Ali')
-    expect(view!.find('[data-testid="pending-payments"]').exists()).toBe(false)
-  })
-
-  it('opens a new entry for the selected tenant', async () => {
-    await mountView()
-    useTenantStore().selectTenant('tenant-002')
-    await flushPromises()
-
-    const addEntry = view!.findAll('button').find((button) => button.text() === 'New bill')
-    await addEntry!.trigger('click')
-
-    // The entry page is lazy loaded, so navigation finishes after its chunk is imported.
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-new'))
-    expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
-  })
-
-  it('opens the selected tenant’s previous entries', async () => {
-    await mountView()
-    useTenantStore().selectTenant('tenant-002')
-    await flushPromises()
-
-    const previousEntries = view!
-      .findAll('button')
-      .find((button) => button.text().startsWith('Bills'))
-    await previousEntries!.trigger('click')
-
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-history'))
-    expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('tenant'))
+    expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
   })
 
   describe('tenants from the backend', () => {
@@ -162,18 +128,6 @@ describe('DashboardView', () => {
       expect(optionNames()).toEqual(['Shaik Zahid Ali'])
     })
 
-    it('keeps the selected tenant’s details while searching for another', async () => {
-      await mountView()
-      useTenantStore().selectTenant('tenant-001')
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-      await openSelector()
-
-      await typeSearch('yusuf')
-
-      expect(optionNames()).toEqual(['Mohammed Yusuf'])
-      expect(view!.get('#tenant-name').text()).toBe('Shaik Zahid Ali')
-    })
-
     it('starts from the full list when the dashboard opens again', async () => {
       await mountView(async () => {
         await useAuthStore().init()
@@ -203,198 +157,6 @@ describe('DashboardView', () => {
     })
   })
 
-  describe('saved entries', () => {
-    function previousEntriesText() {
-      return view!
-        .findAll('button')
-        .find((b) => b.text().startsWith('Bills'))!
-        .text()
-    }
-
-    function saveEntries(...months: string[]) {
-      fakeEntries.entries = months.map((billingMonth, index) =>
-        makeEntry({ id: `entry-${index}`, billingMonth }),
-      )
-    }
-
-    it('shows the selected tenant’s bill count from the API', async () => {
-      saveEntries('2026-08', '2026-09')
-      await mountView()
-
-      useTenantStore().selectTenant('tenant-001')
-      await flushPromises()
-      expect(vi.mocked(rentEntryService.getEntries)).toHaveBeenCalledWith(
-        testProperty.id,
-        'tenant-001',
-      )
-      expect(previousEntriesText()).toBe('Bills (2)')
-
-      useTenantStore().selectTenant('tenant-002')
-      await flushPromises()
-      expect(previousEntriesText()).toBe('Bills (0)')
-    })
-
-    it('shows a skeleton instead of a count or latest entry on error, then auto-retries', async () => {
-      vi.useFakeTimers()
-      try {
-        saveEntries('2026-09')
-        vi.mocked(rentEntryService.getEntries).mockRejectedValueOnce(new ApiError('unknown'))
-        await mountView()
-        useTenantStore().selectTenant('tenant-001')
-        await flushPromises()
-
-        expect(view!.find('[data-testid="entries-error"]').exists()).toBe(false)
-        expect(previousEntriesText()).toBe('Bills')
-        expect(view!.find('[data-testid="latest-entry-loading"]').exists()).toBe(true)
-
-        vi.advanceTimersByTime(5000)
-        await flushPromises()
-
-        expect(previousEntriesText()).toBe('Bills (1)')
-        expect(view!.find('[data-testid="latest-entry-loading"]').exists()).toBe(false)
-      } finally {
-        vi.useRealTimers()
-      }
-    })
-
-    it('shows the selected tenant’s latest entry below the name', async () => {
-      fakeEntries.entries = [
-        makeEntry({ id: 'entry-aug', billingMonth: '2026-08' }),
-        makeEntry({ id: 'entry-oct', billingMonth: '2026-10', waterAmount: 0 }),
-        makeEntry({ id: 'entry-sep', billingMonth: '2026-09' }),
-      ]
-      await mountView()
-      useTenantStore().selectTenant('tenant-001')
-      await flushPromises()
-
-      const card = view!.get('[aria-labelledby="latest-entry-heading"]')
-      expect(card.get('h3').text()).toBe('October 2026')
-      expect(card.text()).toContain('₹15,450')
-      expect(card.text()).toContain('Unpaid')
-
-      await card.get('button').trigger('click')
-      await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
-      expect(router.currentRoute.value.params).toEqual({
-        tenantId: 'tenant-001',
-        entryId: 'entry-oct',
-      })
-      // So the summary's back button returns to the dashboard.
-      expect(router.currentRoute.value.query).toEqual({ from: 'dashboard' })
-    })
-
-    describe('the latest entry’s receipt', () => {
-      beforeEach(async () => {
-        vi.mocked(downloadReceiptPdf).mockReset().mockResolvedValue()
-        fakeEntries.entries = [makeEntry({ id: 'entry-oct', billingMonth: '2026-10' })]
-        addFakePayment(makePayment({ id: 'p-1', entryId: 'entry-oct', paidDate: '2026-10-03' }))
-        addFakePayment(
-          makePayment({ id: 'p-2', entryId: 'entry-oct', amount: 2000, paidDate: '2026-10-05' }),
-        )
-        await mountView()
-        useTenantStore().selectTenant('tenant-001')
-        await flushPromises()
-      })
-
-      function receiptButton() {
-        return view!.get('[data-testid="download-entry-receipt"]')
-      }
-
-      it('downloads the receipt for the bill’s most recent payment', async () => {
-        await receiptButton().trigger('click')
-        await flushPromises()
-
-        expect(receiptService.issueReceipt).toHaveBeenCalledWith(
-          expect.any(String),
-          'tenant-001',
-          'entry-oct',
-          'p-2',
-        )
-        expect(downloadReceiptPdf).toHaveBeenCalledWith(fakeReceipts.get('p-2'))
-        expect(fakeReceipts.get('p-2')).toMatchObject({ paymentAmount: 2000 })
-        expect(view!.find('[data-testid="receipt-error"]').exists()).toBe(false)
-      })
-
-      it('shows why a receipt can’t be issued', async () => {
-        vi.mocked(receiptService.issueReceipt).mockRejectedValueOnce(
-          new ApiError('invalid-request', 'x', 'receipt_configuration_incomplete', {
-            detail: 'Configure the property address before issuing receipts.',
-          }),
-        )
-
-        await receiptButton().trigger('click')
-        await flushPromises()
-
-        expect(view!.get('[data-testid="receipt-error"]').text()).toBe(
-          'Configure the property address before issuing receipts.',
-        )
-        expect(downloadReceiptPdf).not.toHaveBeenCalled()
-      })
-
-      it('never shows an earlier tenant’s receipt error, or makes the next tenant wait', async () => {
-        fakeEntries.entries.push(
-          makeEntry({ id: 'entry-t2', tenantId: 'tenant-002', billingMonth: '2026-10' }),
-        )
-        addFakePayment(makePayment({ id: 'p-t2', entryId: 'entry-t2', paidDate: '2026-10-04' }))
-        let fail!: (error: unknown) => void
-        vi.mocked(receiptService.issueReceipt).mockImplementationOnce(
-          () => new Promise((_, reject) => (fail = reject)),
-        )
-        await receiptButton().trigger('click')
-        await flushPromises()
-
-        useTenantStore().selectTenant('tenant-002')
-        await flushPromises()
-        fail(new ApiError('forbidden'))
-        await flushPromises()
-
-        expect(view!.find('[data-testid="receipt-error"]').exists()).toBe(false)
-        expect(receiptButton().attributes('disabled')).toBeUndefined()
-        expect(receiptButton().text()).toBe('Download receipt')
-      })
-    })
-
-    it('holds the latest entry’s place with a skeleton while bills load', async () => {
-      fakeEntries.entries = [makeEntry({ id: 'entry-oct', billingMonth: '2026-10' })]
-      await mountView()
-      vi.mocked(rentEntryService.getEntries).mockReturnValueOnce(new Promise(() => {}))
-      useTenantStore().selectTenant('tenant-001')
-      await flushPromises()
-
-      expect(view!.get('[data-testid="latest-entry-loading"]').text()).toBe(
-        'Loading the latest bill…',
-      )
-      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
-    })
-
-    it('shows no latest entry for a tenant without entries', async () => {
-      saveEntries('2026-09')
-      await mountView()
-      useTenantStore().selectTenant('tenant-002')
-      await flushPromises()
-
-      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
-      expect(previousEntriesText()).toBe('Bills (0)')
-    })
-
-    it('reloads the latest entry when returning with a tenant selected', async () => {
-      await mountView()
-      useTenantStore().selectTenant('tenant-001')
-      await flushPromises()
-      expect(view!.find('[aria-labelledby="latest-entry-heading"]').exists()).toBe(false)
-
-      // Saved elsewhere (e.g. the new-entry page) while away.
-      saveEntries('2026-10')
-      view!.unmount()
-      view = mount(DashboardView, {
-        global: { plugins: [router] },
-        attachTo: document.body,
-      })
-      await flushPromises()
-
-      expect(view.get('[aria-labelledby="latest-entry-heading"] h3').text()).toBe('October 2026')
-    })
-  })
-
   it('logs out, clears the selection and returns to login', async () => {
     await mountView()
     useTenantStore().selectTenant('tenant-002')
@@ -412,8 +174,7 @@ describe('DashboardView', () => {
   it('forgets loaded bills on logout', async () => {
     fakeEntries.entries = [makeEntry({ billingMonth: '2026-09' })]
     await mountView()
-    useTenantStore().selectTenant('tenant-001')
-    await flushPromises()
+    await useRentEntryStore().loadSummary('tenant-001')
     expect(useRentEntryStore().summaries['tenant-001']).toBeDefined()
 
     await openUserMenu()
@@ -461,25 +222,6 @@ describe('DashboardView', () => {
         .trigger('click')
 
       await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('property-select'))
-    })
-
-    it('clears the selected tenant when the property changes', async () => {
-      vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty, annex]))
-      await mountView(async () => {
-        await useAuthStore().init()
-        await useAccessStore().load()
-        useAccessStore().selectProperty(testProperty.id)
-      })
-      useTenantStore().selectTenant('tenant-001')
-      await flushPromises()
-      expect(view!.find('#tenant-name').exists()).toBe(true)
-
-      useAccessStore().selectProperty(annex.id)
-      await flushPromises()
-
-      expect(useTenantStore().selectedTenant).toBeNull()
-      expect(view!.find('#tenant-name').exists()).toBe(false)
-      expect(view!.find('[data-testid="pending-payments"]').exists()).toBe(true)
     })
 
     it('loads the new property’s rent due', async () => {
@@ -566,7 +308,7 @@ describe('DashboardView', () => {
         tenantId: 'tenant-001',
         entryId: 'entry-001',
       })
-      expect(router.currentRoute.value.query).toEqual({ from: 'dashboard', pay: '1' })
+      expect(router.currentRoute.value.query).toEqual({ pay: '1' })
     })
 
     it('shows every month without a bill from the summary', async () => {
@@ -698,19 +440,8 @@ describe('DashboardView', () => {
       expect(view!.find('[data-testid="summary-known-outstanding"]').exists()).toBe(false)
       expect(view!.text()).not.toContain('₹0')
     })
-
-    it('goes back to rent due from a tenant, refreshing it', async () => {
-      await mountView()
-      useTenantStore().selectTenant('tenant-001')
-      await flushPromises()
-
-      await view!.get('[data-testid="back-to-pending"]').trigger('click')
-      await flushPromises()
-
-      expect(view!.find('[data-testid="pending-payments"]').exists()).toBe(true)
-      expect(dashboardService.getSummary).toHaveBeenCalledTimes(2)
-    })
   })
+
   describe('overdue bills', () => {
     beforeEach(() => {
       openAt = OVERDUE
@@ -780,7 +511,7 @@ describe('DashboardView', () => {
         tenantId: 'tenant-002',
         entryId: 'entry-002',
       })
-      expect(router.currentRoute.value.query).toEqual({ from: 'dashboard' })
+      expect(router.currentRoute.value.query).toEqual({})
 
       view!.unmount()
       view = undefined
