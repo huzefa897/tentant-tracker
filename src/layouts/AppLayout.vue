@@ -71,8 +71,21 @@ function record(kind: RecordKind, tenantId: string) {
   else router.push({ name: 'meter-readings', params: { tenantId }, query: { record: '1' } })
 }
 
-// The bar gives way to the keyboard: while a field has focus it would cover what's typed.
-const typing = ref(false)
+// The bar gives way to the keyboard: while one is open over a focused field it would cover what's
+// typed. A phone's keyboard shrinks the visible screen (the visual viewport) without a focus
+// change, so closing it with the field still focused brings the bar back. A hardware keyboard
+// shrinks nothing, so the bar stays; without a visual viewport focus alone decides.
+const KEYBOARD_MIN_HEIGHT = 150
+const fieldFocused = ref(false)
+const keyboardOpen = ref(false)
+const typing = computed(() => fieldFocused.value && keyboardOpen.value)
+
+function updateKeyboard() {
+  const viewport = window.visualViewport
+  // Zooming in shrinks the viewport too, but its height times its scale stays the screen's.
+  keyboardOpen.value =
+    !viewport || window.innerHeight - viewport.height * viewport.scale > KEYBOARD_MIN_HEIGHT
+}
 
 function isField(target: EventTarget | null) {
   return (
@@ -82,20 +95,24 @@ function isField(target: EventTarget | null) {
 }
 
 function handleFocusIn(event: FocusEvent) {
-  typing.value = isField(event.target)
+  fieldFocused.value = isField(event.target)
+  updateKeyboard()
 }
 
 function handleFocusOut(event: FocusEvent) {
-  if (!isField(event.relatedTarget)) typing.value = false
+  if (!isField(event.relatedTarget)) fieldFocused.value = false
 }
 
 onMounted(() => {
   document.addEventListener('focusin', handleFocusIn)
   document.addEventListener('focusout', handleFocusOut)
+  window.visualViewport?.addEventListener('resize', updateKeyboard)
+  updateKeyboard()
 })
 onBeforeUnmount(() => {
   document.removeEventListener('focusin', handleFocusIn)
   document.removeEventListener('focusout', handleFocusOut)
+  window.visualViewport?.removeEventListener('resize', updateKeyboard)
 })
 </script>
 

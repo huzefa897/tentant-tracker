@@ -156,6 +156,71 @@ describe('AppLayout', () => {
       input.remove()
     })
 
+    describe('with a visual viewport', () => {
+      const viewport = Object.assign(new EventTarget(), { height: 0, scale: 1 })
+
+      function setViewportHeight(height: number, scale = 1) {
+        viewport.height = height
+        viewport.scale = scale
+        viewport.dispatchEvent(new Event('resize'))
+      }
+
+      beforeEach(() => {
+        viewport.height = window.innerHeight
+        viewport.scale = 1
+        Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
+      })
+
+      afterEach(() => {
+        Reflect.deleteProperty(window, 'visualViewport')
+      })
+
+      async function focusedField() {
+        const layout = await mountSignedIn()
+        const input = document.createElement('input')
+        layout.get('[data-testid="app-content"]').element.append(input)
+        return { bar: layout.get('[data-testid="app-nav-bar"]'), input }
+      }
+
+      it('hides while the keyboard is open over a field, and returns when it is closed', async () => {
+        const { bar, input } = await focusedField()
+
+        setViewportHeight(window.innerHeight - 300)
+        input.focus()
+        await flushPromises()
+        expect(bar.isVisible()).toBe(false)
+
+        // The keyboard is dismissed, but the field keeps focus.
+        setViewportHeight(window.innerHeight)
+        await flushPromises()
+        expect(document.activeElement).toBe(input)
+        expect(bar.isVisible()).toBe(true)
+
+        input.remove()
+      })
+
+      it('stays with a field focused and no keyboard (a hardware keyboard)', async () => {
+        const { bar, input } = await focusedField()
+
+        input.focus()
+        await flushPromises()
+
+        expect(bar.isVisible()).toBe(true)
+        input.remove()
+      })
+
+      it('does not take zooming in for a keyboard', async () => {
+        const { bar, input } = await focusedField()
+
+        input.focus()
+        setViewportHeight(window.innerHeight / 2, 2)
+        await flushPromises()
+
+        expect(bar.isVisible()).toBe(true)
+        input.remove()
+      })
+    })
+
     it('records a bill: what, then for whom, then the new bill page', async () => {
       const layout = await mountSignedIn()
 
