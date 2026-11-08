@@ -36,15 +36,15 @@ const half = Math.ceil(props.links.length / 2)
   <nav
     v-if="variant === 'bar'"
     aria-label="Main"
-    class="rounded-2xl border bg-card/95 px-2 py-1.5 text-card-foreground shadow-2xl shadow-black/30 backdrop-blur"
+    class="glass rounded-full p-1.5 text-card-foreground"
     data-testid="app-nav-bar"
   >
-    <ul class="grid grid-flow-col auto-cols-fr items-center">
+    <ul class="grid grid-flow-col auto-cols-fr items-center gap-1">
       <li v-for="link in links.slice(0, half)" :key="link.section">
         <a
           :href="link.href"
           :aria-current="link.section === current ? 'page' : undefined"
-          class="flex h-14 flex-col items-center justify-center gap-0.5 rounded-xl text-xs font-medium text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=page]:text-primary"
+          class="flex h-14 flex-col items-center justify-center gap-0.5 rounded-full text-xs font-medium text-muted-foreground transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=page]:bg-primary/10 aria-[current=page]:text-primary"
           :data-testid="`nav-${link.section}`"
           @click="handleClick($event, link.section)"
         >
@@ -55,7 +55,7 @@ const half = Math.ceil(props.links.length / 2)
       <li class="flex justify-center">
         <button
           type="button"
-          class="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          class="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[inset_0_1px_0_oklch(1_0_0/0.35),0_6px_16px_-4px_oklch(0.2_0.06_268/0.5)] outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           aria-label="Record"
           data-testid="nav-record"
           @click="emit('record')"
@@ -67,7 +67,7 @@ const half = Math.ceil(props.links.length / 2)
         <a
           :href="link.href"
           :aria-current="link.section === current ? 'page' : undefined"
-          class="flex h-14 flex-col items-center justify-center gap-0.5 rounded-xl text-xs font-medium text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=page]:text-primary"
+          class="flex h-14 flex-col items-center justify-center gap-0.5 rounded-full text-xs font-medium text-muted-foreground transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 aria-[current=page]:bg-primary/10 aria-[current=page]:text-primary"
           :data-testid="`nav-${link.section}`"
           @click="handleClick($event, link.section)"
         >
@@ -78,14 +78,19 @@ const half = Math.ceil(props.links.length / 2)
     </ul>
   </nav>
 
-  <!-- On the dark backdrop above the card, so light on dark. -->
-  <nav v-else aria-label="Main" data-testid="app-nav-header">
+  <!-- On the dark backdrop above the card: a dark glass pill, light on dark. -->
+  <nav
+    v-else
+    aria-label="Main"
+    class="glass-on-dark rounded-full p-1 text-white"
+    data-testid="app-nav-header"
+  >
     <ul class="flex items-center gap-1">
       <li v-for="link in links" :key="link.section">
         <a
           :href="link.href"
           :aria-current="link.section === current ? 'page' : undefined"
-          class="flex h-11 items-center gap-2 rounded-full px-4 text-sm font-medium text-white/75 outline-none hover:bg-white/10 hover:text-white focus-visible:ring-3 focus-visible:ring-white/50 aria-[current=page]:bg-white/15 aria-[current=page]:text-white"
+          class="flex h-10 items-center gap-2 rounded-full px-4 text-sm font-medium text-white/80 transition-colors outline-none hover:bg-white/10 hover:text-white focus-visible:ring-3 focus-visible:ring-white/50 aria-[current=page]:bg-white/20 aria-[current=page]:text-white aria-[current=page]:shadow-[inset_0_1px_0_oklch(1_0_0/0.3)]"
           :data-testid="`nav-${link.section}`"
           @click="handleClick($event, link.section)"
         >
@@ -96,7 +101,7 @@ const half = Math.ceil(props.links.length / 2)
       <li>
         <button
           type="button"
-          class="ml-2 flex h-11 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-3 focus-visible:ring-white/50"
+          class="ml-1 flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground shadow-[inset_0_1px_0_oklch(1_0_0/0.35)] outline-none hover:bg-primary/90 focus-visible:ring-3 focus-visible:ring-white/50"
           data-testid="nav-record"
           @click="emit('record')"
         >
