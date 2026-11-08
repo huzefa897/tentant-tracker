@@ -5,7 +5,7 @@ Stack: Vue Router, Pinia (setup stores), Tailwind v4, shadcn-vue (reka-ui), Axio
 
 ## Commands
 
-- `npm run dev` — dev server
+- `npm run dev` — dev server (or `pnpm nx run web:serve`; the Nx `web` project wraps the same scripts: `serve`, `build`, `test`, `lint`, `format`)
 - `npm run build` — type-check (`vue-tsc`) + production build. Run it: the dev server does not type-check.
 - `npm run lint` — oxlint + ESLint with auto-fix
 - `npm run lint:check` — same, no fixes (use for verification/CI)

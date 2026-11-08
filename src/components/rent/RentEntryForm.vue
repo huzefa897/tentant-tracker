@@ -1013,7 +1013,7 @@ const lockedClass =
           variant="secondary"
           class="h-12 text-base"
           :disabled="saving"
-          ="emit('back')"
+          @click="emit('back')"
         >
           Go back
         </Button>
