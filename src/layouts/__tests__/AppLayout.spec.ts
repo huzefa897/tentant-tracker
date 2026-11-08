@@ -95,7 +95,10 @@ describe('AppLayout', () => {
       signInAs()
       await useAuthStore().init()
       await useAccessStore().load()
-      await router.push({ path, force: true })
+      // A query string in `path` is dropped by the router, so it is passed as `query`.
+      const [pathname, search] = path.split('?')
+      const query = Object.fromEntries(new URLSearchParams(search))
+      await router.push({ path: pathname, query, force: true })
       const layout = mountLayout()
       await flushPromises()
       return layout
