@@ -290,8 +290,9 @@ export const meterReadingService = {
   },
 
   // Voids a reading recorded by mistake. A retry with the same reason is safe. Errors:
-  // 'conflict' with code 'reading_in_use' (details.entries: every bill to void first, newest first) or
-  // 'reading_void_conflict'.
+  // 'conflict' with code 'reading_in_use' (details.entries: every bill to void first, newest first),
+  // 'reading_feeds_units' (details.readings: every units-entered reading to void first, newest
+  // first) or 'reading_void_conflict'.
   voidReading(
     propertyId: string,
     tenancyId: string,
@@ -304,7 +305,7 @@ export const meterReadingService = {
   },
 
   // Voids a wrong reading and records its replacement together. Errors as recordReading, and
-  // 'conflict' with code 'reading_in_use' or 'reading_void'.
+  // 'conflict' with code 'reading_in_use', 'reading_feeds_units' or 'reading_void'.
   correctReading(
     propertyId: string,
     tenancyId: string,

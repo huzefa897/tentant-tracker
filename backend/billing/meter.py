@@ -16,6 +16,8 @@ is billed twice or lost.
 
 Corrections never change a bill silently: a reading an active bill is measured from can't be
 voided or corrected until that bill is voided (after its payments are reversed), newest first.
+Nor do they leave a reading entered as units stale: units are added to the reading before, so
+that one can't change until the units-entered readings after it are voided, newest first.
 
 Lock order: the tenancy (FOR UPDATE: the same lock as creating a bill, so readings and bills
 of one tenancy are written one at a time), then the reading.
@@ -87,6 +89,15 @@ class ReadingInUseError(Exception):
     def __init__(self, entries: list[RentEntry]):
         super().__init__(f"{len(entries)} bill(s) are measured from this reading.")
         self.entries = entries
+
+
+class ReadingFeedsUnitsError(Exception):
+    """Readings entered as units are worked out from this reading, so changing it would leave
+    their totals stale. readings: those to void first, newest first."""
+
+    def __init__(self, readings: list[MeterReading]):
+        super().__init__(f"{len(readings)} reading(s) were worked out from this one.")
+        self.readings = readings
 
 
 class NothingToCorrectReadingError(Exception):
@@ -427,6 +438,23 @@ def bills_to_void_for(reading: MeterReading) -> list[RentEntry]:
     )
 
 
+def readings_to_void_for(reading: MeterReading) -> list[MeterReading]:
+    """The active readings entered as units whose totals were worked out from this one, newest
+    first (the order to void them): the run of units-entered readings after it, up to the first
+    reading typed in, which is the meter's own figure and absorbs any difference. Voided or
+    corrected, this reading would leave their totals, and the consumption they stand for,
+    stale. Empty when none depend on it."""
+    later = MeterReading.objects.active().filter(
+        tenancy_id=reading.tenancy_id, read_on__gt=reading.read_on
+    )
+    dependent = []
+    for candidate in later.order_by("read_on"):
+        if candidate.entered_units is None:
+            break
+        dependent.append(candidate)
+    return dependent[::-1]
+
+
 def _lock_reading(tenancy_id, reading_id, actor) -> tuple[Tenancy, MeterReading]:
     tenancy = _lock_tenancy(tenancy_id)
     _check_can_record_readings(actor, tenancy.property_id)
@@ -466,6 +494,9 @@ def void_meter_reading(*, tenancy_id, reading_id, actor, reason: str) -> VoidedR
         in_use = bills_to_void_for(reading)
         if in_use:
             raise ReadingInUseError(in_use)
+        feeding = readings_to_void_for(reading)
+        if feeding:
+            raise ReadingFeedsUnitsError(feeding)
         _void_reading(reading, actor=actor, reason=reason)
         return VoidedReading(reading=reading, created=True)
 
@@ -515,6 +546,9 @@ def correct_meter_reading(
             in_use = bills_to_void_for(original)
             if in_use:
                 raise ReadingInUseError(in_use)
+            feeding = readings_to_void_for(original)
+            if feeding:
+                raise ReadingFeedsUnitsError(feeding)
 
             _check_reading_fits(tenancy, value, read_on, ignore=original.pk)
             _void_reading(original, actor=actor, reason=reason)

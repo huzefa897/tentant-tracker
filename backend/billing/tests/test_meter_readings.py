@@ -18,6 +18,7 @@ from billing.meter import (
     InvalidReadingError,
     MeterNotSetUpError,
     NothingToCorrectReadingError,
+    ReadingFeedsUnitsError,
     ReadingIdempotencyConflictError,
     ReadingNotAllowedError,
     ReadingNotFoundError,
@@ -302,6 +303,68 @@ class UnitsEntryTests(MeterTestCase):
         )
         self.assertEqual(self.units("100", date(2026, 12, 1)).reading, Decimal("2663"))
 
+    def change(self, reading, new=None):
+        """Voids the reading, or corrects it to the value `new`."""
+        kwargs = {
+            "tenancy_id": self.tenancy.pk,
+            "reading_id": reading.pk,
+            "actor": self.owner,
+            "reason": "Wrong",
+        }
+        if new is None:
+            return void_meter_reading(**kwargs)
+        return correct_meter_reading(
+            **kwargs,
+            validated_data={"reading": Decimal(new), "read_on": reading.read_on},
+            idempotency_key=uuid.uuid4(),
+        )
+
+    def test_a_reading_units_were_added_to_cannot_be_corrected_or_voided(self):
+        october = self.read("2563", date(2026, 10, 31))
+        november = self.units("100", date(2026, 11, 30))
+        self.assertEqual(november.reading, Decimal("2663"))
+        for new in ("2500", None):
+            with self.subTest(new=new), self.assertRaises(ReadingFeedsUnitsError) as error:
+                self.change(october, new)
+            self.assertEqual(error.exception.readings, [november])
+        october.refresh_from_db()
+        november.refresh_from_db()
+        self.assertEqual(october.status, MeterReading.Status.ACTIVE)
+        self.assertEqual(november.reading, Decimal("2663"))
+
+    def test_the_whole_run_of_units_is_listed_newest_first_up_to_a_typed_reading(self):
+        october = self.read("2563", date(2026, 10, 31))
+        november = self.units("100", date(2026, 11, 30))
+        december = self.units("50", date(2026, 12, 31))
+        self.read("2900", date(2027, 1, 10))
+        self.units("20", date(2027, 1, 15))
+        with self.assertRaises(ReadingFeedsUnitsError) as error:
+            self.change(october, "2500")
+        self.assertEqual(error.exception.readings, [december, november])
+
+    def test_voiding_the_units_newest_first_frees_the_reading_before(self):
+        october = self.read("2563", date(2026, 10, 31))
+        november = self.units("100", date(2026, 11, 30))
+        december = self.units("50", date(2026, 12, 31))
+        with self.assertRaises(ReadingFeedsUnitsError):
+            self.change(november, "2650")
+        self.change(december)
+        self.change(november)
+        result = self.change(october, "2500")
+        self.assertEqual(result.replacement.reading, Decimal("2500"))
+        # The units are entered again from the corrected reading.
+        self.assertEqual(self.units("100", date(2026, 11, 30)).reading, Decimal("2600"))
+
+    def test_a_typed_reading_after_it_does_not_depend_on_the_reading_before(self):
+        october = self.read("2563", date(2026, 10, 31))
+        self.read("2700", date(2026, 11, 30))
+        self.change(october, "2500")
+
+    def test_a_reading_with_nothing_after_it_can_change_even_when_entered_as_units(self):
+        november = self.units("100", date(2026, 11, 30))
+        result = self.change(november, "2480")
+        self.assertEqual(result.replacement.reading, Decimal("2480"))
+
     def test_the_other_checks_still_apply(self):
         with self.assertRaises(InvalidReadingError) as error:
             self.units("10", date(2027, 1, 21))
@@ -544,6 +607,24 @@ class MeterApiTests(MeterTestCase):
         stranger = make_user("stranger")
         self.client.force_authenticate(stranger)
         self.assertEqual(self.client.get(self.url).status_code, 404)
+
+    def test_changing_a_reading_units_were_added_to_is_a_conflict_listing_them(self):
+        october = self.post({"reading": "2563", "readOn": "2026-10-31"}).json()["reading"]
+        november = self.post({"units": "100", "readOn": "2026-11-30"}).json()["reading"]
+        for response in (
+            self.post(
+                {"reason": "Wrong", "reading": "2500", "readOn": "2026-10-31"},
+                url=f"{self.url}{october}/correction/",
+            ),
+            self.post({"reason": "Wrong"}, url=f"{self.url}{october}/void/"),
+        ):
+            self.assertEqual(response.status_code, 409, response.content)
+            body = response.json()
+            self.assertEqual(body["code"], "reading_feeds_units")
+            self.assertEqual(
+                body["readings"],
+                [{"id": november, "reading": "2663.000", "readOn": "2026-11-30"}],
+            )
 
     def test_correction_endpoint(self):
         reading_id = self.post({"reading": "2867", "readOn": "2026-11-30"}).json()["reading"]

@@ -180,6 +180,21 @@ describe('useMeterReadingStore', () => {
     ])
   })
 
+  it('lists the units-entered readings that block voiding the reading they were added to', async () => {
+    const store = await signedIn()
+    const october = makeReading({ reading: 2563, readOn: '2026-10-31' })
+    setFakeMeter(TENANT, undefined, [october])
+    const feeding = [{ id: 'r-nov', reading: '2663.000', readOn: '2026-11-30' }]
+    vi.mocked(meterReadingService.voidReading).mockRejectedValueOnce(
+      new ApiError('conflict', 'Conflict', 'reading_feeds_units', {}, { readings: feeding }),
+    )
+    const error = await store.voidReading(TENANT, october.id, 'Misread').catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(MeterReadingError)
+    expect((error as MeterReadingError).blockingReadings).toEqual(feeding)
+    expect((error as MeterReadingError).blockingEntries).toEqual([])
+    expect((error as MeterReadingError).message).toContain('worked out from this one')
+  })
+
   it('needs a reason to void or correct', async () => {
     const store = await signedIn()
     await expect(store.voidReading(TENANT, 'reading-1', ' ')).rejects.toThrow('Say why')

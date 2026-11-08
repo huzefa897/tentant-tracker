@@ -28,14 +28,23 @@ export interface BlockingEntry {
   billingMonth: string // YYYY-MM
 }
 
+// A reading entered as units that must be voided before the reading it was added to can change.
+export interface BlockingReading {
+  id: string
+  reading: string // three decimals
+  readOn: string // YYYY-MM-DD
+}
+
 // A reading that couldn't be recorded, voided or corrected: nothing changed, unless uncertain
 // (no usable response), when it may have; trying again is safe (the same key or reason).
 // blockingEntries: every bill to void first, newest first (reading_in_use).
+// blockingReadings: every units-entered reading to void first, newest first (reading_feeds_units).
 export class MeterReadingError extends Error {
   constructor(
     message: string,
     readonly uncertain = false,
     readonly blockingEntries: BlockingEntry[] = [],
+    readonly blockingReadings: BlockingReading[] = [],
   ) {
     super(message)
     this.name = 'MeterReadingError'
@@ -73,6 +82,19 @@ function blockingEntriesOf(error: ApiError): BlockingEntry[] {
   )
 }
 
+function blockingReadingsOf(error: ApiError): BlockingReading[] {
+  const readings = error.details.readings
+  if (!Array.isArray(readings)) return []
+  return readings.filter(
+    (item): item is BlockingReading =>
+      typeof item === 'object' &&
+      item !== null &&
+      typeof (item as BlockingReading).id === 'string' &&
+      typeof (item as BlockingReading).reading === 'string' &&
+      typeof (item as BlockingReading).readOn === 'string',
+  )
+}
+
 function writeError(err: unknown): MeterReadingError {
   if (isUncertainFailure(err)) return new MeterReadingError(UNCONFIRMED_MESSAGE, true)
   if (!(err instanceof ApiError)) return new MeterReadingError("Couldn't save the reading.")
@@ -86,6 +108,13 @@ function writeError(err: unknown): MeterReadingError {
         'Bills are measured from this reading. Void the bills listed, in that order, then try again.',
         false,
         blockingEntriesOf(err),
+      )
+    case 'reading_feeds_units':
+      return new MeterReadingError(
+        'Readings entered as units were worked out from this one. Void the readings listed, in that order, then try again.',
+        false,
+        [],
+        blockingReadingsOf(err),
       )
     case 'reading_void':
       return new MeterReadingError('This reading is void already.')

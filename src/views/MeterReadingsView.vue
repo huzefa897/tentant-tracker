@@ -23,7 +23,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
-import { type BlockingEntry, MeterReadingError, useMeterReadingStore } from '@/stores/meterReading'
+import {
+  type BlockingEntry,
+  type BlockingReading,
+  MeterReadingError,
+  useMeterReadingStore,
+} from '@/stores/meterReading'
 import type { MeterPoint, MeterReading, MeterReadingInput } from '@/types/meterReading'
 import { formatDateValue, formatMonthValue } from '@/utils/date'
 import { formatReading } from '@/utils/electricity'
@@ -73,10 +78,12 @@ const dialog = ref<Dialog | null>(null)
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 const blocking = ref<BlockingEntry[]>([])
+const blockingReadings = ref<BlockingReading[]>([])
 
 function open(next: Dialog) {
   saveError.value = null
   blocking.value = []
+  blockingReadings.value = []
   dialog.value = next
 }
 
@@ -89,12 +96,16 @@ async function run(action: () => Promise<void>) {
   saving.value = true
   saveError.value = null
   blocking.value = []
+  blockingReadings.value = []
   try {
     await action()
     dialog.value = null
   } catch (error) {
     saveError.value = error instanceof Error ? error.message : "Couldn't save the reading."
-    if (error instanceof MeterReadingError) blocking.value = error.blockingEntries
+    if (error instanceof MeterReadingError) {
+      blocking.value = error.blockingEntries
+      blockingReadings.value = error.blockingReadings
+    }
   } finally {
     saving.value = false
   }
@@ -291,6 +302,19 @@ const pageLoading = computed(
                 >
                   {{ formatMonthValue(bill.billingMonth) }} bill
                 </button>
+              </li>
+            </ul>
+          </div>
+
+          <div
+            v-if="blockingReadings.length"
+            class="rounded-lg bg-warning/10 p-3 text-sm"
+            data-testid="blocking-readings"
+          >
+            <p>Void these readings first, in this order (newest first):</p>
+            <ul class="mt-2 space-y-1">
+              <li v-for="item in blockingReadings" :key="item.id" class="font-medium">
+                {{ formatReading(Number(item.reading)) }} on {{ formatDateValue(item.readOn) }}
               </li>
             </ul>
           </div>
