@@ -301,9 +301,7 @@ function handleDialogOpenChange(open: boolean) {
           View Entry
           <ChevronRight aria-hidden="true" />
         </Button>
-        <Button class="mt-3 h-12 w-full text-base" @click="goToDashboard">
-          Go to dashboard
-        </Button>
+        <Button class="mt-3 h-12 w-full text-base" @click="goToDashboard">Go to dashboard</Button>
       </section>
 
       <template v-else>
