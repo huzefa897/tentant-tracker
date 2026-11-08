@@ -13,6 +13,7 @@ from .meter import (
     InvalidReadingError,
     MeterNotSetUpError,
     NothingToCorrectReadingError,
+    ReadingFeedsUnitsError,
     ReadingIdempotencyConflictError,
     ReadingInUseError,
     ReadingNotAllowedError,
@@ -68,6 +69,21 @@ def reading_in_use(error: ReadingInUseError) -> Conflict:
         entries=[
             {"id": str(entry.pk), "billingMonth": format_month(entry.billing_month)}
             for entry in error.entries
+        ],
+    )
+
+
+def reading_feeds_units(error: ReadingFeedsUnitsError) -> Conflict:
+    return Conflict(
+        "reading_feeds_units",
+        "Readings entered as units were worked out from this one: void them first, newest first.",
+        readings=[
+            {
+                "id": str(reading.pk),
+                "reading": f"{reading.reading:.3f}",
+                "readOn": reading.read_on.isoformat(),
+            }
+            for reading in error.readings
         ],
     )
 
@@ -154,6 +170,7 @@ class ReadingLookupMixin(ScopedLookupMixin):
 class MeterReadingVoidViewSet(ReadingLookupMixin, viewsets.GenericViewSet):
     """POST {reason}: voids a reading recorded by mistake (201 with the meter; 200 for a retry
     with the same reason). 409 reading_in_use (with every bill to void first, newest first),
+    reading_feeds_units (with the units-entered readings to void first, newest first),
     reading_void_conflict."""
 
     pagination_class = None
@@ -176,6 +193,8 @@ class MeterReadingVoidViewSet(ReadingLookupMixin, viewsets.GenericViewSet):
             raise exceptions.PermissionDenied(READINGS_FORBIDDEN) from None
         except ReadingInUseError as error:
             raise reading_in_use(error) from None
+        except ReadingFeedsUnitsError as error:
+            raise reading_feeds_units(error) from None
         except ReadingVoidConflictError:
             raise Conflict(
                 "reading_void_conflict", "This reading was already voided with another reason."
@@ -190,7 +209,7 @@ class MeterReadingCorrectionViewSet(ReadingLookupMixin, viewsets.GenericViewSet)
     """POST {reason, reading, readOn, notes?} with an Idempotency-Key header: voids the reading
     and records its replacement together (201 with the replacement's id and the meter; 200 for
     a retry). 400 when the replacement doesn't fit the other readings or changes nothing; 409
-    reading_in_use, reading_void, duplicate_reading_day, idempotency_conflict."""
+    reading_in_use, reading_feeds_units, reading_void, duplicate_reading_day, idempotency_conflict."""
 
     pagination_class = None
 
@@ -217,6 +236,8 @@ class MeterReadingCorrectionViewSet(ReadingLookupMixin, viewsets.GenericViewSet)
             raise exceptions.PermissionDenied(READINGS_FORBIDDEN) from None
         except ReadingInUseError as error:
             raise reading_in_use(error) from None
+        except ReadingFeedsUnitsError as error:
+            raise reading_feeds_units(error) from None
         except ReadingVoidError:
             raise Conflict("reading_void", "This reading is void: it can't be corrected.") from None
         except NothingToCorrectReadingError:

@@ -35,10 +35,11 @@ import {
   PaymentSaveError,
   useRentEntryStore,
 } from '@/stores/rentEntry'
+import type { MeterPoint } from '@/types/meterReading'
 import type { Payment, PaymentInput } from '@/types/payment'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
-import { formatReading, NOT_CHARGED } from '@/utils/electricity'
+import { formatReading, FROM_UNITS_REPORTED, NOT_CHARGED } from '@/utils/electricity'
 import { formatDateValue, formatMonthValue, formatTimestamp } from '@/utils/date'
 import { formatPaymentTiming } from '@/utils/rentCalculations'
 
@@ -305,6 +306,14 @@ const charges = computed(() => {
   ]
 })
 
+// "2,985 (31 Dec 2026)", and "from units reported" when it wasn't read off the meter.
+function readingText(point: MeterPoint): string {
+  const day = formatDateValue(point.readOn)
+  return point.fromUnits
+    ? `${formatReading(point.reading)} (${day}, ${FROM_UNITS_REPORTED})`
+    : `${formatReading(point.reading)} (${day})`
+}
+
 // A meter bill's readings, then its units; "Not charged" alone when electricity was left off.
 function electricityRows(value: RentEntry) {
   if (value.electricityMode === 'not_charged') {
@@ -313,14 +322,8 @@ function electricityRows(value: RentEntry) {
   const readings =
     value.electricityMode === 'meter' && value.openingReading && value.closingReading
       ? [
-          {
-            label: 'Opening reading',
-            value: `${formatReading(value.openingReading.reading)} (${formatDateValue(value.openingReading.readOn)})`,
-          },
-          {
-            label: 'Closing reading',
-            value: `${formatReading(value.closingReading.reading)} (${formatDateValue(value.closingReading.readOn)})`,
-          },
+          { label: 'Opening reading', value: readingText(value.openingReading) },
+          { label: 'Closing reading', value: readingText(value.closingReading) },
         ]
       : []
   return [

@@ -34,6 +34,19 @@ describe('MeterReadingHistory', () => {
     expect(rows[2]!.get('[data-testid="reading-void"]').text()).toBe('VOID · Digits swapped')
   })
 
+  it('says when a reading was entered as units rather than read off the meter', () => {
+    const fromUnits = makeReading({ reading: 2985, readOn: '2026-12-31', enteredUnits: 109 })
+    const wrapper = mount(MeterReadingHistory, {
+      props: { readings: [fromUnits, unbilled], canEdit: false },
+    })
+    const rows = wrapper.findAll('[data-testid="meter-reading"]')
+
+    expect(rows[0]!.get('[data-testid="reading-entered-units"]').text()).toBe(
+      'Entered as 109 units, not read off the meter',
+    )
+    expect(rows[1]!.find('[data-testid="reading-entered-units"]').exists()).toBe(false)
+  })
+
   it('offers Correct and Void on active readings only, emitting the reading', async () => {
     const wrapper = mount(MeterReadingHistory, {
       props: { readings: [unbilled, voided], canEdit: true },

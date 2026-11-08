@@ -137,6 +137,21 @@ describe('RentEntryDetailsView', () => {
     })
   })
 
+  it('says when a meter bill’s reading was worked out from units reported', async () => {
+    fakeEntries.entries = [
+      makeEntry({
+        ...entry,
+        electricityMode: 'meter',
+        openingReading: { id: 'r1', reading: 2563, readOn: '2026-08-31', fromUnits: false },
+        closingReading: { id: 'r2', reading: 2638, readOn: '2026-10-01', fromUnits: true },
+      }),
+    ]
+    await openDetails('tenant-001', 'sep')
+
+    expect(section('charges')['Opening reading']).toBe('2,563 (31 Aug 2026)')
+    expect(section('charges')['Closing reading']).toBe('2,638 (1 Oct 2026, from units reported)')
+  })
+
   it('shows the backend’s figures and status', async () => {
     fakeEntries.entries = [
       makeEntry({ ...entry, electricityAmount: 413, totalDue: 14713, outstanding: 14713 }),

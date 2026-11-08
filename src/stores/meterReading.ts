@@ -4,7 +4,11 @@ import { defineStore } from 'pinia'
 import { ApiError, isUncertainFailure, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { meterReadingService } from '@/services/meterReading.service'
 import { useAccessStore } from '@/stores/access'
-import type { MeterReadingInput, TenantMeter } from '@/types/meterReading'
+import type {
+  MeterReadingCorrectionInput,
+  MeterReadingInput,
+  TenantMeter,
+} from '@/types/meterReading'
 import { hasAtMostDecimals } from '@/utils/money'
 import { validateReason } from '@/utils/meterReadingValidation'
 
@@ -24,14 +28,23 @@ export interface BlockingEntry {
   billingMonth: string // YYYY-MM
 }
 
+// A reading entered as units that must be voided before the reading it was added to can change.
+export interface BlockingReading {
+  id: string
+  reading: string // three decimals
+  readOn: string // YYYY-MM-DD
+}
+
 // A reading that couldn't be recorded, voided or corrected: nothing changed, unless uncertain
 // (no usable response), when it may have; trying again is safe (the same key or reason).
 // blockingEntries: every bill to void first, newest first (reading_in_use).
+// blockingReadings: every units-entered reading to void first, newest first (reading_feeds_units).
 export class MeterReadingError extends Error {
   constructor(
     message: string,
     readonly uncertain = false,
     readonly blockingEntries: BlockingEntry[] = [],
+    readonly blockingReadings: BlockingReading[] = [],
   ) {
     super(message)
     this.name = 'MeterReadingError'
@@ -69,6 +82,19 @@ function blockingEntriesOf(error: ApiError): BlockingEntry[] {
   )
 }
 
+function blockingReadingsOf(error: ApiError): BlockingReading[] {
+  const readings = error.details.readings
+  if (!Array.isArray(readings)) return []
+  return readings.filter(
+    (item): item is BlockingReading =>
+      typeof item === 'object' &&
+      item !== null &&
+      typeof (item as BlockingReading).id === 'string' &&
+      typeof (item as BlockingReading).reading === 'string' &&
+      typeof (item as BlockingReading).readOn === 'string',
+  )
+}
+
 function writeError(err: unknown): MeterReadingError {
   if (isUncertainFailure(err)) return new MeterReadingError(UNCONFIRMED_MESSAGE, true)
   if (!(err instanceof ApiError)) return new MeterReadingError("Couldn't save the reading.")
@@ -82,6 +108,13 @@ function writeError(err: unknown): MeterReadingError {
         'Bills are measured from this reading. Void the bills listed, in that order, then try again.',
         false,
         blockingEntriesOf(err),
+      )
+    case 'reading_feeds_units':
+      return new MeterReadingError(
+        'Readings entered as units were worked out from this one. Void the readings listed, in that order, then try again.',
+        false,
+        [],
+        blockingReadingsOf(err),
       )
     case 'reading_void':
       return new MeterReadingError('This reading is void already.')
@@ -104,11 +137,14 @@ function writeError(err: unknown): MeterReadingError {
   return new MeterReadingError("Couldn't save the reading. Please try again.")
 }
 
-function validInput(input: MeterReadingInput): boolean {
+// The reading or the units entered (exactly one) and the day.
+function validInput(input: { reading?: number; units?: number; readOn: string }): boolean {
+  const values = [input.reading, input.units].filter((value) => value !== undefined)
   return (
-    Number.isFinite(input.reading) &&
-    input.reading >= 0 &&
-    hasAtMostDecimals(input.reading, 3) &&
+    values.length === 1 &&
+    Number.isFinite(values[0]) &&
+    values[0]! >= 0 &&
+    hasAtMostDecimals(values[0]!, 3) &&
     /^\d{4}-\d{2}-\d{2}$/.test(input.readOn)
   )
 }
@@ -209,7 +245,8 @@ export const useMeterReadingStore = defineStore('meterReading', () => {
     const key = keyFor(
       recordKeys,
       tenantId,
-      JSON.stringify([input.reading, input.readOn, input.notes]),
+      // Units and the same figure as a reading are different requests.
+      JSON.stringify([input.reading ?? null, input.units ?? null, input.readOn, input.notes]),
     )
     try {
       await write(tenantId, async (propertyId) => {
@@ -246,7 +283,7 @@ export const useMeterReadingStore = defineStore('meterReading', () => {
   async function correctReading(
     tenantId: string,
     readingId: string,
-    input: MeterReadingInput & { reason: string },
+    input: MeterReadingCorrectionInput,
   ) {
     const problem = validateReason(input.reason, 'reading is being corrected')
     if (problem) throw new MeterReadingError(problem)

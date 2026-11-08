@@ -22,6 +22,7 @@ const readingDto = {
   id: READING_ID,
   reading: '2876.500',
   readOn: '2026-11-30',
+  enteredUnits: null,
   notes: '',
   status: 'active',
   consumption: '313.500',
@@ -65,6 +66,7 @@ describe('parseTenantMeter', () => {
           id: READING_ID,
           reading: 2876.5,
           readOn: '2026-11-30',
+          enteredUnits: null,
           notes: '',
           status: 'active',
           consumption: 313.5,
@@ -76,6 +78,14 @@ describe('parseTenantMeter', () => {
         },
       ],
     })
+  })
+
+  it('maps the units a reading was entered as', () => {
+    const meter = parseTenantMeter({
+      ...meterDto,
+      readings: [{ ...readingDto, enteredUnits: '109.000' }],
+    })
+    expect(meter.readings[0]!.enteredUnits).toBe(109)
   })
 
   it('accepts a meter that isn’t set up', () => {
@@ -127,6 +137,11 @@ describe('parseTenantMeter', () => {
       { ...meterDto, readings: [{ ...readingDto, voidReason: 'z' }] },
     ],
     ['a bad billedBy', { ...meterDto, readings: [{ ...readingDto, billedBy: { id: 'e1' } }] }],
+    ['number entered units', { ...meterDto, readings: [{ ...readingDto, enteredUnits: 109 }] }],
+    [
+      'missing entered units',
+      { ...meterDto, readings: [{ ...readingDto, enteredUnits: undefined }] },
+    ],
   ])('rejects %s', (_label, data) => {
     expect(() => parseTenantMeter(data)).toThrow(ApiError)
   })
@@ -202,6 +217,14 @@ describe('toMeterReadingDto', () => {
       reading: '2876.500',
       readOn: '2026-11-30',
       notes: 'Kitchen',
+    })
+  })
+
+  it('sends units used instead of the reading when they were entered', () => {
+    expect(toMeterReadingDto({ units: 109, readOn: '2026-12-31', notes: '' })).toEqual({
+      units: '109.000',
+      readOn: '2026-12-31',
+      notes: '',
     })
   })
 })

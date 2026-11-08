@@ -6,8 +6,9 @@ import type { MeterReading } from '@/types/meterReading'
 import { formatDateValue, formatMonthValue } from '@/utils/date'
 import { formatReading } from '@/utils/electricity'
 
-// A tenancy's readings, newest first: each with its consumption and the bill it closes, if
-// any. Void ones stay, muted, with why. A billed reading can't be changed until its bills are
+// A tenancy's readings, newest first: each with its consumption, the units it was entered as
+// (when it wasn't read off the meter) and the bill it closes, if any. Void ones stay, muted,
+// with why. A billed reading can't be changed until its bills are
 // voided: the backend refuses, and the page lists those bills.
 defineProps<{
   readings: MeterReading[]
@@ -45,6 +46,13 @@ const emit = defineEmits<{
           <template v-if="reading.consumption !== null">
             · {{ formatReading(reading.consumption) }} units since the previous
           </template>
+        </p>
+        <p
+          v-if="reading.enteredUnits !== null"
+          class="mt-1 text-sm text-muted-foreground"
+          data-testid="reading-entered-units"
+        >
+          Entered as {{ formatReading(reading.enteredUnits) }} units, not read off the meter
         </p>
         <p v-if="reading.status === 'void'" class="mt-1 text-sm" data-testid="reading-void">
           VOID · {{ reading.voided?.reason }}

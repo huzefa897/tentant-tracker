@@ -2,7 +2,13 @@ import { vi } from 'vitest'
 
 import { ApiError } from '@/services/apiError'
 import type { MeterWrite } from '@/services/meterReading.service'
-import type { MeterPoint, MeterReading, MeterReadingInput, TenantMeter } from '@/types/meterReading'
+import type {
+  MeterPoint,
+  MeterReading,
+  MeterReadingCorrectionInput,
+  MeterReadingInput,
+  TenantMeter,
+} from '@/types/meterReading'
 
 // A fake meterReadingService that keeps each tenant's readings like the API: newest first,
 // one active reading a day, never below the one before, consumption derived, idempotency keys
@@ -31,6 +37,7 @@ export function makeReading(overrides: Partial<MeterReading> = {}): MeterReading
     id: `reading-${String(fakeMeters.seq).padStart(3, '0')}`,
     reading: 2563,
     readOn: '2026-10-31',
+    enteredUnits: null,
     notes: '',
     status: 'active',
     consumption: null,
@@ -83,7 +90,27 @@ function snapshot(tenantId: string): TenantMeter {
   }
 }
 
-function checkFits(tenantId: string, input: MeterReadingInput, ignoring?: string) {
+// Units are added to the newest active reading (else the baseline), dated after it, like the API.
+function readingFor(tenantId: string, input: MeterReadingInput): number {
+  if (input.units === undefined) return input.reading
+  const meter = meterOf(tenantId)
+  const newest = meter.readings
+    .filter((r) => r.status === 'active')
+    .sort((a, b) => b.readOn.localeCompare(a.readOn))[0]
+  if (newest && input.readOn <= newest.readOn) {
+    throw new ApiError('invalid-request', 'Invalid', null, {
+      readOn: 'Units are added to the latest reading: date them after it.',
+    })
+  }
+  const from = newest?.reading ?? meter.baseline.reading
+  return (Math.round(from * 1000) + Math.round(input.units * 1000)) / 1000
+}
+
+function checkFits(
+  tenantId: string,
+  input: { reading: number; readOn: string },
+  ignoring?: string,
+) {
   const meter = meterOf(tenantId)
   const active = meter.readings.filter((r) => r.status === 'active' && r.id !== ignoring)
   if (active.some((r) => r.readOn === input.readOn)) {
@@ -133,8 +160,15 @@ export function resetMeterReadingService() {
       async (_propertyId: string, tenantId: string, input: MeterReadingInput, key: string) => {
         const known = keys.get(key)
         if (known) return write(tenantId, known, true)
-        checkFits(tenantId, input)
-        const reading = makeReading({ ...input, createdAt: new Date().toISOString() })
+        const value = readingFor(tenantId, input)
+        checkFits(tenantId, { reading: value, readOn: input.readOn })
+        const reading = makeReading({
+          reading: value,
+          readOn: input.readOn,
+          notes: input.notes,
+          enteredUnits: input.units ?? null,
+          createdAt: new Date().toISOString(),
+        })
         fakeMeters.meters[tenantId]!.readings.push(reading)
         keys.set(key, reading.id)
         return write(tenantId, reading.id)
@@ -162,7 +196,7 @@ export function resetMeterReadingService() {
         _propertyId: string,
         tenantId: string,
         readingId: string,
-        input: MeterReadingInput & { reason: string },
+        input: MeterReadingCorrectionInput,
         key: string,
       ) => {
         const known = keys.get(key)

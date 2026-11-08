@@ -11,7 +11,7 @@ import {
   formatOrdinal,
   formatTimestamp,
 } from '@/utils/date'
-import { formatReading, NOT_CHARGED } from '@/utils/electricity'
+import { formatReading, FROM_UNITS_REPORTED, NOT_CHARGED } from '@/utils/electricity'
 import { toPaise } from '@/utils/money'
 import { formatPhoneNumber } from '@/utils/phone'
 
@@ -103,6 +103,20 @@ function electricityRow(charges: PaymentReceipt['charges']): ReceiptChargeRow {
   }
 }
 
+// A reading worked out from units reported, not read off the meter: it may not match the dial,
+// so the receipt says so.
+function readingValue(point: { reading: number; fromUnits?: boolean }): string {
+  return point.fromUnits
+    ? `${formatReading(point.reading)} (${FROM_UNITS_REPORTED})`
+    : formatReading(point.reading)
+}
+
+function readingNote(which: 'Opening' | 'Closing', point: { fromUnits?: boolean }, day: string) {
+  return point.fromUnits
+    ? `${which} reading worked out from units reported: ${formatDateValue(day)}`
+    : `${which} reading recorded: ${formatDateValue(day)}`
+}
+
 // A meter bill's opening and closing readings, units and rate. The opening reading has no date
 // when it's where tracking started: that day isn't printed.
 function consumption(charges: PaymentReceipt['charges']): ReceiptConsumption | null {
@@ -111,16 +125,16 @@ function consumption(charges: PaymentReceipt['charges']): ReceiptConsumption | n
   const units = formatReading(charges.electricityUnits)
   return {
     fields: [
-      { label: 'Opening reading', value: formatReading(opening.reading) },
-      { label: 'Closing reading', value: formatReading(closing.reading) },
+      { label: 'Opening reading', value: readingValue(opening) },
+      { label: 'Closing reading', value: readingValue(closing) },
       { label: 'Units consumed', value: `${units} ${units === '1' ? 'unit' : 'units'}` },
       { label: 'Rate per unit', value: formatINRWithPaise(charges.electricityRate) },
     ],
     note: [
       opening.readOn === null
         ? 'Opening reading: the starting reading'
-        : `Opening reading recorded: ${formatDateValue(opening.readOn)}`,
-      `Closing reading recorded: ${formatDateValue(closing.readOn)}`,
+        : readingNote('Opening', opening, opening.readOn),
+      readingNote('Closing', closing, closing.readOn),
     ].join(' · '),
   }
 }

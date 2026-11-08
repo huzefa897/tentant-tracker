@@ -229,8 +229,10 @@ def reading_text(value: Decimal) -> str:
     return f"{value:.3f}"
 
 
-def meter_point(reading, read_on, reading_id=None) -> dict | None:
-    """{reading, readOn, id?}; readOn is null only on a receipt opening on the baseline."""
+def meter_point(reading, read_on, reading_id=None, from_units=None) -> dict | None:
+    """{reading, readOn, id?, fromUnits?}; readOn is null only on a receipt opening on the
+    baseline. fromUnits (a bill's or receipt's readings): worked out from units reported rather
+    than read off the meter."""
     if reading is None:
         return None
     point = {
@@ -239,6 +241,8 @@ def meter_point(reading, read_on, reading_id=None) -> dict | None:
     }
     if reading_id is not False:
         point["id"] = None if reading_id is None else str(reading_id)
+    if from_units is not None:
+        point["fromUnits"] = from_units
     return point
 
 
@@ -278,10 +282,16 @@ class ReceiptSerializer(serializers.BaseSerializer):
                 "electricityMode": receipt.electricity_mode,
                 # The readings a meter bill was measured between, as saved; else null.
                 "openingReading": meter_point(
-                    receipt.opening_reading, receipt.opening_read_on, reading_id=False
+                    receipt.opening_reading,
+                    receipt.opening_read_on,
+                    reading_id=False,
+                    from_units=receipt.opening_from_units,
                 ),
                 "closingReading": meter_point(
-                    receipt.closing_reading, receipt.closing_read_on, reading_id=False
+                    receipt.closing_reading,
+                    receipt.closing_read_on,
+                    reading_id=False,
+                    from_units=receipt.closing_from_units,
                 ),
                 "waterAmount": money(receipt.water_amount),
             },
@@ -355,17 +365,31 @@ class EntryCorrectionSerializer(EntryVoidSerializer):
 
 
 class MeterReadingCreateSerializer(serializers.Serializer):
-    """One meter reading: the units on the meter and the day it was read. The tenancy comes from
-    the URL; the order checks against its other readings are the server's (billing/meter.py)."""
+    """One meter reading and the day it was read: what the meter said (reading), or the units
+    used since the latest reading (units), which the server adds to it under the tenancy's
+    lock. The tenancy comes from the URL; the order checks against its other readings are the
+    server's (billing/meter.py)."""
 
     reading = serializers.DecimalField(
         max_digits=10,
         decimal_places=3,
         min_value=Decimal("0"),
+        required=False,
         error_messages={
             "min_value": "A meter reading can't be negative.",
             "invalid": "Enter the reading as a number, e.g. 2920.",
             "max_decimal_places": "A reading can have at most three decimal places.",
+        },
+    )
+    units = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        min_value=Decimal("0"),
+        required=False,
+        error_messages={
+            "min_value": "Units used can't be negative.",
+            "invalid": "Enter the units as a number, e.g. 109.",
+            "max_decimal_places": "Units can have at most three decimal places.",
         },
     )
     readOn = serializers.DateField(source="read_on")
@@ -380,6 +404,21 @@ class MeterReadingCreateSerializer(serializers.Serializer):
     def to_internal_value(self, data):
         refuse_unknown_fields(self, data)
         return super().to_internal_value(data)
+
+    def validate(self, attrs):
+        if "units" not in self.fields:
+            if "reading" not in attrs:
+                raise serializers.ValidationError({"reading": ["Enter the meter reading."]})
+            return attrs
+        if "reading" in attrs and "units" in attrs:
+            raise serializers.ValidationError(
+                {"units": ["Send the meter reading or the units used, not both."]}
+            )
+        if "reading" not in attrs and "units" not in attrs:
+            raise serializers.ValidationError(
+                {"reading": ["Enter the meter reading or the units used."]}
+            )
+        return attrs
 
 
 class MeterReadingVoidSerializer(serializers.Serializer):
@@ -399,7 +438,10 @@ class MeterReadingVoidSerializer(serializers.Serializer):
 
 
 class MeterReadingCorrectionSerializer(MeterReadingVoidSerializer, MeterReadingCreateSerializer):
-    """The replacement's reading, date and notes, and why the original is corrected."""
+    """The replacement's reading, date and notes, and why the original is corrected. Always
+    the reading itself: units would be added to the reading being corrected."""
+
+    units = None
 
 
 def meter_reading_data(reading: MeterReading, consumption=None, billed_by=None) -> dict:
@@ -413,6 +455,10 @@ def meter_reading_data(reading: MeterReading, consumption=None, billed_by=None) 
         "id": str(reading.pk),
         "reading": reading_text(reading.reading),
         "readOn": reading.read_on.isoformat(),
+        # The units entered, when the reading was worked out from them; else null.
+        "enteredUnits": None
+        if reading.entered_units is None
+        else reading_text(reading.entered_units),
         "notes": reading.notes,
         "status": reading.status,
         "consumption": None if consumption is None else reading_text(consumption),
@@ -598,12 +644,18 @@ def entry_meter_data(entry: RentEntry) -> dict:
             "closingReading": None,
         }
     closing = entry.closing_reading
+    opening = entry.opening_reading  # None from the baseline: the meter's own figure.
     return {
         "electricityMode": entry.electricity_mode,
         "openingReading": meter_point(
-            entry.meter_opening, entry.meter_opening_date, entry.opening_reading_id
+            entry.meter_opening,
+            entry.meter_opening_date,
+            entry.opening_reading_id,
+            from_units=opening is not None and opening.from_units,
         ),
-        "closingReading": meter_point(closing.reading, closing.read_on, closing.pk),
+        "closingReading": meter_point(
+            closing.reading, closing.read_on, closing.pk, from_units=closing.from_units
+        ),
     }
 
 
