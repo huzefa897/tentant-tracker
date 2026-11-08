@@ -39,7 +39,7 @@ describe('api client', () => {
     expect(api.defaults.baseURL).toBe('/api/v1')
   })
 
-  it('sends the Firebase ID token as a Bearer token', async () => {
+  it("sends the auth service's Authorization header", async () => {
     expect((await sentHeaders()).get('Authorization')).toBe('Bearer test-id-token')
   })
 

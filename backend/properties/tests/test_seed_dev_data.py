@@ -58,6 +58,32 @@ class SeedDevDataTests(TestCase):
         self.assertFalse(person.is_superuser)
         self.assertEqual(person.property_memberships.filter(role="owner").count(), len(PROPERTIES))
 
+    def test_an_existing_persons_password_is_left_alone(self):
+        person = User.objects.create_user(
+            username="real", email="seeder@example.test", password="their-own"
+        )
+
+        seed("--password", "something-else")
+
+        person.refresh_from_db()
+        self.assertTrue(person.check_password("their-own"))
+
+    def test_a_rerun_restores_the_owners_ended_or_changed_membership(self):
+        seed()
+        owner = User.objects.get(email="seeder@example.test")
+        first, second = owner.property_memberships.order_by("property__name")
+        first.is_active = False
+        first.save()
+        second.role = PropertyMembership.Role.MANAGER
+        second.save()
+
+        seed()
+
+        self.assertEqual(
+            list(owner.property_memberships.values_list("role", "is_active")),
+            [("owner", True), ("owner", True)],
+        )
+
     def test_running_again_adds_nothing(self):
         seed()
         counts = (

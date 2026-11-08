@@ -12,8 +12,10 @@ import type { AuthUser } from '@/types/auth'
 type Listener = (user: AuthUser | null) => void
 const listeners = new Set<Listener>()
 
+// "dev-login-only" is the marker scripts/check-no-dev-login.sh looks for in a production build:
+// keep it in this key (and on DevSignInButton) so the check stays tied to the code, not to copy.
 function storageKey() {
-  return 'rent-tracker.dev-login-email'
+  return 'rent-tracker.dev-login-only.email'
 }
 
 function storage(): Storage | null {
@@ -24,8 +26,16 @@ function storage(): Storage | null {
   }
 }
 
+const DEV_USER_PREFIX = 'dev:'
+
 function toUser(email: string): AuthUser {
-  return { id: `dev:${email}`, email }
+  return { id: `${DEV_USER_PREFIX}${email}`, email }
+}
+
+// Whether this user signed in through dev login (their id is never a Firebase UID).
+export function isDevUser(user: AuthUser | null): boolean {
+  if (!import.meta.env.DEV) return false
+  return user?.id.startsWith(DEV_USER_PREFIX) ?? false
 }
 
 // The email the login page offers to sign in as, or null when dev login is off.

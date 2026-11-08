@@ -12,7 +12,8 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="mt-4 space-y-2 border-t border-dashed pt-4 text-center">
+  <!-- data-dev-login-only: the marker scripts/check-no-dev-login.sh looks for in a build. -->
+  <div data-dev-login-only class="mt-4 space-y-2 border-t border-dashed pt-4 text-center">
     <Button type="button" variant="secondary" class="h-11 w-full" @click="emit('signIn')">
       Dev sign-in as {{ email }}
     </Button>

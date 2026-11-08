@@ -89,7 +89,11 @@ class DevAuthenticationTests(TestCase):
             authenticate("Dev person@example.test")
 
 
+@override_settings(DEV_LOGIN=False)
 class DevLoginIsOffByDefaultTests(TestCase):
+    """A developer's backend/.env may set DJANGO_ENV=dev, so this pins the setting off; whether
+    the authenticator is installed at all is checked in a clean process below."""
+
     def test_the_api_does_not_accept_a_dev_header(self):
         get_user_model().objects.create_user(username="p", email="person@example.test")
         client = APIClient()
@@ -101,7 +105,7 @@ class DevLoginIsOffByDefaultTests(TestCase):
 class DevLoginSettingsGuardTests(SimpleTestCase):
     """config/settings.py refuses to start with dev login in the wrong environment."""
 
-    def load_settings(self, **env):
+    def load_settings(self, code="import config.settings", **env):
         base = {
             key: value
             for key, value in os.environ.items()
@@ -109,7 +113,7 @@ class DevLoginSettingsGuardTests(SimpleTestCase):
         }
         base.setdefault("DJANGO_SECRET_KEY", "test-only-secret")
         return subprocess.run(
-            [sys.executable, "-c", "import config.settings"],
+            [sys.executable, "-c", code],
             cwd=BACKEND,
             env={**base, **env},
             capture_output=True,
@@ -137,6 +141,21 @@ class DevLoginSettingsGuardTests(SimpleTestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rent.example.com", result.stderr)
+
+    def test_the_authenticator_is_installed_only_with_dev(self):
+        code = (
+            "import config.settings as s; "
+            "print(s.REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES'])"
+        )
+        # Empty rather than unset, so a developer's backend/.env (loaded by settings) can't set it.
+        off = self.load_settings(code, DJANGO_ENV="", DJANGO_ALLOWED_HOSTS="localhost")
+        on = self.load_settings(
+            code, DJANGO_ENV="dev", DJANGO_DEBUG="true", DJANGO_ALLOWED_HOSTS="localhost"
+        )
+
+        self.assertEqual(off.returncode, 0, off.stderr)
+        self.assertNotIn("DevAuthentication", off.stdout)
+        self.assertIn("DevAuthentication", on.stdout)
 
     def test_other_environments_are_unaffected(self):
         # Empty rather than unset, so a developer's backend/.env (loaded by settings) can't set it.

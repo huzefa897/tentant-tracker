@@ -32,6 +32,8 @@ export const useAuthStore = defineStore('auth', () => {
   const error = ref<string | null>(null)
 
   const isAuthenticated = computed(() => user.value !== null)
+  // Signed in through dev login (local development only), not Google.
+  const isDevSession = computed(() => authService.isDevUser(user.value))
 
   let readyPromise: Promise<void> | null = null
 
@@ -106,6 +108,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     error,
     isAuthenticated,
+    isDevSession,
     init,
     signInWithGoogle,
     signInAsDev,

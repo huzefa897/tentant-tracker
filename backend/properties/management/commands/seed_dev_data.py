@@ -114,7 +114,8 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--password",
-            help="Optional: lets that person log in to /admin/ with a password.",
+            help="Optional, for a person this command creates: their password for /admin/. "
+            "Ignored for an existing person, whose password and permissions stay as they are.",
         )
 
     def handle(self, *args, **options):
@@ -132,8 +133,13 @@ class Command(BaseCommand):
                 (owner, PropertyMembership.Role.OWNER),
                 (manager, PropertyMembership.Role.MANAGER),
             ):
-                PropertyMembership.objects.get_or_create(
-                    user=person, property=prop, defaults={"role": role, "granted_by": owner}
+                # The seed's own properties: a membership ended or changed since the last run is
+                # put back, so "both properties are yours" stays true.
+                PropertyMembership.objects.update_or_create(
+                    user=person,
+                    property=prop,
+                    defaults={"role": role, "is_active": True},
+                    create_defaults={"role": role, "is_active": True, "granted_by": owner},
                 )
             properties.append(prop)
 
@@ -164,14 +170,21 @@ class Command(BaseCommand):
     def _owner(self, email: str, password: str | None) -> User:
         email = email.strip().lower()
         owner = User.objects.filter(email__iexact=email).first()
-        if owner is None:
-            # Only a person made here becomes an admin: an existing one (real data, say) keeps
-            # their permissions and just gets owner memberships of the seeded properties.
-            owner = User(username=email, email=email, name="Dev Owner")
-            owner.set_unusable_password()
-            owner.is_staff = owner.is_superuser = True
+        if owner is not None:
+            # An existing person (real data, say) keeps their permissions and password, and just
+            # gets owner memberships of the seeded properties.
+            if password:
+                self.stderr.write(
+                    f"Ignored --password: {email} already exists, so their password is unchanged."
+                )
+            return owner
+
+        owner = User(username=email, email=email, name="Dev Owner")
+        owner.is_staff = owner.is_superuser = True
         if password:
             owner.set_password(password)
+        else:
+            owner.set_unusable_password()
         owner.save()
         return owner
 

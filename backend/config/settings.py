@@ -56,6 +56,9 @@ ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 # check is an extra tripwire for misconfiguration (DEBUG off, a public host name), not the
 # boundary: Host is a header a caller can fake (docs/security.md).
 DEV_LOGIN = os.getenv("DJANGO_ENV", "").strip().lower() == "dev"
+# "backend" is compose's service name: allowed so `docker compose --profile app` still starts with
+# DJANGO_ENV=dev in backend/.env. Dev login itself won't work there (Vite connects over the
+# Docker network, not loopback), which is intended; keep both as they are.
 DEV_LOGIN_HOSTS = {"localhost", "127.0.0.1", "[::1]", "testserver", "backend"}
 if DEV_LOGIN:
     _open_hosts = [

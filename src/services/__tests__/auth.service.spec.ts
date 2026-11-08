@@ -120,21 +120,31 @@ describe('dev login', () => {
     vi.unstubAllEnvs()
   })
 
-  it('signs in without Firebase, sends a Dev authorization and signs out without Firebase', async () => {
+  it('signs in without Firebase, sends a Dev authorization and signs out', async () => {
     const listener = vi.fn()
     authService.onAuthStateChanged(listener)
 
     const user = authService.signInAsDev()
 
     expect(user.email).toBe('dev@example.test')
+    expect(authService.isDevUser(user)).toBe(true)
     expect(listener).toHaveBeenLastCalledWith(user)
     await expect(authService.getAuthorization()).resolves.toBe('Dev dev@example.test')
 
     await authService.logout()
 
     expect(listener).toHaveBeenLastCalledWith(null)
-    expect(signOut).not.toHaveBeenCalled()
+    // Any Google session Firebase kept ends too, so a reload doesn't sign back in as it.
+    expect(signOut).toHaveBeenCalledWith(fakeAuth)
     await expect(authService.getAuthorization()).resolves.toBeNull()
+  })
+
+  it('a dev logout still works when Firebase has no config', async () => {
+    vi.mocked(signOut).mockRejectedValue(new Error('no config'))
+    authService.signInAsDev()
+
+    await expect(authService.logout()).resolves.toBeUndefined()
+    expect(authService.isDevUser({ id: 'firebase-uid-1', email })).toBe(false)
   })
 
   it('restores a saved dev session, ignoring Firebase while it lasts', () => {

@@ -34,7 +34,7 @@ describe('dev login', () => {
     })
 
     it('is off even with the email set and a session saved', () => {
-      window.localStorage.setItem('rent-tracker.dev-login-email', 'dev@example.test')
+      window.localStorage.setItem('rent-tracker.dev-login-only.email', 'dev@example.test')
 
       expect(devLoginEmail()).toBeNull()
       expect(readDevSession()).toBeNull()
@@ -60,7 +60,7 @@ describe('dev login', () => {
     })
 
     it('ignores a saved session for another email', () => {
-      window.localStorage.setItem('rent-tracker.dev-login-email', 'someone@else.test')
+      window.localStorage.setItem('rent-tracker.dev-login-only.email', 'someone@else.test')
 
       expect(readDevSession()).toBeNull()
     })
@@ -71,11 +71,15 @@ describe('dev login', () => {
       const unsubscribe = subscribeToDevSession(listener)
 
       // What another tab's endDevSession() looks like from here.
-      window.localStorage.removeItem('rent-tracker.dev-login-email')
-      window.dispatchEvent(new StorageEvent('storage', { key: 'rent-tracker.dev-login-email' }))
+      window.localStorage.removeItem('rent-tracker.dev-login-only.email')
+      window.dispatchEvent(
+        new StorageEvent('storage', { key: 'rent-tracker.dev-login-only.email' }),
+      )
       window.dispatchEvent(new StorageEvent('storage', { key: 'something-else' }))
       unsubscribe()
-      window.dispatchEvent(new StorageEvent('storage', { key: 'rent-tracker.dev-login-email' }))
+      window.dispatchEvent(
+        new StorageEvent('storage', { key: 'rent-tracker.dev-login-only.email' }),
+      )
 
       expect(listener).toHaveBeenCalledTimes(1)
       expect(listener).toHaveBeenCalledWith(null)

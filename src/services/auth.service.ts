@@ -10,6 +10,7 @@ import { AuthError, type AuthErrorCode } from '@/services/authErrors'
 import {
   devLoginEmail,
   endDevSession,
+  isDevUser,
   readDevSession,
   startDevSession,
   subscribeToDevSession,
@@ -93,6 +94,7 @@ export const authService = {
 
   // The email dev login signs in as, or null when it's off (always in production builds).
   devLoginEmail,
+  isDevUser,
 
   // Local development only: signs in as devLoginEmail() without Google.
   signInAsDev(): AuthUser {
@@ -132,6 +134,13 @@ export const authService = {
   async logout(): Promise<void> {
     if (readDevSession()) {
       endDevSession()
+      // Also end any Google session Firebase kept, so a reload doesn't sign back in as it.
+      // Optional: dev login works without Firebase config.
+      try {
+        await signOut(getFirebaseAuth())
+      } catch {
+        // No Firebase config, or nothing to sign out of.
+      }
       return
     }
     await signOut(getFirebaseAuth())
