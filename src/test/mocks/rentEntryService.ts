@@ -202,7 +202,18 @@ export function resetRentEntryService() {
         // Electricity as the backend works it out: left off (0 units), from the meter (the
         // closing reading less the last billed one), or the typed units.
         const included = input.includeElectricity ?? true
-        const closing = input.closingReading ?? null
+        const closingInput = input.closingReading ?? null
+        // Units entered are added to the opening (the fake keeps no other readings).
+        const closing =
+          closingInput === null
+            ? null
+            : {
+                reading:
+                  closingInput.units !== undefined
+                    ? fakeEntries.meterOpening.reading + closingInput.units
+                    : closingInput.reading,
+                readOn: closingInput.readOn,
+              }
         const meter = included && closing !== null
         const entry = makeEntry({
           id: nextFakeId('saved'),

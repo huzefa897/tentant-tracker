@@ -249,6 +249,90 @@ class ReadingTests(MeterTestCase):
                 self.read("2600", date(2026, 11, 30))
 
 
+class UnitsEntryTests(MeterTestCase):
+    """A reading entered as the units used since the latest reading: the server adds them to
+    it under the tenancy's lock, and keeps the units as entered."""
+
+    def units(self, value, on, key=None, notes=""):
+        return record_meter_reading(
+            tenancy_id=self.tenancy.pk,
+            actor=self.owner,
+            validated_data={"units": Decimal(value), "read_on": on, "notes": notes},
+            idempotency_key=key or uuid.uuid4(),
+        ).reading
+
+    def test_units_are_added_to_the_baseline_when_nothing_is_read_yet(self):
+        reading = self.units("163", date(2026, 10, 31))
+        self.assertEqual(reading.reading, Decimal("2563"))
+        self.assertEqual(reading.entered_units, Decimal("163"))
+
+    def test_units_are_added_to_the_newest_reading_billed_or_not(self):
+        self.read("2563", date(2026, 10, 31))
+        self.read("2876", date(2026, 11, 30))
+        reading = self.units("109", date(2026, 12, 31))
+        self.assertEqual(reading.reading, Decimal("2985"))
+
+    def test_a_reading_entered_after_units_is_measured_from_them(self):
+        self.units("163", date(2026, 10, 31))
+        reading = self.read("2700", date(2026, 11, 30))
+        self.assertIsNone(reading.entered_units)
+        self.assertEqual(reading.reading, Decimal("2700"))
+
+    def test_units_can_start_on_the_day_tracking_started(self):
+        self.assertEqual(self.units("0", date(2026, 9, 30)).reading, Decimal("2400"))
+
+    def test_units_are_dated_after_the_newest_reading(self):
+        self.read("2563", date(2026, 10, 31))
+        self.read("2876", date(2026, 11, 30))
+        for on in (date(2026, 11, 15), date(2026, 11, 30)):
+            with self.subTest(on=on), self.assertRaises(InvalidReadingError) as error:
+                self.units("50", on)
+            self.assertEqual(error.exception.field, "readOn")
+            self.assertIn("2876 on 30 Nov 2026", error.exception.detail)
+        with self.assertRaises(InvalidReadingError):
+            self.units("50", date(2026, 9, 29))
+
+    def test_void_readings_are_not_what_units_are_added_to(self):
+        self.read("2563", date(2026, 10, 31))
+        wrong = self.read("9999", date(2026, 11, 30))
+        void_meter_reading(
+            tenancy_id=self.tenancy.pk, reading_id=wrong.pk, actor=self.owner, reason="Typo"
+        )
+        self.assertEqual(self.units("100", date(2026, 12, 1)).reading, Decimal("2663"))
+
+    def test_the_other_checks_still_apply(self):
+        with self.assertRaises(InvalidReadingError) as error:
+            self.units("10", date(2027, 1, 21))
+        self.assertEqual(error.exception.field, "readOn")
+        with self.assertRaises(InvalidReadingError) as error:
+            self.units("9999999", date(2026, 10, 31))
+        self.assertEqual(error.exception.field, "units")
+        bare = make_tenancy(self.property, flat_number="302")
+        with self.assertRaises(MeterNotSetUpError):
+            record_meter_reading(
+                tenancy_id=bare.pk,
+                actor=self.owner,
+                validated_data={"units": Decimal("5"), "read_on": date(2026, 10, 31)},
+                idempotency_key=uuid.uuid4(),
+            )
+
+    def test_a_retry_returns_the_same_reading_even_after_a_later_one(self):
+        key = uuid.uuid4()
+        first = self.units("163", date(2026, 10, 31), key=key)
+        self.read("2700", date(2026, 11, 30))
+        self.assertEqual(self.units("163", date(2026, 10, 31), key=key).pk, first.pk)
+        with self.assertRaises(ReadingIdempotencyConflictError):
+            self.units("164", date(2026, 10, 31), key=key)
+        with self.assertRaises(ReadingIdempotencyConflictError):
+            # The same figure as a reading is another request.
+            record_meter_reading(
+                tenancy_id=self.tenancy.pk,
+                actor=self.owner,
+                validated_data={"reading": Decimal("163"), "read_on": date(2026, 10, 31)},
+                idempotency_key=key,
+            )
+
+
 class CorrectionTests(MeterTestCase):
     def test_tc15_a_reading_no_bill_uses_is_corrected_with_an_audit_trail(self):
         reading = self.read("2867", date(2026, 11, 30))
@@ -316,6 +400,7 @@ class ReadingGuardTests(MeterTestCase):
             {"notes": "Changed"},
             {"tenancy": other},
             {"created_by": make_user("other")},
+            {"entered_units": Decimal("5")},
         ):
             self.assert_refused(lambda change=change: MeterReading.objects.filter(pk=reading.pk).update(**change))
         reading.refresh_from_db()
@@ -417,6 +502,37 @@ class MeterApiTests(MeterTestCase):
         self.post({"reading": "2563", "readOn": "2026-10-31"})
         response = self.post({"reading": "2563", "readOn": "2026-10-31"})
         self.assertEqual(response.json()["code"], "duplicate_reading_day")
+
+    def test_records_units_and_shows_how_each_reading_was_entered(self):
+        response = self.post({"units": "163", "readOn": "2026-10-31"})
+        self.assertEqual(response.status_code, 201, response.content)
+        self.post({"reading": "2700", "readOn": "2026-11-30"})
+        readings = self.client.get(self.url).json()["readings"]
+        self.assertEqual(
+            [(r["reading"], r["enteredUnits"], r["consumption"]) for r in readings],
+            [("2700.000", None, "137.000"), ("2563.000", "163.000", "163.000")],
+        )
+
+    def test_takes_the_reading_or_the_units(self):
+        for body, field in (
+            ({"readOn": "2026-10-31"}, "reading"),
+            ({"reading": "2563", "units": "163", "readOn": "2026-10-31"}, "units"),
+            ({"units": "-1", "readOn": "2026-10-31"}, "units"),
+            ({"units": "1.2345", "readOn": "2026-10-31"}, "units"),
+        ):
+            with self.subTest(body=body):
+                response = self.post(body)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
+    def test_a_correction_takes_the_reading_not_units(self):
+        reading_id = self.post({"units": "163", "readOn": "2026-10-31"}).json()["reading"]
+        response = self.post(
+            {"reason": "Wrong", "units": "150", "readOn": "2026-10-31"},
+            url=f"{self.url}{reading_id}/correction/",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("units", response.json())
 
     def test_needs_a_key(self):
         response = self.client.post(self.url, {"reading": "2563", "readOn": "2026-10-31"}, format="json")

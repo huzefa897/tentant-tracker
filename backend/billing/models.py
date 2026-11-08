@@ -736,6 +736,12 @@ class MeterReading(models.Model):
     )
     reading = models.DecimalField(max_digits=10, decimal_places=3)
     read_on = models.DateField(help_text="The day the meter was read.")
+    # The units the person entered, when they entered units used rather than what the meter
+    # said: the reading is then the latest reading before it plus these (billing/meter.py), so
+    # it may not match the meter's dial. Null when the reading itself was entered.
+    entered_units = models.DecimalField(
+        max_digits=10, decimal_places=3, null=True, blank=True, editable=False
+    )
     notes = models.CharField(max_length=500, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
@@ -781,6 +787,10 @@ class MeterReading(models.Model):
             ),
             models.CheckConstraint(
                 condition=Q(reading__gte=0), name="meter_reading_not_negative"
+            ),
+            models.CheckConstraint(
+                condition=Q(entered_units__isnull=True) | Q(entered_units__gte=0),
+                name="meter_reading_entered_units_not_negative",
             ),
             models.CheckConstraint(
                 condition=(

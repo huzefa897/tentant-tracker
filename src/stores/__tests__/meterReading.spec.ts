@@ -93,6 +93,24 @@ describe('useMeterReadingStore', () => {
     expect(meter.readings.map((r) => [r.reading, r.consumption])).toEqual([[2600, 200]])
   })
 
+  it('records units used, which the backend adds to the latest reading', async () => {
+    const store = await signedIn()
+    await store.recordReading(TENANT, { units: 163, readOn: '2026-10-15', notes: '' })
+    const [reading] = store.meterFor(TENANT).meter!.readings
+    expect(reading).toMatchObject({ reading: 2563, enteredUnits: 163, consumption: 163 })
+  })
+
+  it('sends units and the same figure as a reading with different keys', async () => {
+    const store = await signedIn()
+    recordReading.mockRejectedValueOnce(new ApiError('network'))
+    await store
+      .recordReading(TENANT, { units: 2600, readOn: '2026-10-15', notes: '' })
+      .catch(() => {})
+    await store.recordReading(TENANT, { reading: 2600, readOn: '2026-10-15', notes: '' })
+    const [first, second] = recordReading.mock.calls.map((call) => call[3])
+    expect(second).not.toBe(first)
+  })
+
   it('refuses an invalid reading without asking the backend', async () => {
     const store = await signedIn()
     await expect(

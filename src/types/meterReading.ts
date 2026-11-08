@@ -26,6 +26,9 @@ export interface MeterReading {
   id: string
   reading: number
   readOn: string // YYYY-MM-DD
+  // The units entered, when the reading was entered as units used since the latest reading
+  // (the backend added them to it); null when the reading itself was entered.
+  enteredUnits: number | null
   notes: string
   status: MeterReadingStatus
   // Units since the active reading before it (or the baseline); null for a void reading.
@@ -46,9 +49,22 @@ export interface TenantMeter {
   readings: MeterReading[]
 }
 
-// A reading as a form submits it.
-export interface MeterReadingInput {
+// How a new reading is entered: what the meter says, or the units used since the latest
+// reading, which the backend adds to it (so the tenant can give either, month to month).
+export type ReadingEntryMode = 'reading' | 'units'
+export type ReadingValue = { reading: number; units?: never } | { units: number; reading?: never }
+
+// A new reading as a form submits it.
+export type MeterReadingInput = ReadingValue & {
+  readOn: string // YYYY-MM-DD
+  notes: string
+}
+
+// A correction's replacement: always the reading itself (units would be added to the reading
+// being corrected).
+export interface MeterReadingCorrectionInput {
   reading: number
   readOn: string // YYYY-MM-DD
   notes: string
+  reason: string
 }

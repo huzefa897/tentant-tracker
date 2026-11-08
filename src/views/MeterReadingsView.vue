@@ -106,10 +106,14 @@ function handleRecord(input: MeterReadingInput) {
 
 function handleCorrect(input: MeterReadingInput & { reason?: string }) {
   const current = dialog.value
-  if (current?.kind !== 'correct') return
+  // A correction is always the reading itself: the form offers no units there.
+  if (current?.kind !== 'correct' || input.reading === undefined) return
+  const reading = input.reading
   run(() =>
     meterStore.correctReading(props.tenantId, current.reading.id, {
-      ...input,
+      reading,
+      readOn: input.readOn,
+      notes: input.notes,
       reason: input.reason ?? '',
     }),
   )

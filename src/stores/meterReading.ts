@@ -4,7 +4,11 @@ import { defineStore } from 'pinia'
 import { ApiError, isUncertainFailure, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { meterReadingService } from '@/services/meterReading.service'
 import { useAccessStore } from '@/stores/access'
-import type { MeterReadingInput, TenantMeter } from '@/types/meterReading'
+import type {
+  MeterReadingCorrectionInput,
+  MeterReadingInput,
+  TenantMeter,
+} from '@/types/meterReading'
 import { hasAtMostDecimals } from '@/utils/money'
 import { validateReason } from '@/utils/meterReadingValidation'
 
@@ -104,11 +108,14 @@ function writeError(err: unknown): MeterReadingError {
   return new MeterReadingError("Couldn't save the reading. Please try again.")
 }
 
-function validInput(input: MeterReadingInput): boolean {
+// The reading or the units entered (exactly one) and the day.
+function validInput(input: { reading?: number; units?: number; readOn: string }): boolean {
+  const values = [input.reading, input.units].filter((value) => value !== undefined)
   return (
-    Number.isFinite(input.reading) &&
-    input.reading >= 0 &&
-    hasAtMostDecimals(input.reading, 3) &&
+    values.length === 1 &&
+    Number.isFinite(values[0]) &&
+    values[0]! >= 0 &&
+    hasAtMostDecimals(values[0]!, 3) &&
     /^\d{4}-\d{2}-\d{2}$/.test(input.readOn)
   )
 }
@@ -209,7 +216,8 @@ export const useMeterReadingStore = defineStore('meterReading', () => {
     const key = keyFor(
       recordKeys,
       tenantId,
-      JSON.stringify([input.reading, input.readOn, input.notes]),
+      // Units and the same figure as a reading are different requests.
+      JSON.stringify([input.reading ?? null, input.units ?? null, input.readOn, input.notes]),
     )
     try {
       await write(tenantId, async (propertyId) => {
@@ -246,7 +254,7 @@ export const useMeterReadingStore = defineStore('meterReading', () => {
   async function correctReading(
     tenantId: string,
     readingId: string,
-    input: MeterReadingInput & { reason: string },
+    input: MeterReadingCorrectionInput,
   ) {
     const problem = validateReason(input.reason, 'reading is being corrected')
     if (problem) throw new MeterReadingError(problem)

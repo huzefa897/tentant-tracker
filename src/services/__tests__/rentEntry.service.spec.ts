@@ -228,6 +228,18 @@ describe('toCreateRentEntryDto', () => {
     )
   })
 
+  it('sends a new closing reading as the reading or as the units used', () => {
+    expect(
+      toCreateRentEntryDto({ ...input, closingReading: { reading: 2985, readOn: '2026-10-31' } }),
+    ).toMatchObject({ closingReading: { reading: '2985.000', readOn: '2026-10-31' } })
+    const byUnits = toCreateRentEntryDto({
+      ...input,
+      closingReading: { units: 109, readOn: '2026-10-31' },
+    })
+    expect(byUnits.closingReading).toEqual({ units: '109.000', readOn: '2026-10-31' })
+    expect(byUnits).not.toHaveProperty('electricityUnits')
+  })
+
   it('closes on a recorded reading by its id, without typed units', () => {
     expect(toCreateRentEntryDto({ ...input, closingReadingId: 'reading-1' })).toMatchObject({
       closingReadingId: 'reading-1',

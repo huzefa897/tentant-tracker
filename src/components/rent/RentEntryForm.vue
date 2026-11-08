@@ -3,20 +3,24 @@ import { computed, nextTick, reactive, ref, useTemplateRef, watch } from 'vue'
 import { Droplet, Gauge, IndianRupee, Lock, Zap } from '@lucide/vue'
 
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
+import ReadingEntryToggle from '@/components/meter/ReadingEntryToggle.vue'
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import type { MeterPoint } from '@/types/meterReading'
+import type { MeterPoint, ReadingEntryMode } from '@/types/meterReading'
 import type { NewRentEntrySubmission } from '@/types/rentEntry'
 import type { Tenant } from '@/types/tenant'
 import { formatINR } from '@/utils/currency'
 import { formatDateValue, toDateValue, toMonthValue } from '@/utils/date'
 import {
   type MeterReadingErrors,
+  readingFromUnits,
+  type UnitsErrors,
   unitsBetween,
   validateMeterReadingDraft,
+  validateUnitsDraft,
 } from '@/utils/meterReadingValidation'
 import { EMPTY_VALUE } from '@/utils/emptyValue'
 import { toPaise } from '@/utils/money'
@@ -99,7 +103,11 @@ const paidDate = ref('')
 const paymentNotes = ref('')
 // Electricity: charged (typed units, or the meter's closing reading) or left off this bill.
 const includeElectricity = ref(true)
+// A new closing reading is entered as what the meter says, or as the units used since the
+// newest reading (the backend adds them to it).
+const closingEntry = ref<ReadingEntryMode>('reading')
 const closingReading = ref<NumberInputValue>('')
+const closingUnits = ref<NumberInputValue>('')
 // A recorded reading waiting to be billed is used unless a new reading is chosen.
 const closingChoice = ref<'recorded' | 'new'>('recorded')
 // Which of them, once picked; until then the one dated in the billing month, else the newest.
@@ -110,8 +118,11 @@ const readOnTyped = ref<string | null>(null)
 
 // The tenant's meter is set up (in admin): units come from readings, never typed.
 const hasMeter = computed(() => props.tenant.meterBaseline !== null)
+const byUnits = computed(() => closingEntry.value === 'units')
 // A reading entered with electricity left off is recorded as a reading only.
-const readingEntered = computed(() => closingReading.value !== '')
+const readingEntered = computed(() =>
+  byUnits.value ? closingUnits.value !== '' : closingReading.value !== '',
+)
 // The bill closes on the recorded reading: no reading is typed, and none is recorded with it.
 const recordedReading = computed<MeterPoint | null>(
   () =>
@@ -129,10 +140,16 @@ const useRecorded = computed(
 )
 // The reading a new one must follow.
 const followedReading = computed(() => props.latestReading ?? props.lastBilled)
+// Units typed are added to the newest reading (a preview: the backend adds them).
+const unitsReading = computed(() => readingFromUnits(followedReading.value, closingUnits.value))
 const meterUnits = computed(() =>
   unitsBetween(
     props.lastBilled,
-    useRecorded.value ? recordedReading.value!.reading : closingReading.value,
+    useRecorded.value
+      ? recordedReading.value!.reading
+      : byUnits.value
+        ? (unitsReading.value ?? '')
+        : closingReading.value,
   ),
 )
 
@@ -247,19 +264,33 @@ const summaryRows = computed(() => {
 
 // Form fields by input id. The payment's own fields map to the payment rules.
 type Field =
-  keyof RentEntryDraft | 'paymentAmount' | 'paidDate' | 'paymentNotes' | 'closingReading' | 'readOn'
+  | keyof RentEntryDraft
+  | 'paymentAmount'
+  | 'paidDate'
+  | 'paymentNotes'
+  | 'closingReading'
+  | 'closingUnits'
+  | 'readOn'
 
 // The closing reading: needed to charge a meter, optional (a reading only) with electricity left
 // off. A new one is checked against the newest reading; the backend checks the others too.
-const meterErrors = computed<MeterReadingErrors & { meter?: string }>(() => {
+const meterErrors = computed<MeterReadingErrors & UnitsErrors & { meter?: string }>(() => {
   if (!hasMeter.value || (!includeElectricity.value && !readingEntered.value)) return {}
   if (!props.lastBilled) {
     return { meter: props.meterError ?? 'Loading the meter’s last billed reading…' }
   }
   if (useRecorded.value) return {}
+  const context = { after: followedReading.value, today }
+  if (byUnits.value) {
+    const found = validateUnitsDraft({ units: closingUnits.value, readOn: readOn.value }, context)
+    if (includeElectricity.value && !readingEntered.value) {
+      found.units = 'Enter the units used, or leave electricity off this bill.'
+    }
+    return found
+  }
   const found = validateMeterReadingDraft(
     { reading: closingReading.value, readOn: readOn.value },
-    { after: followedReading.value, today },
+    context,
   )
   if (includeElectricity.value && !readingEntered.value) {
     found.reading = 'Enter the closing meter reading, or leave electricity off this bill.'
@@ -283,6 +314,7 @@ const errors = computed<Partial<Record<Field, string>>>(() => ({
   // Units come from the readings (or there are none): their errors are the reading's.
   ...(hasMeter.value || !includeElectricity.value ? { electricityUnits: undefined } : {}),
   closingReading: meterErrors.value.reading,
+  closingUnits: meterErrors.value.units,
   readOn: meterErrors.value.readOn,
   paymentAmount: paymentErrors.value.amount,
   paidDate: paymentErrors.value.paidDate,
@@ -328,9 +360,12 @@ async function handleSubmit() {
   // Validation guarantees a finite, non-negative amount; 0 means no payment.
   const amount = paymentAmount.value as number
 
+  // Validation guarantees a number in whichever was entered.
   const reading =
     hasMeter.value && readingEntered.value && !useRecorded.value
-      ? { reading: closingReading.value as number, readOn: readOn.value }
+      ? byUnits.value
+        ? { units: closingUnits.value as number, readOn: readOn.value }
+        : { reading: closingReading.value as number, readOn: readOn.value }
       : null
   emit('save', {
     entry: {
@@ -518,38 +553,82 @@ const lockedClass =
           </div>
 
           <div v-else class="space-y-2">
-            <Label for="closingReading">
-              <template v-if="includeElectricity">Closing reading</template>
-              <template v-else>
-                Meter reading <span class="text-muted-foreground">(optional, not charged)</span>
-              </template>
-            </Label>
-            <div class="relative">
-              <Gauge
-                class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <Input
-                id="closingReading"
-                v-model.number="closingReading"
-                type="number"
-                inputmode="decimal"
-                min="0"
-                step="any"
-                :required="includeElectricity"
-                placeholder="e.g. 2985"
-                :class="[inputClass, 'pl-9']"
-                v-bind="fieldAttrs('closingReading')"
-              />
-            </div>
-            <p
-              v-if="errorFor('closingReading')"
-              id="closingReading-error"
-              class="text-sm text-destructive"
-              role="alert"
-            >
-              {{ errorFor('closingReading') }}
-            </p>
+            <ReadingEntryToggle v-model="closingEntry" name="closing-entry" :disabled="saving" />
+            <template v-if="byUnits">
+              <Label for="closingUnits">
+                Units used since the last reading
+                <span v-if="!includeElectricity" class="text-muted-foreground">
+                  (optional, not charged)
+                </span>
+              </Label>
+              <div class="relative">
+                <Zap
+                  class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  id="closingUnits"
+                  v-model.number="closingUnits"
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="any"
+                  :required="includeElectricity"
+                  placeholder="e.g. 109"
+                  :class="[inputClass, 'pl-9']"
+                  v-bind="fieldAttrs('closingUnits')"
+                />
+              </div>
+              <p
+                v-if="errorFor('closingUnits')"
+                id="closingUnits-error"
+                class="text-sm text-destructive"
+                role="alert"
+              >
+                {{ errorFor('closingUnits') }}
+              </p>
+              <p
+                v-else-if="unitsReading !== null"
+                class="text-xs text-muted-foreground"
+                data-testid="closing-units-reading"
+              >
+                The reading becomes {{ unitsReading.toLocaleString('en-IN') }}
+              </p>
+            </template>
+            <template v-else>
+              <Label for="closingReading">
+                <template v-if="includeElectricity">Closing reading</template>
+                <template v-else>
+                  Meter reading <span class="text-muted-foreground">(optional, not charged)</span>
+                </template>
+              </Label>
+              <div class="relative">
+                <Gauge
+                  class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  id="closingReading"
+                  v-model.number="closingReading"
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="any"
+                  :required="includeElectricity"
+                  placeholder="e.g. 2985"
+                  :class="[inputClass, 'pl-9']"
+                  v-bind="fieldAttrs('closingReading')"
+                />
+              </div>
+              <p
+                v-if="errorFor('closingReading')"
+                id="closingReading-error"
+                class="text-sm text-destructive"
+                role="alert"
+              >
+                {{ errorFor('closingReading') }}
+              </p>
+            </template>
             <p v-if="includeElectricity && recordedReading" class="text-xs">
               <Button
                 type="button"

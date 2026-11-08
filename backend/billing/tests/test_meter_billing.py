@@ -463,6 +463,51 @@ class MeterBillApiTests(MeterBillTestCase):
             meter["readings"][0]["billedBy"], {"id": str(october.pk), "billingMonth": "2026-10"}
         )
 
+    def test_a_bill_closing_on_units_used(self):
+        entries = f"/api/v1/properties/{self.property.id}/tenancies/{self.tenancy.id}/entries/"
+        october = {
+            "billingMonth": "2026-10",
+            "waterAmount": "0",
+            "closingReading": {"units": "163", "readOn": "2026-10-31"},
+        }
+        key = str(uuid.uuid4())
+        response = self.client.post(entries, october, format="json", headers={"Idempotency-Key": key})
+        self.assertEqual(response.status_code, 201, response.content)
+        body = response.json()
+        self.assertEqual(body["electricityUnits"], "163.000")
+        self.assertEqual(body["closingReading"]["reading"], "2563.000")
+        replay = self.client.post(entries, october, format="json", headers={"Idempotency-Key": key})
+        self.assertEqual(replay.status_code, 200, replay.content)
+        self.assertEqual(replay.json()["id"], body["id"])
+
+        # November read but not charged; December's units are added to November's reading, and
+        # the bill charges both months from October's.
+        self.bill(NOVEMBER, closing=("2876", date(2026, 11, 30)), include=False)
+        december = self.client.post(
+            entries,
+            {
+                "billingMonth": "2026-12",
+                "waterAmount": "0",
+                "closingReading": {"units": "109", "readOn": "2026-12-31"},
+            },
+            format="json",
+        )
+        self.assertEqual(december.status_code, 201, december.content)
+        self.assertEqual(december.json()["closingReading"]["reading"], "2985.000")
+        self.assertEqual(december.json()["electricityUnits"], "422.000")
+
+        backdated = self.client.post(
+            entries,
+            {
+                "billingMonth": "2027-01",
+                "waterAmount": "0",
+                "closingReading": {"units": "10", "readOn": "2026-12-15"},
+            },
+            format="json",
+        )
+        self.assertEqual(backdated.status_code, 400)
+        self.assertIn("added to the latest reading", backdated.json()["closingReading"][0])
+
     def test_a_bill_with_a_closing_reading_and_its_contract(self):
         entries = f"/api/v1/properties/{self.property.id}/tenancies/{self.tenancy.id}/entries/"
         response = self.client.post(

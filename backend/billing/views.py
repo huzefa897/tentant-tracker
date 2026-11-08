@@ -378,7 +378,9 @@ class RentEntryViewSet(
                 }
             ) from None
         except InvalidReadingError as error:
-            field = "closingReading" if error.field in ("reading", "readOn") else error.field
+            field = (
+                "closingReading" if error.field in ("reading", "units", "readOn") else error.field
+            )
             raise exceptions.ValidationError({field: [error.detail]}) from None
         except DuplicateReadingDayError:
             raise exceptions.ValidationError(

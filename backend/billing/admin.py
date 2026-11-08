@@ -81,6 +81,7 @@ class MeterReadingAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
         "tenancy",
         "reading",
         "read_on",
+        "entered_units",
         "notes",
         "created_by",
         "created_at",

@@ -165,16 +165,22 @@ def _fingerprint(request: dict) -> str:
     return hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
 
 
-def _reading_fingerprint(tenancy_id, value: Decimal, read_on: date, notes: str, replaces=None):
-    return _fingerprint(
-        {
-            "tenancy_id": str(tenancy_id),
-            "reading": f"{value:.3f}",
-            "read_on": read_on.isoformat(),
-            "notes": notes,
-            "replaces": None if replaces is None else str(replaces),
-        }
-    )
+def _reading_fingerprint(
+    tenancy_id, value: Decimal | None, read_on: date, notes: str, replaces=None, *, units=None
+):
+    """The request, not the reading worked out from it: units entered are fingerprinted as
+    units (the reading they become depends on the meter at the time)."""
+    request = {
+        "tenancy_id": str(tenancy_id),
+        "read_on": read_on.isoformat(),
+        "notes": notes,
+        "replaces": None if replaces is None else str(replaces),
+    }
+    if units is None:
+        request["reading"] = f"{value:.3f}"
+    else:
+        request["units"] = f"{units:.3f}"
+    return _fingerprint(request)
 
 
 def _check_can_record_readings(actor, property_id) -> None:
@@ -221,6 +227,45 @@ def last_billed(tenancy: Tenancy) -> MeterPoint | None:
         return start
     closing = latest.closing_reading
     return MeterPoint(closing.reading, closing.read_on, closing.pk)
+
+
+def latest_reading(tenancy: Tenancy) -> MeterPoint | None:
+    """What the meter last said: the newest active reading, else the baseline. Units entered
+    are added to it. None when the meter isn't set up."""
+    start = baseline(tenancy)
+    if start is None:
+        return None
+    newest = MeterReading.objects.active().filter(tenancy=tenancy).order_by("-read_on").first()
+    if newest is None:
+        return start
+    return MeterPoint(newest.reading, newest.read_on, newest.pk)
+
+
+# The largest reading the column holds (max_digits=10, decimal_places=3).
+MAX_READING = Decimal("9999999.999")
+
+
+def reading_from_units(tenancy: Tenancy, units: Decimal, read_on: date) -> Decimal:
+    """The reading that units used since the latest reading make, on a tenancy the caller has
+    locked. Units are always added to the newest reading, so they're dated after it (or on the
+    baseline's day, when there's no reading yet): a backdated reading is entered as the reading
+    itself."""
+    latest = latest_reading(tenancy)
+    if latest is None:
+        raise MeterNotSetUpError()
+    if units < 0:
+        raise InvalidReadingError("units", "Units used can't be negative.")
+    from_baseline = latest.reading_id is None
+    if read_on < latest.read_on or (read_on == latest.read_on and not from_baseline):
+        raise InvalidReadingError(
+            "readOn",
+            f"Units are added to the latest reading, {latest.reading.normalize():f} on "
+            f"{latest.read_on:%d %b %Y}: date them after it, or enter the meter reading.",
+        )
+    value = latest.reading + units
+    if value > MAX_READING:
+        raise InvalidReadingError("units", "That's more units than the meter can show.")
+    return value
 
 
 def _check_reading_fits(tenancy: Tenancy, value: Decimal, read_on: date, *, ignore=None) -> None:
@@ -279,33 +324,50 @@ def _replay_reading(*, idempotency_key, tenancy_id, actor, fingerprint) -> Recor
 
 
 def record_reading_locked(
-    tenancy: Tenancy, *, actor, value: Decimal, read_on: date, notes: str, idempotency_key
+    tenancy: Tenancy,
+    *,
+    actor,
+    read_on: date,
+    notes: str,
+    idempotency_key,
+    value: Decimal | None = None,
+    units: Decimal | None = None,
 ) -> MeterReading:
     """Records a reading on a tenancy the caller has locked (_lock_tenancy, or bill creation's
-    lock), after the order checks. Access is the caller's to check."""
+    lock), after the order checks. Either the reading itself (value) or the units used since
+    the latest reading (units: reading_from_units, worked out here under the lock, and kept
+    as entered_units). Access is the caller's to check."""
+    if (value is None) == (units is None):
+        raise ValueError("A reading is entered as the reading or as units, not both.")
+    fingerprint = _reading_fingerprint(tenancy.pk, value, read_on, notes, units=units)
+    if units is not None:
+        value = reading_from_units(tenancy, units, read_on)
     _check_reading_fits(tenancy, value, read_on)
     return MeterReading.objects.create(
         tenancy=tenancy,
         reading=value,
         read_on=read_on,
+        entered_units=units,
         notes=notes,
         created_by=actor,
         idempotency_key=idempotency_key,
-        fingerprint=_reading_fingerprint(tenancy.pk, value, read_on, notes),
+        fingerprint=fingerprint,
     )
 
 
 def record_meter_reading(*, tenancy_id, actor, validated_data: dict, idempotency_key):
     """Records one reading of the tenancy's meter (owners and managers).
 
-    validated_data: reading (≥ 0, up to 3 decimals), read_on, and optionally notes. A retry
-    with the same key and request returns the reading it recorded; anything else with that key
-    is ReadingIdempotencyConflictError. Never creates or changes a bill.
+    validated_data: reading (≥ 0, up to 3 decimals) or units (used since the latest reading,
+    which they're added to), read_on, and optionally notes. A retry with the same key and
+    request returns the reading it recorded; anything else with that key is
+    ReadingIdempotencyConflictError. Never creates or changes a bill.
     """
-    value = validated_data["reading"]
+    value = validated_data.get("reading")
+    units = validated_data.get("units")
     read_on = validated_data["read_on"]
     notes = validated_data.get("notes", "")
-    fingerprint = _reading_fingerprint(tenancy_id, value, read_on, notes)
+    fingerprint = _reading_fingerprint(tenancy_id, value, read_on, notes, units=units)
     try:
         with transaction.atomic():
             tenancy = _lock_tenancy(tenancy_id)
@@ -321,6 +383,7 @@ def record_meter_reading(*, tenancy_id, actor, validated_data: dict, idempotency
                 tenancy,
                 actor=actor,
                 value=value,
+                units=units,
                 read_on=read_on,
                 notes=notes,
                 idempotency_key=idempotency_key,
@@ -512,7 +575,8 @@ def electricity_for_new_bill(
         closing = record_reading_locked(
             tenancy,
             actor=actor,
-            value=new_reading["reading"],
+            value=new_reading.get("reading"),
+            units=new_reading.get("units"),
             read_on=new_reading["read_on"],
             notes=new_reading.get("notes", ""),
             idempotency_key=reading_key,

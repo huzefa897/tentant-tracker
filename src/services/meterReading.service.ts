@@ -4,7 +4,9 @@ import type {
   ElectricityMode,
   MeterPoint,
   MeterReading,
+  MeterReadingCorrectionInput,
   MeterReadingInput,
+  ReadingValue,
   ReceiptMeterPoint,
   TenantMeter,
 } from '@/types/meterReading'
@@ -27,6 +29,7 @@ export interface MeterReadingDto {
   id: string
   reading: string
   readOn: string
+  enteredUnits: string | null
   notes: string
   status: 'active' | 'void'
   consumption: string | null
@@ -131,6 +134,12 @@ export function parseMeterReading(value: unknown): MeterReadingDto {
   }
   if (typeof value.reading !== 'string' || !READING.test(value.reading)) invalid('reading')
   if (typeof value.readOn !== 'string' || !DATE.test(value.readOn)) invalid('readOn')
+  if (
+    value.enteredUnits !== null &&
+    (typeof value.enteredUnits !== 'string' || !READING.test(value.enteredUnits))
+  ) {
+    invalid('enteredUnits')
+  }
   if (typeof value.notes !== 'string') invalid('notes')
   if (value.status === 'void') {
     for (const key of ['voidedAt', 'voidedByName', 'voidReason'] as const) {
@@ -172,6 +181,7 @@ export function toMeterReading(dto: MeterReadingDto): MeterReading {
     id: dto.id,
     reading: Number(dto.reading),
     readOn: dto.readOn,
+    enteredUnits: dto.enteredUnits === null ? null : Number(dto.enteredUnits),
     notes: dto.notes,
     status: dto.status,
     consumption: dto.consumption === null ? null : Number(dto.consumption),
@@ -198,10 +208,16 @@ export function parseTenantMeter(data: unknown): TenantMeter {
   }
 }
 
-// Validation (utils/meterReadingValidation.ts) has limited the decimals, so toFixed rounds
-// nothing away.
+// The reading or the units entered, as the backend takes them. Validation
+// (utils/meterReadingValidation.ts) has limited the decimals, so toFixed rounds nothing away.
+export function toReadingValueDto(value: ReadingValue): { reading: string } | { units: string } {
+  return value.units !== undefined
+    ? { units: value.units.toFixed(3) }
+    : { reading: value.reading.toFixed(3) }
+}
+
 export function toMeterReadingDto(input: MeterReadingInput) {
-  return { reading: input.reading.toFixed(3), readOn: input.readOn, notes: input.notes }
+  return { ...toReadingValueDto(input), readOn: input.readOn, notes: input.notes }
 }
 
 // The new or replacement reading's id and the meter as it is now.
@@ -280,12 +296,17 @@ export const meterReadingService = {
     propertyId: string,
     tenancyId: string,
     readingId: string,
-    input: MeterReadingInput & { reason: string },
+    input: MeterReadingCorrectionInput,
     idempotencyKey: string,
   ): Promise<MeterWrite> {
     return post(
       `${readingsUrl(propertyId, tenancyId)}${encodeURIComponent(readingId)}/correction/`,
-      { reason: input.reason, ...toMeterReadingDto(input) },
+      {
+        reason: input.reason,
+        reading: input.reading.toFixed(3),
+        readOn: input.readOn,
+        notes: input.notes,
+      },
       idempotencyKey,
     )
   },

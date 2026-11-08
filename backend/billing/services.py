@@ -308,6 +308,19 @@ def record_payment(*, entry_id, actor, idempotency_key, validated_data: dict) ->
         )
 
 
+def _closing_reading_request(closing: dict) -> dict:
+    """A new closing reading as requested: the reading, or the units used (added to the latest
+    reading on the server, so the request is fingerprinted, not the reading they make)."""
+    request = {
+        "reading": None if closing.get("reading") is None else str(closing["reading"]),
+        "read_on": closing["read_on"].isoformat(),
+        "notes": closing.get("notes", ""),
+    }
+    if closing.get("units") is not None:
+        request["units"] = str(closing["units"])
+    return request
+
+
 def _creation_fingerprint(validated_data: dict, initial_payment: dict | None) -> str:
     """The original creation request, to tell a retry from a different request with the same
     key. The bill's current balance isn't part of it, so later payments never make a genuine
@@ -325,11 +338,7 @@ def _creation_fingerprint(validated_data: dict, initial_payment: dict | None) ->
         "include_electricity": validated_data.get("include_electricity", True),
         "closing_reading": None
         if validated_data.get("closing_reading") is None
-        else {
-            "reading": text(validated_data["closing_reading"]["reading"]),
-            "read_on": validated_data["closing_reading"]["read_on"].isoformat(),
-            "notes": validated_data["closing_reading"].get("notes", ""),
-        },
+        else _closing_reading_request(validated_data["closing_reading"]),
         "closing_reading_id": text(validated_data.get("closing_reading_id")),
         "initial_payment": None
         if initial_payment is None
