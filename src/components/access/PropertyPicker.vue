@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Building2, Check, ChevronRight } from '@lucide/vue'
+import { PhBuildings, PhCaretRight, PhCheck } from '@phosphor-icons/vue'
 
 import type { PropertyAccess, PropertyRole } from '@/types/access'
 
@@ -31,18 +31,18 @@ const ROLE_LABELS: Record<PropertyRole, string> = {
           class="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-primary"
           aria-hidden="true"
         >
-          <Building2 class="size-5" />
+          <PhBuildings class="size-5" />
         </span>
         <span class="min-w-0 flex-1">
           <span class="block truncate font-semibold">{{ property.name }}</span>
           <span class="block text-sm text-muted-foreground">{{ ROLE_LABELS[property.role] }}</span>
         </span>
-        <Check
+        <PhCheck
           v-if="property.id === selectedPropertyId"
           class="size-5 shrink-0 text-primary"
           aria-label="Selected"
         />
-        <ChevronRight v-else class="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <PhCaretRight v-else class="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
     </li>
   </ul>

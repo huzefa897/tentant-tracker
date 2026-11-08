@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ArrowLeftRight, ChevronDown, LogOut, User } from '@lucide/vue'
+import { PhArrowsLeftRight, PhCaretDown, PhSignOut, PhUser } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -54,12 +54,12 @@ const initials = computed(() =>
           aria-hidden="true"
         >
           <template v-if="initials">{{ initials }}</template>
-          <User v-else class="size-5" />
+          <PhUser v-else class="size-5" />
         </span>
         <span class="truncate font-medium max-sm:hidden" data-testid="user-menu-name">{{
           displayName
         }}</span>
-        <ChevronDown class="shrink-0 opacity-80" aria-hidden="true" />
+        <PhCaretDown class="shrink-0 opacity-80" aria-hidden="true" />
       </Button>
     </DropdownMenuTrigger>
 
@@ -77,11 +77,11 @@ const initials = computed(() =>
         data-testid="user-menu-switch-property"
         @select="emit('switch-property')"
       >
-        <ArrowLeftRight aria-hidden="true" />
+        <PhArrowsLeftRight aria-hidden="true" />
         Switch property
       </DropdownMenuItem>
       <DropdownMenuItem class="h-10 px-2" data-testid="user-menu-logout" @select="emit('logout')">
-        <LogOut aria-hidden="true" />
+        <PhSignOut aria-hidden="true" />
         Logout
       </DropdownMenuItem>
     </DropdownMenuContent>

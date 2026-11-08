@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Ban, PencilLine } from '@lucide/vue'
+import { PhPencilLine, PhProhibit } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import type { MeterReading } from '@/types/meterReading'
@@ -73,7 +73,7 @@ const emit = defineEmits<{
           :aria-label="`Correct reading ${formatReading(reading.reading)}`"
           @click="emit('correct', reading)"
         >
-          <PencilLine aria-hidden="true" />
+          <PhPencilLine aria-hidden="true" />
           Correct
         </Button>
         <Button
@@ -83,7 +83,7 @@ const emit = defineEmits<{
           :aria-label="`Void reading ${formatReading(reading.reading)}`"
           @click="emit('void', reading)"
         >
-          <Ban aria-hidden="true" />
+          <PhProhibit aria-hidden="true" />
           Void
         </Button>
       </div>

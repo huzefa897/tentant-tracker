@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef } from 'vue'
-import { TriangleAlert } from '@lucide/vue'
+import { PhWarning } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -72,7 +72,7 @@ async function handleSubmit() {
       class="flex gap-3 rounded-lg bg-warning/10 p-3 text-sm text-foreground"
       data-testid="reversal-effects"
     >
-      <TriangleAlert class="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+      <PhWarning class="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
       <ul class="space-y-1">
         <li>
           It stops counting towards this bill. It stays in the payment history, marked reversed.

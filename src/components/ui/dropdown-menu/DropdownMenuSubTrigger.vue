@@ -2,7 +2,7 @@
 import type { DropdownMenuSubTriggerProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
-import { ChevronRightIcon } from '@lucide/vue'
+import { PhCaretRight } from '@phosphor-icons/vue'
 import { reactiveOmit } from '@vueuse/core'
 import { DropdownMenuSubTrigger, useForwardProps } from 'reka-ui'
 import { cn } from '@/lib/utils'
@@ -28,6 +28,6 @@ const forwardedProps = useForwardProps(delegatedProps)
     "
   >
     <slot />
-    <ChevronRightIcon class="cn-rtl-flip ml-auto" />
+    <PhCaretRight class="cn-rtl-flip ml-auto" />
   </DropdownMenuSubTrigger>
 </template>

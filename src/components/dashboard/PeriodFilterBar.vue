@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CalendarDays, ChevronDown, FileText, X } from '@lucide/vue'
+import { PhCalendarDots, PhCaretDown, PhFileText, PhX } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import type { PreparationFilter, TimingFilter } from '@/types/dashboard'
@@ -50,7 +50,7 @@ const selects = computed(() => [
   {
     id: 'filter-preparation',
     label: 'Bill',
-    icon: FileText,
+    icon: PhFileText,
     selected: preparation.value,
     shown: PREPARATIONS[preparation.value],
     options: (Object.keys(PREPARATIONS) as PreparationFilter[]).map((value) => ({
@@ -61,7 +61,7 @@ const selects = computed(() => [
   {
     id: 'filter-month',
     label: 'Month',
-    icon: CalendarDays,
+    icon: PhCalendarDots,
     selected: month.value ?? ALL_MONTHS,
     shown: month.value ? formatMonthValue(month.value) : 'All',
     options: [
@@ -101,7 +101,7 @@ function choose(id: string, event: Event) {
             <span class="text-muted-foreground">{{ `${select.label}: ` }}</span>
             <span class="font-semibold">{{ select.shown }}</span>
           </span>
-          <ChevronDown class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <PhCaretDown class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <select
             :id="select.id"
             :value="select.selected"
@@ -123,7 +123,7 @@ function choose(id: string, event: Event) {
           :disabled="disabled"
           @click="emit('clear')"
         >
-          <X aria-hidden="true" />
+          <PhX aria-hidden="true" />
           Clear filters
         </Button>
       </div>

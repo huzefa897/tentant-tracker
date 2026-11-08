@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { ChevronRight, Gauge, LoaderCircle, Search } from '@lucide/vue'
+import { PhCaretRight, PhGauge, PhMagnifyingGlass, PhSpinnerGap } from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
@@ -50,7 +50,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 <template>
   <div>
     <div class="relative mb-4 max-w-xl">
-      <Search
+      <PhMagnifyingGlass
         class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
         aria-hidden="true"
       />
@@ -108,12 +108,12 @@ onBeforeUnmount(() => clearTimeout(timer))
                 Due {{ formatOrdinal(tenant.rentDueDay) }}
               </span>
             </span>
-            <Gauge
+            <PhGauge
               v-if="tenant.meterBaseline"
               class="size-4 shrink-0 text-muted-foreground max-sm:hidden"
               aria-label="Meter tracked"
             />
-            <ChevronRight class="shrink-0 text-muted-foreground" aria-hidden="true" />
+            <PhCaretRight class="shrink-0 text-muted-foreground" aria-hidden="true" />
           </button>
         </li>
       </ul>
@@ -127,7 +127,7 @@ onBeforeUnmount(() => clearTimeout(timer))
         :disabled="loadingMore"
         @click="emit('load-more')"
       >
-        <LoaderCircle v-if="loadingMore" class="animate-spin" aria-hidden="true" />
+        <PhSpinnerGap v-if="loadingMore" class="animate-spin" aria-hidden="true" />
         {{ loadingMore ? 'Loading…' : 'Load more' }}
       </Button>
     </template>

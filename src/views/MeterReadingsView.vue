@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Gauge, Plus, User } from '@lucide/vue'
+import { PhGauge, PhPlus, PhUser } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -207,7 +207,7 @@ const pageLoading = computed(
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
           data-testid="tenant-chip"
         >
-          <User class="size-4" aria-hidden="true" />
+          <PhUser class="size-4" aria-hidden="true" />
           {{ tenant.name }} · Flat {{ tenant.flatNumber }}
         </p>
       </header>
@@ -253,14 +253,14 @@ const pageLoading = computed(
               </div>
             </dl>
             <Button v-if="canEdit" class="mt-5 h-11 px-6" @click="open({ kind: 'record' })">
-              <Plus aria-hidden="true" />
+              <PhPlus aria-hidden="true" />
               Record reading
             </Button>
           </section>
 
           <section aria-labelledby="meter-history">
             <h2 id="meter-history" class="mb-3 flex items-center gap-2 font-semibold">
-              <Gauge class="size-4" aria-hidden="true" />
+              <PhGauge class="size-4" aria-hidden="true" />
               Readings
             </h2>
             <MeterReadingHistory

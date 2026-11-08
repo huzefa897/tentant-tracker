@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@expo-google-fonts/poppins": "^0.4.1",
-    "@lucide/vue": "^1.66.0",
+    "@phosphor-icons/vue": "^2.2.1",
     "@tailwindcss/vite": "^4.3.3",
     "@vueuse/core": "^15.0.0",
     "axios": "^1.21.0",

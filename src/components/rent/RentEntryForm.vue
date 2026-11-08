@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, useTemplateRef, watch } from 'vue'
-import { Droplet, Gauge, IndianRupee, Lock, Zap } from '@lucide/vue'
+import { PhCurrencyInr, PhDrop, PhGauge, PhLightning, PhLock } from '@phosphor-icons/vue'
 
 import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import ReadingEntryToggle from '@/components/meter/ReadingEntryToggle.vue'
@@ -480,7 +480,7 @@ const lockedClass =
           <div class="space-y-2">
             <Label for="rentAmount">Rent amount (₹)</Label>
             <div class="relative">
-              <IndianRupee
+              <PhCurrencyInr
                 class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden="true"
               />
@@ -574,7 +574,7 @@ const lockedClass =
                   · {{ formatDateValue(lastBilled.readOn) }}
                 </span>
               </span>
-              <Lock class="size-4" aria-hidden="true" />
+              <PhLock class="size-4" aria-hidden="true" />
             </div>
             <p class="text-xs text-muted-foreground">The last reading billed for electricity.</p>
           </div>
@@ -591,7 +591,7 @@ const lockedClass =
                 {{ recordedReading!.reading.toLocaleString('en-IN') }}
                 <span class="text-xs"> · {{ formatDateValue(recordedReading!.readOn) }}</span>
               </span>
-              <Lock class="size-4" aria-hidden="true" />
+              <PhLock class="size-4" aria-hidden="true" />
             </div>
             <select
               v-else
@@ -628,7 +628,7 @@ const lockedClass =
                 </span>
               </Label>
               <div class="relative">
-                <Zap
+                <PhLightning
                   class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                   aria-hidden="true"
                 />
@@ -669,7 +669,7 @@ const lockedClass =
                 </template>
               </Label>
               <div class="relative">
-                <Gauge
+                <PhGauge
                   class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                   aria-hidden="true"
                 />
@@ -731,7 +731,7 @@ const lockedClass =
             <p id="meterUnits-label" class="text-sm font-medium">Units used</p>
             <div :class="lockedClass" aria-labelledby="meterUnits-label" data-testid="meter-units">
               {{ meterUnits === null ? PLACEHOLDER : meterUnits.toLocaleString('en-IN') }}
-              <Lock class="size-4" aria-hidden="true" />
+              <PhLock class="size-4" aria-hidden="true" />
             </div>
           </div>
         </div>
@@ -740,7 +740,7 @@ const lockedClass =
           <div v-if="!hasMeter && includeElectricity" class="space-y-2">
             <Label for="electricityUnits">Electricity units used</Label>
             <div class="relative">
-              <Zap
+              <PhLightning
                 class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden="true"
               />
@@ -770,7 +770,7 @@ const lockedClass =
           <div class="space-y-2">
             <Label for="waterAmount">Water amount (₹)</Label>
             <div class="relative">
-              <Droplet
+              <PhDrop
                 class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden="true"
               />
@@ -800,7 +800,7 @@ const lockedClass =
             <p id="electricityRate-label" class="text-sm font-medium">Electricity rate</p>
             <div :class="lockedClass" aria-labelledby="electricityRate-label" data-testid="rate">
               {{ formatINR(tenant.electricityRate) }} / unit
-              <Lock class="size-4" aria-hidden="true" />
+              <PhLock class="size-4" aria-hidden="true" />
             </div>
             <p
               v-if="errorFor('electricityRate')"
@@ -820,7 +820,7 @@ const lockedClass =
               data-testid="electricity-amount"
             >
               {{ formatAmount(electricityAmount) }}
-              <Lock class="size-4" aria-hidden="true" />
+              <PhLock class="size-4" aria-hidden="true" />
             </div>
           </div>
         </div>
@@ -843,7 +843,7 @@ const lockedClass =
           <div class="space-y-2">
             <Label for="paymentAmount">Amount paid (₹)</Label>
             <div class="relative">
-              <IndianRupee
+              <PhCurrencyInr
                 class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
                 aria-hidden="true"
               />
