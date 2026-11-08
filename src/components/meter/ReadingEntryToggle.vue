@@ -1,40 +1,42 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-
-import ToggleSwitch from '@/components/common/ToggleSwitch.vue'
 import type { ReadingEntryMode } from '@/types/meterReading'
 
-// How a new reading is entered: what the meter says (off), or the units used since the latest
-// reading (on), which the backend adds to it. A switch row, like "Include electricity charges".
+// How a new reading is entered: what the meter says, or the units used since the latest
+// reading (the backend adds them to it). Native radios, so the arrow keys and screen readers
+// treat it as one choice.
 defineProps<{
-  // The switch's id: unique on the page.
-  id: string
+  // The radios' group name: unique on the page.
+  name: string
+  disabled?: boolean
 }>()
 
 const mode = defineModel<ReadingEntryMode>({ required: true })
 
-const byUnits = computed({
-  get: () => mode.value === 'units',
-  set: (on: boolean) => (mode.value = on ? 'units' : 'reading'),
-})
+const options: { value: ReadingEntryMode; label: string }[] = [
+  { value: 'reading', label: 'Meter reading' },
+  { value: 'units', label: 'Units used' },
+]
 </script>
 
 <template>
-  <label
-    :for="id"
-    class="flex cursor-pointer items-center justify-between gap-4 rounded-lg border bg-background px-3 py-2.5"
-    data-testid="reading-entry-toggle"
-  >
-    <span>
-      <span class="block text-sm font-medium">Enter units used</span>
-      <span class="block text-xs text-muted-foreground" data-testid="reading-entry-hint">
-        {{
-          byUnits
-            ? 'Added to the latest meter reading.'
-            : 'Off: enter the reading on the meter.'
-        }}
-      </span>
-    </span>
-    <ToggleSwitch :id="id" v-model="byUnits" />
-  </label>
+  <fieldset class="min-w-0" :disabled="disabled" data-testid="reading-entry-toggle">
+    <legend class="sr-only">Enter the meter reading or the units used</legend>
+    <div class="inline-grid grid-cols-2 rounded-lg border bg-muted p-0.5 text-sm">
+      <label
+        v-for="option in options"
+        :key="option.value"
+        class="cursor-pointer rounded-md px-3 py-1.5 text-center font-medium text-muted-foreground transition-colors has-checked:bg-background has-checked:text-foreground has-checked:shadow-sm has-focus-visible:ring-2 has-focus-visible:ring-ring has-disabled:cursor-not-allowed has-disabled:opacity-60"
+      >
+        <input
+          v-model="mode"
+          type="radio"
+          class="sr-only"
+          :name="name"
+          :value="option.value"
+          :data-testid="`entry-${option.value}`"
+        />
+        {{ option.label }}
+      </label>
+    </div>
+  </fieldset>
 </template>

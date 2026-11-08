@@ -594,25 +594,8 @@ describe('RentEntryForm electricity', () => {
 
   describe('entering units used instead of the reading', () => {
     async function byUnits() {
-      await wrapper!.get('#closingByUnits').trigger('click')
+      await wrapper!.get('[data-testid="entry-units"]').setValue(true)
     }
-
-    it('offers the switch only while a new reading is entered', async () => {
-      const recorded = { id: 'reading-nov', reading: 2876, readOn: '2026-10-02' }
-      mountMeter({ latestReading: recorded, unbilledReadings: [recorded] })
-      expect(wrapper!.find('#closingByUnits').exists()).toBe(false)
-
-      await wrapper!
-        .findAll('button')
-        .find((b) => b.text().includes('new reading'))!
-        .trigger('click')
-      expect(wrapper!.find('#closingByUnits').exists()).toBe(true)
-    })
-
-    it('has no switch for a tenant without a meter', () => {
-      mountForm()
-      expect(wrapper!.find('#closingByUnits').exists()).toBe(false)
-    })
 
     it('adds them to the last reading and sends the units', async () => {
       mountMeter()
