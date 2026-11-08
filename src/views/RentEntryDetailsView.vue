@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
-import { Ban, CircleCheck, Link2, PencilLine, Plus, User } from '@lucide/vue'
+import {
+  PhCheckCircle,
+  PhLink,
+  PhPencilLine,
+  PhPlus,
+  PhProhibit,
+  PhUser,
+} from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -421,7 +428,7 @@ function goToHistory() {
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
           data-testid="tenant-chip"
         >
-          <User class="size-4" aria-hidden="true" />
+          <PhUser class="size-4" aria-hidden="true" />
           {{ tenant.name }} · Flat {{ tenant.flatNumber }}
         </p>
 
@@ -433,7 +440,7 @@ function goToHistory() {
           data-testid="void-notice"
         >
           <p class="flex items-center gap-2 text-lg font-bold tracking-wide text-destructive">
-            <Ban class="size-5" aria-hidden="true" />
+            <PhProhibit class="size-5" aria-hidden="true" />
             VOID
           </p>
           <p class="mt-1 text-sm">
@@ -456,7 +463,7 @@ function goToHistory() {
             :to="linkedEntry(entry.replacedByEntryId)"
             class="inline-flex min-h-11 items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
           >
-            <Link2 class="size-4" aria-hidden="true" />
+            <PhLink class="size-4" aria-hidden="true" />
             Replaced by bill · {{ formatMonthValue(entry.billingMonth) }}
           </RouterLink>
           <RouterLink
@@ -464,14 +471,14 @@ function goToHistory() {
             :to="linkedEntry(entry.replacesEntryId)"
             class="inline-flex min-h-11 items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
           >
-            <Link2 class="size-4" aria-hidden="true" />
+            <PhLink class="size-4" aria-hidden="true" />
             Replaces void bill · {{ formatMonthValue(entry.billingMonth) }}
           </RouterLink>
         </p>
 
         <div v-if="canCorrect" class="mt-4 flex flex-wrap gap-3" data-testid="bill-actions">
           <Button variant="outline" class="h-11" :disabled="busy()" @click="goToCorrection">
-            <PencilLine aria-hidden="true" />
+            <PhPencilLine aria-hidden="true" />
             Correct bill
           </Button>
           <Button
@@ -480,7 +487,7 @@ function goToHistory() {
             :disabled="busy() || entryPayments?.status !== 'ready'"
             @click="openVoid"
           >
-            <Ban aria-hidden="true" />
+            <PhProhibit aria-hidden="true" />
             Void bill
           </Button>
         </div>
@@ -491,7 +498,7 @@ function goToHistory() {
           class="mt-4 flex animate-rise-in flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
         >
           <p class="flex items-center gap-2" role="status">
-            <CircleCheck class="size-5 shrink-0" aria-hidden="true" />
+            <PhCheckCircle class="size-5 shrink-0" aria-hidden="true" />
             {{ confirmation }}
           </p>
           <Button
@@ -502,7 +509,7 @@ function goToHistory() {
             data-testid="record-replacement"
             @click="openPaymentDialog"
           >
-            <Plus aria-hidden="true" />
+            <PhPlus aria-hidden="true" />
             Record replacement payment
           </Button>
         </div>
@@ -551,11 +558,11 @@ function goToHistory() {
             class="mt-4 flex h-11 items-center justify-center gap-2 rounded-lg bg-success/10 font-medium text-success"
             data-testid="fully-paid"
           >
-            <CircleCheck class="size-5" aria-hidden="true" />
+            <PhCheckCircle class="size-5" aria-hidden="true" />
             Fully paid
           </p>
           <Button v-else class="mt-4 h-11 w-full" @click="openPaymentDialog">
-            <Plus aria-hidden="true" />
+            <PhPlus aria-hidden="true" />
             Record payment
           </Button>
         </section>

@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArrowLeft, ChevronRight, Gauge, HandCoins, ReceiptText, User } from '@lucide/vue'
+import {
+  PhArrowLeft,
+  PhCaretRight,
+  PhGauge,
+  PhHandCoins,
+  PhReceipt,
+  PhUser,
+} from '@phosphor-icons/vue'
 
 import TenantSelector from '@/components/tenant/TenantSelector.vue'
 import { Button } from '@/components/ui/button'
@@ -51,24 +58,24 @@ const emit = defineEmits<{
   'load-more': []
 }>()
 
-const KINDS: { kind: RecordKind; label: string; hint: string; icon: typeof Gauge }[] = [
+const KINDS: { kind: RecordKind; label: string; hint: string; icon: typeof PhGauge }[] = [
   {
     kind: 'bill',
     label: 'New bill',
     hint: 'Rent, water and electricity for a month',
-    icon: ReceiptText,
+    icon: PhReceipt,
   },
   {
     kind: 'payment',
     label: 'Payment',
     hint: 'Money received on one of their bills',
-    icon: HandCoins,
+    icon: PhHandCoins,
   },
   {
     kind: 'reading',
     label: 'Meter reading',
     hint: 'What the meter says, or the units used',
-    icon: Gauge,
+    icon: PhGauge,
   },
 ]
 
@@ -162,7 +169,7 @@ const description = computed(() => {
             data-testid="quick-back"
             @click="emit('back')"
           >
-            <ArrowLeft aria-hidden="true" />
+            <PhArrowLeft aria-hidden="true" />
           </Button>
           <DialogTitle>{{ title }}</DialogTitle>
         </div>
@@ -192,7 +199,7 @@ const description = computed(() => {
               <span class="block font-medium">{{ option.label }}</span>
               <span class="block text-sm text-muted-foreground">{{ option.hint }}</span>
             </span>
-            <ChevronRight class="text-muted-foreground" aria-hidden="true" />
+            <PhCaretRight class="text-muted-foreground" aria-hidden="true" />
           </button>
         </li>
       </ul>
@@ -208,7 +215,7 @@ const description = computed(() => {
         <p
           class="inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
         >
-          <User class="size-4" aria-hidden="true" />
+          <PhUser class="size-4" aria-hidden="true" />
           {{ billTenant.name }} · Flat {{ billTenant.flatNumber }}
         </p>
         <div class="space-y-2">
@@ -224,7 +231,7 @@ const description = computed(() => {
         </div>
         <Button type="submit" class="h-11 w-full" :disabled="!monthValid">
           Continue
-          <ChevronRight aria-hidden="true" />
+          <PhCaretRight aria-hidden="true" />
         </Button>
       </form>
 
@@ -236,14 +243,14 @@ const description = computed(() => {
           data-testid="quick-preselected"
           @click="chooseTenant(preselected.id)"
         >
-          <User class="size-5 text-primary" aria-hidden="true" />
+          <PhUser class="size-5 text-primary" aria-hidden="true" />
           <span class="min-w-0 flex-1">
             <span class="block font-medium">{{ preselected.name }}</span>
             <span class="block text-sm text-muted-foreground">
               Flat {{ preselected.flatNumber }} · the tenant you are viewing
             </span>
           </span>
-          <ChevronRight class="text-muted-foreground" aria-hidden="true" />
+          <PhCaretRight class="text-muted-foreground" aria-hidden="true" />
         </button>
         <TenantSelector
           :tenants="tenants"

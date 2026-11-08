@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CircleAlert } from '@lucide/vue'
+import { PhWarningCircle } from '@phosphor-icons/vue'
 
 import type { Payment } from '@/types/payment'
 import { formatINR } from '@/utils/currency'
@@ -22,7 +22,7 @@ defineProps<{
     data-testid="payments-to-reverse"
   >
     <p class="flex gap-2 font-medium">
-      <CircleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+      <PhWarningCircle class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
       Reverse
       {{ payments.length === 1 ? 'this payment' : `these ${payments.length} payments` }} first. A
       bill with payments that count can't be {{ action }}.

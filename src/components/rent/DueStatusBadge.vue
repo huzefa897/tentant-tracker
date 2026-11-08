@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CalendarClock } from '@lucide/vue'
+import { PhCalendarCheck } from '@phosphor-icons/vue'
 
 import type { DueStatus } from '@/types/rentEntry'
 import { formatDueStatus } from '@/utils/rentCalculations'
@@ -22,7 +22,7 @@ defineProps<{
     "
     data-testid="due-status-badge"
   >
-    <CalendarClock class="size-3.5" aria-hidden="true" />
+    <PhCalendarCheck class="size-3.5" aria-hidden="true" />
     {{ formatDueStatus(status) }}
   </span>
 </template>

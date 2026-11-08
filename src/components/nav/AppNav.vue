@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { House, UserRound, Users, Zap } from '@lucide/vue'
+import { PhHouse, PhLightning, PhUser, PhUsers } from '@phosphor-icons/vue'
 import type { Component } from 'vue'
 
 import type { NavLink, NavSection } from '@/types/nav'
@@ -18,7 +18,7 @@ const emit = defineEmits<{
   quickEntry: []
 }>()
 
-const ICONS: Record<NavSection, Component> = { home: House, tenants: Users, account: UserRound }
+const ICONS: Record<NavSection, Component> = { home: PhHouse, tenants: PhUsers, account: PhUser }
 
 // A click with a modifier (new tab, new window) is left to the browser.
 function handleClick(event: MouseEvent, section: NavSection) {
@@ -60,7 +60,7 @@ const half = Math.ceil(props.links.length / 2)
           data-testid="nav-quick-entry"
           @click="emit('quickEntry')"
         >
-          <Zap class="size-6" aria-hidden="true" />
+          <PhLightning class="size-6" aria-hidden="true" />
         </button>
       </li>
       <li v-for="link in links.slice(half)" :key="link.section">
@@ -105,7 +105,7 @@ const half = Math.ceil(props.links.length / 2)
           data-testid="nav-quick-entry"
           @click="emit('quickEntry')"
         >
-          <Zap class="size-4" aria-hidden="true" />
+          <PhLightning class="size-4" aria-hidden="true" />
           Quick entry
         </button>
       </li>

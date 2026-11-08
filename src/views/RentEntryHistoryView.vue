@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChevronLeft, ChevronRight, History, Plus, User } from '@lucide/vue'
+import {
+  PhCaretLeft,
+  PhCaretRight,
+  PhClockCounterClockwise,
+  PhPlus,
+  PhUser,
+} from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
@@ -228,12 +234,12 @@ function viewEntry(entryId: string) {
             class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
             data-testid="tenant-chip"
           >
-            <User class="size-4" aria-hidden="true" />
+            <PhUser class="size-4" aria-hidden="true" />
             {{ tenant.name }} · Flat {{ tenant.flatNumber }}
           </p>
         </div>
         <Button class="h-11 px-6" @click="addEntry">
-          <Plus aria-hidden="true" />
+          <PhPlus aria-hidden="true" />
           New bill
         </Button>
       </header>
@@ -262,13 +268,13 @@ function viewEntry(entryId: string) {
           class="mb-4 flex size-14 items-center justify-center rounded-full bg-secondary text-primary"
           aria-hidden="true"
         >
-          <History class="size-7" />
+          <PhClockCounterClockwise class="size-7" />
         </div>
         <p class="max-w-sm text-muted-foreground">
           No bills yet. Add the first bill for this tenant.
         </p>
         <Button class="mt-6 h-11 px-6" @click="addEntry">
-          <Plus aria-hidden="true" />
+          <PhPlus aria-hidden="true" />
           New bill
         </Button>
       </div>
@@ -337,7 +343,7 @@ function viewEntry(entryId: string) {
               :disabled="!history.hasPrevious"
               @click="goToPage(history.page - 1)"
             >
-              <ChevronLeft aria-hidden="true" />
+              <PhCaretLeft aria-hidden="true" />
               Newer
             </Button>
             <p class="text-sm text-muted-foreground" data-testid="page-position">
@@ -350,7 +356,7 @@ function viewEntry(entryId: string) {
               @click="goToPage(history.page + 1)"
             >
               Older
-              <ChevronRight aria-hidden="true" />
+              <PhCaretRight aria-hidden="true" />
             </Button>
           </nav>
         </template>
@@ -367,7 +373,7 @@ function viewEntry(entryId: string) {
               Show void bills
             </Button>
             <Button class="h-11 px-6" @click="addEntry">
-              <Plus aria-hidden="true" />
+              <PhPlus aria-hidden="true" />
               New bill
             </Button>
           </div>

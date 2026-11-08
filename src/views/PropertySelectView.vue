@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Building2 } from '@lucide/vue'
+import { PhBuildings } from '@phosphor-icons/vue'
 
 import PropertyPicker from '@/components/access/PropertyPicker.vue'
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -78,7 +78,7 @@ async function handleSelect(propertyId: string) {
           class="mb-4 flex size-14 items-center justify-center rounded-full bg-secondary text-primary"
           aria-hidden="true"
         >
-          <Building2 class="size-7" />
+          <PhBuildings class="size-7" />
         </div>
         <h1 class="text-lg font-semibold">No property access</h1>
         <p class="mt-1 max-w-sm text-sm text-muted-foreground">

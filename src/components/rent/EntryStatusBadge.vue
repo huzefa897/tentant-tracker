@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Ban } from '@lucide/vue'
+import { PhProhibit } from '@phosphor-icons/vue'
 
 import DueStatusBadge from '@/components/rent/DueStatusBadge.vue'
 import PaymentStatusBadge from '@/components/rent/PaymentStatusBadge.vue'
@@ -19,7 +19,7 @@ defineProps<{
     class="inline-flex items-center gap-1.5 rounded-full border border-foreground/40 px-2.5 py-0.5 text-sm font-semibold tracking-wide text-foreground uppercase"
     data-testid="void-badge"
   >
-    <Ban class="size-3.5" aria-hidden="true" />
+    <PhProhibit class="size-3.5" aria-hidden="true" />
     Void
   </span>
   <span v-else class="inline-flex flex-wrap items-center gap-1.5">

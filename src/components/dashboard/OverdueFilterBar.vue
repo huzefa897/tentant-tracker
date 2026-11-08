@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Building2, CalendarDays, ChevronDown, Search, X } from '@lucide/vue'
+import {
+  PhBuildings,
+  PhCalendarDots,
+  PhCaretDown,
+  PhMagnifyingGlass,
+  PhX,
+} from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -57,7 +63,7 @@ const selects = computed(() => [
         {
           id: 'overdue-filter-property',
           label: 'Property',
-          icon: Building2,
+          icon: PhBuildings,
           selected: propertyId.value ?? ALL,
           shown: props.properties.find((p) => p.id === propertyId.value)?.name ?? 'All',
           options: [
@@ -70,7 +76,7 @@ const selects = computed(() => [
   {
     id: 'overdue-filter-month',
     label: 'Month',
-    icon: CalendarDays,
+    icon: PhCalendarDots,
     selected: month.value ?? ALL,
     shown: month.value ? formatMonthValue(month.value) : 'All',
     options: [
@@ -101,7 +107,7 @@ function clear() {
 <template>
   <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
     <form role="search" class="relative min-w-0 lg:max-w-sm lg:flex-1" @submit.prevent="sendSearch">
-      <Search
+      <PhMagnifyingGlass
         class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
         aria-hidden="true"
       />
@@ -131,7 +137,7 @@ function clear() {
           <span class="text-muted-foreground">{{ `${select.label}: ` }}</span>
           <span class="font-semibold">{{ select.shown }}</span>
         </span>
-        <ChevronDown class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <PhCaretDown class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <select
           :id="select.id"
           :value="select.selected"
@@ -152,7 +158,7 @@ function clear() {
         data-testid="overdue-clear-filters"
         @click="clear"
       >
-        <X aria-hidden="true" />
+        <PhX aria-hidden="true" />
         Clear filters
       </Button>
     </div>
