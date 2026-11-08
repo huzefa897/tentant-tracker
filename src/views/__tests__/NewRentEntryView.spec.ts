@@ -542,7 +542,7 @@ describe('NewRentEntryView', () => {
     })
   })
 
-  describe('when + Record opens a bill for another tenant', () => {
+  describe('when Quick entry opens a bill for another tenant', () => {
     const otherTenant = '/tenants/tenant-002/entries/new'
 
     it('asks before discarding unsaved changes, then starts the other tenant’s bill clean', async () => {

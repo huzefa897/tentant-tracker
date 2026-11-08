@@ -37,7 +37,7 @@ import { formatReading } from '@/utils/electricity'
 // consumption. Readings are recorded, corrected and voided here; none of it bills anything.
 const props = defineProps<{
   tenantId: string
-  // Open Record reading as soon as the meter is shown (from the + Record button).
+  // Open Record reading as soon as the meter is shown (from Quick entry).
   record?: boolean
 }>()
 
@@ -140,7 +140,7 @@ function handleVoid(reason: string) {
   run(() => meterStore.voidReading(props.tenantId, current.reading.id, reason))
 }
 
-// + Record asks for a reading with ?record=1. The request is met once the meter shows and the
+// Quick entry asks for a reading with ?record=1. The request is met once the meter shows and the
 // user may record, then taken out of the URL: asking again, even from this very page (the page
 // is reused when the tenant is the same), is a new navigation that the watch sees, and going
 // back never reopens the form.

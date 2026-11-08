@@ -5,7 +5,7 @@ Stack: Vue Router, Pinia (setup stores), Tailwind v4, shadcn-vue (reka-ui), Axio
 
 ## Commands
 
-- `npm run dev` — dev server
+- `npm run dev` — dev server (or `pnpm nx run web:serve`; the Nx `web` project wraps the same scripts: `serve`, `build`, `test`, `lint`, `format`)
 - `npm run build` — type-check (`vue-tsc`) + production build. Run it: the dev server does not type-check.
 - `npm run lint` — oxlint + ESLint with auto-fix
 - `npm run lint:check` — same, no fixes (use for verification/CI)
@@ -45,7 +45,7 @@ The details of each part of the app live in `docs/`, one file per area. **Before
 | Doc                                                                    | Covers                                                                                                                                                                                                                                                            |
 | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [docs/backend.md](docs/backend.md)                                     | Backend setup and conventions: env, apps, camelCase API, auth by default, `properties_for_user` scoping, roles; how the app calls it (`services/api.ts`, `ApiError`)                                                                                              |
-| [docs/auth-and-access.md](docs/auth-and-access.md)                     | Google sign-in (Firebase), invite-only people, property memberships and selection, `/me`, route guards, logout, the nav (bottom bar, + Record, Account)                                                                                                                                                  |
+| [docs/auth-and-access.md](docs/auth-and-access.md)                     | Google sign-in (Firebase), invite-only people, property memberships and selection, `/me`, route guards, logout, the nav (bottom bar, Quick entry, Account)                                                                                                                                                  |
 | [docs/tenants.md](docs/tenants.md)                                     | Tenancies (model, overlap and property rules, API), the tenant store and selector, the Tenants list and tenant page                                                                                                                                                                |
 | [docs/rent-entries.md](docs/rent-entries.md)                           | Bills: model, calculations, create/list API, the store, saving, history and details pages, the old local ledger                                                                                                                                                   |
 | [docs/payments-and-receipts.md](docs/payments-and-receipts.md)         | Payments (model, `record_payment`, API, store, recording), idempotent retries, and receipts (Django snapshots, issuance, PDF download)                                                                                                                            |
