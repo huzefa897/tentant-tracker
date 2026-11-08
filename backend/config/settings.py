@@ -51,9 +51,10 @@ DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 
 # Local development only: DJANGO_ENV=dev turns on "dev login" (accounts/authentication.py
-# DevAuthentication), which signs in as an existing person by email, no Google. It refuses to
-# start unless DEBUG is on and every allowed host is this machine (or the compose network), so a
-# production setting can't switch it on by accident (docs/security.md).
+# DevAuthentication), which signs in as an existing person by email, no Google. What keeps it
+# local is the authenticator itself, which only accepts connections from loopback. This startup
+# check is an extra tripwire for misconfiguration (DEBUG off, a public host name), not the
+# boundary: Host is a header a caller can fake (docs/security.md).
 DEV_LOGIN = os.getenv("DJANGO_ENV", "").strip().lower() == "dev"
 DEV_LOGIN_HOSTS = {"localhost", "127.0.0.1", "[::1]", "testserver", "backend"}
 if DEV_LOGIN:

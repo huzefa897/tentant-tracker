@@ -13,9 +13,11 @@ from accounts.authentication import DevAuthentication, NotRegistered
 BACKEND = Path(__file__).resolve().parents[2]
 
 
-def authenticate(header):
+def authenticate(header, **meta):
+    """The factory's request comes from 127.0.0.1 unless REMOTE_ADDR says otherwise."""
     extra = {} if header is None else {"HTTP_AUTHORIZATION": header}
-    return DevAuthentication().authenticate(APIRequestFactory().get("/api/v1/me/", **extra))
+    request = APIRequestFactory().get("/api/v1/me/", **extra, **meta)
+    return DevAuthentication().authenticate(request)
 
 
 @override_settings(DEV_LOGIN=True, DEBUG=True)
@@ -52,6 +54,29 @@ class DevAuthenticationTests(TestCase):
 
         with self.assertRaises(exceptions.AuthenticationFailed):
             authenticate("Dev person@example.test")
+
+    def test_accepts_loopback_connections_over_ipv4_and_ipv6(self):
+        for address in ("127.0.0.1", "127.0.0.53", "::1"):
+            with self.subTest(address=address):
+                user, _ = authenticate("Dev person@example.test", REMOTE_ADDR=address)
+                self.assertEqual(user, self.person)
+
+    def test_a_remote_connection_is_refused_whatever_host_it_claims(self):
+        # A misconfigured public instance: the caller fakes a local Host header (and a
+        # forwarded-for), but the connection itself comes from outside.
+        for address in ("203.0.113.5", "10.0.0.7", "172.18.0.3", "2001:db8::1"):
+            with self.subTest(address=address), self.assertRaises(exceptions.AuthenticationFailed):
+                authenticate(
+                    "Dev person@example.test",
+                    REMOTE_ADDR=address,
+                    HTTP_HOST="localhost",
+                    HTTP_X_FORWARDED_FOR="127.0.0.1",
+                )
+
+    def test_a_missing_or_malformed_peer_address_is_refused(self):
+        for address in ("", "localhost", "not-an-address"):
+            with self.subTest(address=address), self.assertRaises(exceptions.AuthenticationFailed):
+                authenticate("Dev person@example.test", REMOTE_ADDR=address)
 
     @override_settings(DEV_LOGIN=False)
     def test_refused_when_dev_login_is_off(self):
