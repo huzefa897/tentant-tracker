@@ -94,7 +94,7 @@ const router = createRouter({
       path: '/tenants/:tenantId/meter',
       name: 'meter-readings',
       component: () => import('@/views/MeterReadingsView.vue'),
-      // ?record=1 opens Record reading once the meter has loaded (the + Record button's).
+      // ?record=1 opens Record reading once the meter has loaded (Quick entry's).
       props: (route) => ({ ...route.params, record: route.query.record === '1' }),
       meta: { requiresAuth: true, requiresProperty: true, section: 'tenants' },
     },

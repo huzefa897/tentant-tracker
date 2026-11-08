@@ -156,7 +156,7 @@ function confirmLeave(to: RouteLocationNormalized) {
 
 onBeforeRouteLeave(confirmLeave)
 
-// This page is reused, not left, when + Record opens a bill for another tenant: the same guard
+// This page is reused, not left, when Quick entry opens a bill for another tenant: the same guard
 // applies to that move. Changing only the query (the month) is the same bill.
 onBeforeRouteUpdate((to) => (to.params.tenantId === props.tenantId ? true : confirmLeave(to)))
 
