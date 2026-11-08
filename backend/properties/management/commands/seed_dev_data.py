@@ -108,7 +108,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--email",
             required=True,
-            help="Your Google account's email: made an owner of both properties (and an admin) "
+            help="Your Google account's email: made an owner of both properties (and an admin, if "
+            "this creates the person) "
             "so you can sign in and see the data.",
         )
         parser.add_argument(
@@ -164,9 +165,11 @@ class Command(BaseCommand):
         email = email.strip().lower()
         owner = User.objects.filter(email__iexact=email).first()
         if owner is None:
+            # Only a person made here becomes an admin: an existing one (real data, say) keeps
+            # their permissions and just gets owner memberships of the seeded properties.
             owner = User(username=email, email=email, name="Dev Owner")
             owner.set_unusable_password()
-        owner.is_staff = owner.is_superuser = True
+            owner.is_staff = owner.is_superuser = True
         if password:
             owner.set_password(password)
         owner.save()

@@ -48,6 +48,16 @@ class SeedDevDataTests(TestCase):
             {fields["name"] for fields in PROPERTIES},
         )
 
+    def test_an_existing_person_gets_ownership_but_not_admin_rights(self):
+        person = User.objects.create_user(username="real", email="seeder@example.test")
+
+        seed()
+
+        person.refresh_from_db()
+        self.assertFalse(person.is_staff)
+        self.assertFalse(person.is_superuser)
+        self.assertEqual(person.property_memberships.filter(role="owner").count(), len(PROPERTIES))
+
     def test_running_again_adds_nothing(self):
         seed()
         counts = (
