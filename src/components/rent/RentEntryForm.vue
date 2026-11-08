@@ -373,15 +373,8 @@ const formRef = useTemplateRef<HTMLFormElement>('form')
 // In the wizard, Continue checks the fields of the step it is on and moves on; only the last step
 // (Confirm) saves, after checking everything.
 const STEP_FIELDS: Partial<Record<WizardStep, Field[]>> = {
-  charges: [
-    'billingMonth',
-    'rentAmount',
-    'electricityUnits',
-    'waterAmount',
-    'closingReading',
-    'closingUnits',
-    'readOn',
-  ],
+  // Not the billing month or the rent: the wizard has no fields for them.
+  charges: ['electricityUnits', 'waterAmount', 'closingReading', 'closingUnits', 'readOn'],
   payment: ['paymentAmount', 'paidDate', 'paymentNotes', 'notes'],
 }
 
@@ -456,11 +449,8 @@ const lockedClass =
       :disabled="saving"
       data-testid="fields"
     >
-      <section
-        v-show="!wizard || wizard === 'charges'"
-        :class="sectionClass"
-        aria-labelledby="rent-details-heading"
-      >
+      <!-- Quick entry leaves this out: the month was chosen a step earlier and the rent is the tenancy's. -->
+      <section v-if="!wizard" :class="sectionClass" aria-labelledby="rent-details-heading">
         <div>
           <h2 id="rent-details-heading" class="font-semibold">Rent details</h2>
           <p class="text-sm text-muted-foreground">Billing month and rent for this bill.</p>

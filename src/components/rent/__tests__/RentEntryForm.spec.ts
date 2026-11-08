@@ -717,10 +717,12 @@ describe('RentEntryForm as Quick entry steps', () => {
     return wrapper!.get(selector).isVisible()
   }
 
-  it('shows rent and utilities on the first step, without the summary', () => {
+  it('shows only the utilities on the first step: the rent and month come from the tenancy', () => {
     mountWizard('charges')
 
-    expect(visible('#rentAmount')).toBe(true)
+    expect(wrapper!.find('#rentAmount').exists()).toBe(false)
+    expect(wrapper!.find('#billingMonth').exists()).toBe(false)
+    expect(wrapper!.text()).not.toContain('Rent details')
     expect(visible('#electricityUnits')).toBe(true)
     expect(visible('#paymentAmount')).toBe(false)
     expect(visible('[data-testid="summary"]')).toBe(false)
@@ -728,12 +730,11 @@ describe('RentEntryForm as Quick entry steps', () => {
 
   it('moves on from the charges only when they are valid', async () => {
     mountWizard('charges')
-    await fill({ rentAmount: '' })
+    await fill({ electricityUnits: '' })
     await save()
     expect(wrapper!.emitted('advance')).toBeUndefined()
-    expect(wrapper!.text()).toContain('Rent')
 
-    await fill({ rentAmount: '15000', electricityUnits: '100' })
+    await fill({ electricityUnits: '100' })
     await save()
     expect(wrapper!.emitted('advance')).toHaveLength(1)
     expect(wrapper!.emitted('save')).toBeUndefined()
@@ -741,10 +742,10 @@ describe('RentEntryForm as Quick entry steps', () => {
 
   it('shows the payment with the running total, and checks the amount against it', async () => {
     mountWizard('payment')
-    await fill({ rentAmount: '15000', electricityUnits: '100', paymentAmount: '99999' })
+    await fill({ electricityUnits: '100', paymentAmount: '99999' })
 
     expect(visible('#paymentAmount')).toBe(true)
-    expect(visible('#rentAmount')).toBe(false)
+    expect(wrapper!.find('#rentAmount').exists()).toBe(false)
     expect(text('total-due')).toBe('₹15,600')
     await save()
     expect(wrapper!.emitted('advance')).toBeUndefined()
@@ -760,7 +761,7 @@ describe('RentEntryForm as Quick entry steps', () => {
     await fill({ electricityUnits: '100', paymentAmount: '5000', paidDate: '2026-10-03' })
 
     expect(wrapper!.get('[data-testid="wizard-actions"]').text()).toContain('Save this bill?')
-    expect(visible('#rentAmount')).toBe(false)
+    expect(wrapper!.find('#rentAmount').exists()).toBe(false)
     expect(visible('[data-testid="summary"]')).toBe(true)
 
     await save()
