@@ -49,7 +49,7 @@ describe('MeterReadingForm', () => {
   it('takes the units used instead, previewing the reading they make', async () => {
     const wrapper = mountForm({ after: { id: 'r', ...after } })
 
-    await wrapper.get('[data-testid="entry-units"]').setValue(true)
+    await wrapper.get('#meter-by-units').trigger('click')
     expect(wrapper.find('#meter-reading').exists()).toBe(false)
     await wrapper.get('#meter-units').setValue('109')
     expect(wrapper.get('[data-testid="meter-units-reading"]').text()).toBe(
@@ -64,7 +64,7 @@ describe('MeterReadingForm', () => {
   it('dates units after the previous reading, which they are added to', async () => {
     const wrapper = mountForm({ after: { id: 'r', ...after } })
 
-    await wrapper.get('[data-testid="entry-units"]').setValue(true)
+    await wrapper.get('#meter-by-units').trigger('click')
     await wrapper.get('#meter-units').setValue('109')
     await wrapper.get('#meter-readOn').setValue('2026-10-31')
     await wrapper.get('form').trigger('submit')

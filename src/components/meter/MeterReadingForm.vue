@@ -118,12 +118,7 @@ async function handleSubmit() {
     </p>
 
     <fieldset class="min-w-0 space-y-4" :disabled="saving">
-      <ReadingEntryToggle
-        v-if="!correcting"
-        v-model="entryMode"
-        name="meter-entry"
-        :disabled="saving"
-      />
+      <ReadingEntryToggle v-if="!correcting" id="meter-by-units" v-model="entryMode" />
       <div class="grid gap-4 sm:grid-cols-2">
         <div v-if="byUnits" class="space-y-2">
           <Label for="meter-units">Units used</Label>

@@ -138,6 +138,8 @@ const useRecorded = computed(
     recordedReading.value !== null &&
     closingChoice.value === 'recorded',
 )
+// A new reading is being entered (not a recorded one closed on): it can be entered as units.
+const enteringReading = computed(() => hasMeter.value && !useRecorded.value)
 // The reading a new one must follow.
 const followedReading = computed(() => props.latestReading ?? props.lastBilled)
 // Units typed are added to the newest reading (a preview: the backend adds them).
@@ -460,24 +462,31 @@ const lockedClass =
           </p>
         </div>
 
-        <label
-          for="includeElectricity"
-          class="flex cursor-pointer items-center justify-between gap-4 rounded-lg border bg-background px-3 py-2.5"
-        >
-          <span>
-            <span class="block text-sm font-medium">Include electricity charges</span>
-            <span class="block text-xs text-muted-foreground" data-testid="electricity-choice-hint">
-              {{
-                includeElectricity
-                  ? 'Charged on this bill.'
-                  : hasMeter
-                    ? 'Not charged: the units since the last billed reading go on a later bill.'
-                    : 'Not charged on this bill.'
-              }}
+        <!-- Beside it, for a new meter reading: entered as the reading or as the units used. -->
+        <div class="grid gap-3" :class="enteringReading && 'sm:grid-cols-2'">
+          <label
+            for="includeElectricity"
+            class="flex cursor-pointer items-center justify-between gap-4 rounded-lg border bg-background px-3 py-2.5"
+          >
+            <span>
+              <span class="block text-sm font-medium">Include electricity charges</span>
+              <span
+                class="block text-xs text-muted-foreground"
+                data-testid="electricity-choice-hint"
+              >
+                {{
+                  includeElectricity
+                    ? 'Charged on this bill.'
+                    : hasMeter
+                      ? 'Not charged: the units since the last billed reading go on a later bill.'
+                      : 'Not charged on this bill.'
+                }}
+              </span>
             </span>
-          </span>
-          <ToggleSwitch id="includeElectricity" v-model="includeElectricity" />
-        </label>
+            <ToggleSwitch id="includeElectricity" v-model="includeElectricity" />
+          </label>
+          <ReadingEntryToggle v-if="enteringReading" id="closingByUnits" v-model="closingEntry" />
+        </div>
 
         <div
           v-if="hasMeter && (meterLoading || meterError)"
@@ -553,7 +562,6 @@ const lockedClass =
           </div>
 
           <div v-else class="space-y-2">
-            <ReadingEntryToggle v-model="closingEntry" name="closing-entry" :disabled="saving" />
             <template v-if="byUnits">
               <Label for="closingUnits">
                 Units used since the last reading
