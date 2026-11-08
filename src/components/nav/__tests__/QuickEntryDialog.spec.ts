@@ -131,6 +131,21 @@ describe('QuickEntryDialog', () => {
     expect(input.element.disabled).toBe(false)
   })
 
+  it('drops the previous tenant’s month while the next tenant’s default loads', async () => {
+    await openDialog({ ...monthStep, defaultMonth: '2026-10' })
+
+    await atStep('month', 'bill', { billTenant: tenants[1], defaultMonth: null })
+    const input = body.get<HTMLInputElement>('#quick-month')
+    expect(input.element.value).toBe('')
+    await body.get('[data-testid="quick-month-step"]').trigger('submit')
+    expect(dialog!.emitted('choose-month')).toBeUndefined()
+
+    await atStep('month', 'bill', { defaultMonth: '2026-08' })
+    expect(input.element.value).toBe('2026-08')
+    await body.get('[data-testid="quick-month-step"]').trigger('submit')
+    expect(dialog!.emitted('choose-month')).toEqual([['tenant-002', '2026-08']])
+  })
+
   it('does not continue without a valid month', async () => {
     await openDialog({ ...monthStep, defaultMonth: '2026-10' })
 

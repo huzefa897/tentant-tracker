@@ -95,13 +95,18 @@ function chooseTenant(tenantId: string) {
   emit('choose-tenant', props.kind, tenantId)
 }
 
-// The month starts from the parent's default and stays whatever the user typed.
+// The month starts from the parent's default and stays whatever the user typed. A different
+// tenant clears it, so the previous tenant's month is never offered (or submitted) while the
+// new tenant's default loads.
 const month = ref('')
 const monthTouched = ref(false)
 watch(
   () => [props.defaultMonth, props.billTenant?.id] as const,
-  ([next], previous) => {
-    if (props.billTenant?.id !== previous?.[1]) monthTouched.value = false
+  ([next, tenantId], previous) => {
+    if (tenantId !== previous?.[1]) {
+      monthTouched.value = false
+      month.value = ''
+    }
     if (!monthTouched.value && next) month.value = next
   },
   { immediate: true },

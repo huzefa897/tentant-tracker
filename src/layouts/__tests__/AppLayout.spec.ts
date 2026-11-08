@@ -328,6 +328,48 @@ describe('AppLayout', () => {
         await vi.waitFor(() => expect(router.currentRoute.value.query.step).toBe('payment'))
       })
 
+      it('keeps the bill being made when stepping back to the month and on again', async () => {
+        await openQuickEntry()
+        await body.get('[data-testid="quick-bill"]').trigger('click')
+        await flushPromises()
+        await chooseTenant(1)
+        await body.get('#quick-month').setValue('2026-11')
+        await body.get('[data-testid="quick-month-step"]').trigger('submit')
+        await flushPromises()
+        await body.get('#electricityUnits').setValue('123')
+
+        router.back()
+        await vi.waitFor(() => expect(router.currentRoute.value.query.step).toBe('month'))
+        await flushPromises()
+        expect(router.currentRoute.value.query.quickMonth).toBeUndefined()
+        await body.get('[data-testid="quick-month-step"]').trigger('submit')
+        await flushPromises()
+
+        expect(router.currentRoute.value.query.step).toBe('charges')
+        expect(body.get<HTMLInputElement>('#electricityUnits').element.value).toBe('123')
+      })
+
+      it('starts a new bill when the month is changed on the way back', async () => {
+        await openQuickEntry()
+        await body.get('[data-testid="quick-bill"]').trigger('click')
+        await flushPromises()
+        await chooseTenant(1)
+        await body.get('#quick-month').setValue('2026-11')
+        await body.get('[data-testid="quick-month-step"]').trigger('submit')
+        await flushPromises()
+        await body.get('#electricityUnits').setValue('123')
+
+        router.back()
+        await vi.waitFor(() => expect(router.currentRoute.value.query.step).toBe('month'))
+        await flushPromises()
+        await body.get('#quick-month').setValue('2026-12')
+        await body.get('[data-testid="quick-month-step"]').trigger('submit')
+        await flushPromises()
+
+        expect(router.currentRoute.value.query.quickMonth).toBe('2026-12')
+        expect(body.get<HTMLInputElement>('#electricityUnits').element.value).toBe('')
+      })
+
       it('returns to the page it was opened from, not the sheet, when back is pressed after a save', async () => {
         await openQuickEntry()
         await body.get('[data-testid="quick-bill"]').trigger('click')

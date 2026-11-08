@@ -226,8 +226,29 @@ function goBack() {
 
 // The bill's steps are the New bill form, part by part; the last saves it and opens the bill.
 const quickBill = useQuickBill(billTenant)
+
+// The bill being made: the tenant and month of the last charges step. The month step's history
+// entry names no month, so stepping back to it would unmount the form and lose what was typed;
+// the draft is kept instead and dropped only when the sheet closes or another tenant is chosen.
+// Choosing a different month starts a new bill (the form is keyed by it).
+const draft = ref<{ tenantId: string; month: string } | null>(null)
 watch(
-  () => [billTenant.value?.id, quickMonth.value],
+  () => [quickOpen.value && quickKind.value === 'bill', billTenant.value?.id, quickMonth.value],
+  ([inBill, tenantId, month]) => {
+    if (!inBill) draft.value = null
+    else if (typeof tenantId === 'string' && typeof month === 'string') {
+      draft.value = { tenantId, month }
+    } else if (tenantId && draft.value && draft.value.tenantId !== tenantId) draft.value = null
+  },
+  { immediate: true },
+)
+const formMonth = computed(() => {
+  if (quickMonth.value) return quickMonth.value
+  const kept = draft.value
+  return kept && kept.tenantId === billTenant.value?.id ? kept.month : null
+})
+watch(
+  () => [billTenant.value?.id, formMonth.value],
   () => quickBill.reset(),
 )
 
@@ -418,11 +439,11 @@ onBeforeUnmount(() => {
       @search="tenantStore.searchTenants"
       @load-more="tenantStore.loadMore"
     >
-      <template v-if="quickKind === 'bill' && billTenant && quickMonth" #bill>
+      <template v-if="quickKind === 'bill' && billTenant && formMonth" #bill>
         <RentEntryForm
-          :key="`${billTenant.id}-${quickMonth}`"
+          :key="`${billTenant.id}-${formMonth}`"
           :tenant="billTenant"
-          :month="quickMonth"
+          :month="formMonth"
           :wizard="billWizard ?? 'charges'"
           :save-error="quickBill.saveError.value"
           :saving="quickBill.saving.value"
