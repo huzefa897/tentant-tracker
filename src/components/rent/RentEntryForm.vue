@@ -240,6 +240,12 @@ const paidAmount = computed(() => {
 })
 const paymentRecorded = computed(() => paidAmount.value !== null && paidAmount.value > 0)
 
+// In Quick entry a payment is dated today as soon as one is entered (still changeable), so the
+// step can move on without a second field to fill.
+watch(paymentRecorded, (recorded) => {
+  if (props.wizard && recorded && !paidDate.value) paidDate.value = today
+})
+
 const electricityAmount = computed(() => {
   const units = toAmount(effectiveUnits.value)
   return units !== null && units >= 0
