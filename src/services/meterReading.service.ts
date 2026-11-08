@@ -4,7 +4,9 @@ import type {
   ElectricityMode,
   MeterPoint,
   MeterReading,
+  MeterReadingCorrectionInput,
   MeterReadingInput,
+  ReadingValue,
   ReceiptMeterPoint,
   TenantMeter,
 } from '@/types/meterReading'
@@ -15,18 +17,26 @@ export interface MeterPointDto {
   id?: string | null
   reading: string // "2563.000"
   readOn: string // YYYY-MM-DD
+  fromUnits?: boolean // bills' and receipts' readings
 }
 
 // A receipt's opening reading: readOn is null when it's the baseline.
 export interface ReceiptMeterPointDto {
   reading: string
   readOn: string | null
+  fromUnits?: boolean
+}
+
+// fromUnits, kept only when the backend sent it.
+function fromUnitsOf(dto: { fromUnits?: boolean }): { fromUnits?: boolean } {
+  return dto.fromUnits === undefined ? {} : { fromUnits: dto.fromUnits }
 }
 
 export interface MeterReadingDto {
   id: string
   reading: string
   readOn: string
+  enteredUnits: string | null
   notes: string
   status: 'active' | 'void'
   consumption: string | null
@@ -77,6 +87,9 @@ export function parseMeterPoint(
   const dated = typeof value.readOn === 'string' && DATE.test(value.readOn)
   if (!dated && !(undated && value.readOn === null)) invalid(`${what}.readOn`)
   if (withId) optionalId(value.id, `${what}.id`)
+  if (value.fromUnits !== undefined && typeof value.fromUnits !== 'boolean') {
+    invalid(`${what}.fromUnits`)
+  }
   return value as unknown as MeterPointDto
 }
 
@@ -86,11 +99,14 @@ export function toMeterPoint(dto: MeterPointDto | null): MeterPoint | null {
     ...(dto.id === undefined ? {} : { id: dto.id }),
     reading: Number(dto.reading),
     readOn: dto.readOn,
+    ...fromUnitsOf(dto),
   }
 }
 
 export function toReceiptMeterPoint(dto: ReceiptMeterPointDto | null): ReceiptMeterPoint | null {
-  return dto === null ? null : { reading: Number(dto.reading), readOn: dto.readOn }
+  return dto === null
+    ? null
+    : { reading: Number(dto.reading), readOn: dto.readOn, ...fromUnitsOf(dto) }
 }
 
 // A bill's (`withIds`) or receipt's electricity: its mode, and readings exactly when it's a
@@ -131,6 +147,12 @@ export function parseMeterReading(value: unknown): MeterReadingDto {
   }
   if (typeof value.reading !== 'string' || !READING.test(value.reading)) invalid('reading')
   if (typeof value.readOn !== 'string' || !DATE.test(value.readOn)) invalid('readOn')
+  if (
+    value.enteredUnits !== null &&
+    (typeof value.enteredUnits !== 'string' || !READING.test(value.enteredUnits))
+  ) {
+    invalid('enteredUnits')
+  }
   if (typeof value.notes !== 'string') invalid('notes')
   if (value.status === 'void') {
     for (const key of ['voidedAt', 'voidedByName', 'voidReason'] as const) {
@@ -172,6 +194,7 @@ export function toMeterReading(dto: MeterReadingDto): MeterReading {
     id: dto.id,
     reading: Number(dto.reading),
     readOn: dto.readOn,
+    enteredUnits: dto.enteredUnits === null ? null : Number(dto.enteredUnits),
     notes: dto.notes,
     status: dto.status,
     consumption: dto.consumption === null ? null : Number(dto.consumption),
@@ -198,10 +221,16 @@ export function parseTenantMeter(data: unknown): TenantMeter {
   }
 }
 
-// Validation (utils/meterReadingValidation.ts) has limited the decimals, so toFixed rounds
-// nothing away.
+// The reading or the units entered, as the backend takes them. Validation
+// (utils/meterReadingValidation.ts) has limited the decimals, so toFixed rounds nothing away.
+export function toReadingValueDto(value: ReadingValue): { reading: string } | { units: string } {
+  return value.units !== undefined
+    ? { units: value.units.toFixed(3) }
+    : { reading: value.reading.toFixed(3) }
+}
+
 export function toMeterReadingDto(input: MeterReadingInput) {
-  return { reading: input.reading.toFixed(3), readOn: input.readOn, notes: input.notes }
+  return { ...toReadingValueDto(input), readOn: input.readOn, notes: input.notes }
 }
 
 // The new or replacement reading's id and the meter as it is now.
@@ -261,8 +290,9 @@ export const meterReadingService = {
   },
 
   // Voids a reading recorded by mistake. A retry with the same reason is safe. Errors:
-  // 'conflict' with code 'reading_in_use' (details.entries: every bill to void first, newest first) or
-  // 'reading_void_conflict'.
+  // 'conflict' with code 'reading_in_use' (details.entries: every bill to void first, newest first),
+  // 'reading_feeds_units' (details.readings: every units-entered reading to void first, newest
+  // first) or 'reading_void_conflict'.
   voidReading(
     propertyId: string,
     tenancyId: string,
@@ -275,17 +305,22 @@ export const meterReadingService = {
   },
 
   // Voids a wrong reading and records its replacement together. Errors as recordReading, and
-  // 'conflict' with code 'reading_in_use' or 'reading_void'.
+  // 'conflict' with code 'reading_in_use', 'reading_feeds_units' or 'reading_void'.
   correctReading(
     propertyId: string,
     tenancyId: string,
     readingId: string,
-    input: MeterReadingInput & { reason: string },
+    input: MeterReadingCorrectionInput,
     idempotencyKey: string,
   ): Promise<MeterWrite> {
     return post(
       `${readingsUrl(propertyId, tenancyId)}${encodeURIComponent(readingId)}/correction/`,
-      { reason: input.reason, ...toMeterReadingDto(input) },
+      {
+        reason: input.reason,
+        reading: input.reading.toFixed(3),
+        readOn: input.readOn,
+        notes: input.notes,
+      },
       idempotencyKey,
     )
   },

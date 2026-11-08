@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import {
   REASON_MAX_LENGTH,
+  readingFromUnits,
   unitsBetween,
   validateMeterReadingDraft,
   validateReason,
+  validateUnitsDraft,
 } from '@/utils/meterReadingValidation'
 
 const after = { id: 'reading-1', reading: 2563, readOn: '2026-10-31' }
@@ -77,6 +79,56 @@ describe('unitsBetween', () => {
     expect(unitsBetween(null, 2985)).toBeNull()
     expect(unitsBetween(after, '')).toBeNull()
     expect(unitsBetween(after, 2500)).toBeNull()
+  })
+})
+
+describe('validateUnitsDraft', () => {
+  it('accepts units dated after the latest reading, and zero', () => {
+    expect(validateUnitsDraft({ units: 109.5, readOn: '2026-11-04' }, { after, today })).toEqual({})
+    expect(validateUnitsDraft({ units: 0, readOn: '2026-11-04' }, { after, today })).toEqual({})
+  })
+
+  it('accepts units on the baseline’s day, before any reading', () => {
+    expect(
+      validateUnitsDraft({ units: 10, readOn: '2026-10-31' }, { after: baseline, today }),
+    ).toEqual({})
+  })
+
+  it.each([
+    ['empty', '', 'Enter the units used.'],
+    ['negative', -1, "Units used can't be negative."],
+    ['too precise', 1.2345, 'Units can have at most 3 decimals.'],
+  ] as const)('refuses %s units', (_label, units, message) => {
+    expect(validateUnitsDraft({ units, readOn: '2026-11-04' }, { after, today }).units).toBe(
+      message,
+    )
+  })
+
+  it('refuses units that would take the reading over the limit', () => {
+    expect(
+      validateUnitsDraft({ units: 9_999_999, readOn: '2026-11-04' }, { after, today }).units,
+    ).toContain('would be over')
+  })
+
+  it('dates them after the reading they’re added to, and not in the future', () => {
+    expect(
+      validateUnitsDraft({ units: 5, readOn: '2026-10-31' }, { after, today }).readOn,
+    ).toContain('Units are added to the reading of')
+    expect(validateUnitsDraft({ units: 5, readOn: '2026-11-06' }, { after, today }).readOn).toBe(
+      "The reading can't be dated in the future.",
+    )
+  })
+})
+
+describe('readingFromUnits', () => {
+  it('adds the units to the reading exactly', () => {
+    expect(readingFromUnits({ ...after, reading: 2563.25 }, 109.1)).toBe(2672.35)
+  })
+
+  it('is null until the units are valid', () => {
+    expect(readingFromUnits(after, '')).toBeNull()
+    expect(readingFromUnits(after, -1)).toBeNull()
+    expect(readingFromUnits(null, 5)).toBeNull()
   })
 })
 

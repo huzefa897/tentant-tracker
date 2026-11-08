@@ -1,4 +1,4 @@
-import type { ElectricityMode, MeterPoint } from '@/types/meterReading'
+import type { ElectricityMode, MeterPoint, ReadingValue } from '@/types/meterReading'
 
 export type PaymentStatus = 'unpaid' | 'partially_paid' | 'paid'
 
@@ -30,7 +30,8 @@ export interface RentEntryInput {
   includeElectricity?: boolean
   // With a meter baseline: the closing reading taken now (recorded with the bill), charged unless
   // electricity is left off.
-  closingReading?: { reading: number; readOn: string } | null
+  // It's the reading, or the units used since the latest reading (the backend adds them to it).
+  closingReading?: (ReadingValue & { readOn: string }) | null
   // With a meter baseline: a reading already recorded and not yet billed, to close on instead.
   closingReadingId?: string | null
   waterAmount: number

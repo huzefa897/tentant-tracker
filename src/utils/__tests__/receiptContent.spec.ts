@@ -202,6 +202,25 @@ describe('getReceiptContent', () => {
     })
   })
 
+  it('says which readings were worked out from units reported, not read off the meter', () => {
+    const charges = {
+      ...makeReceipt().charges,
+      electricityMode: 'meter' as const,
+      openingReading: { reading: 2563, readOn: '2026-10-31', fromUnits: true },
+      closingReading: { reading: 2985, readOn: '2026-12-31', fromUnits: false },
+    }
+    const content = getReceiptContent(makeReceipt({ charges }))
+
+    expect(content.consumption?.fields.slice(0, 2)).toEqual([
+      { label: 'Opening reading', value: '2,563 (from units reported)' },
+      { label: 'Closing reading', value: '2,985' },
+    ])
+    expect(content.consumption?.note).toBe(
+      'Opening reading worked out from units reported: 31 Oct 2026 · ' +
+        'Closing reading recorded: 31 Dec 2026',
+    )
+  })
+
   it('shows the reading tracking started from without a date', () => {
     const charges = {
       ...makeReceipt().charges,

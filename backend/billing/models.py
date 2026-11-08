@@ -608,6 +608,10 @@ class Receipt(models.Model):
     opening_read_on = models.DateField(null=True, blank=True)
     closing_reading = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
     closing_read_on = models.DateField(null=True, blank=True)
+    # Whether each reading was worked out from units reported (MeterReading.entered_units)
+    # rather than read off the meter: the receipt says so, as it may not match the dial.
+    opening_from_units = models.BooleanField(default=False)
+    closing_from_units = models.BooleanField(default=False)
     water_amount = models.DecimalField(max_digits=10, decimal_places=2)
     total_due = models.DecimalField(max_digits=12, decimal_places=2)
     total_paid = models.DecimalField(
@@ -687,6 +691,11 @@ class Receipt(models.Model):
                 ),
                 name="receipt_meter_readings_with_meter_mode",
             ),
+            models.CheckConstraint(
+                condition=Q(electricity_mode="meter")
+                | Q(opening_from_units=False, closing_from_units=False),
+                name="receipt_from_units_with_meter_mode",
+            ),
         ]
 
     def __str__(self):
@@ -736,6 +745,12 @@ class MeterReading(models.Model):
     )
     reading = models.DecimalField(max_digits=10, decimal_places=3)
     read_on = models.DateField(help_text="The day the meter was read.")
+    # The units the person entered, when they entered units used rather than what the meter
+    # said: the reading is then the latest reading before it plus these (billing/meter.py), so
+    # it may not match the meter's dial. Null when the reading itself was entered.
+    entered_units = models.DecimalField(
+        max_digits=10, decimal_places=3, null=True, blank=True, editable=False
+    )
     notes = models.CharField(max_length=500, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
@@ -783,6 +798,10 @@ class MeterReading(models.Model):
                 condition=Q(reading__gte=0), name="meter_reading_not_negative"
             ),
             models.CheckConstraint(
+                condition=Q(entered_units__isnull=True) | Q(entered_units__gte=0),
+                name="meter_reading_entered_units_not_negative",
+            ),
+            models.CheckConstraint(
                 condition=(
                     Q(
                         status="active",
@@ -805,6 +824,11 @@ class MeterReading(models.Model):
 
     def __str__(self):
         return f"{self.reading} on {self.read_on:%d %b %Y} — {self.tenancy}"
+
+    @property
+    def from_units(self) -> bool:
+        """Worked out from units reported, not read off the meter: it may not match the dial."""
+        return self.entered_units is not None
 
 
 class LegacyRecord(models.Model):

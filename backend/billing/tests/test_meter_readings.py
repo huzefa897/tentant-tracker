@@ -18,6 +18,7 @@ from billing.meter import (
     InvalidReadingError,
     MeterNotSetUpError,
     NothingToCorrectReadingError,
+    ReadingFeedsUnitsError,
     ReadingIdempotencyConflictError,
     ReadingNotAllowedError,
     ReadingNotFoundError,
@@ -249,6 +250,154 @@ class ReadingTests(MeterTestCase):
                 self.read("2600", date(2026, 11, 30))
 
 
+class UnitsEntryTests(MeterTestCase):
+    """A reading entered as the units used since the latest reading: the server adds them to
+    it under the tenancy's lock, and keeps the units as entered."""
+
+    def units(self, value, on, key=None, notes=""):
+        return record_meter_reading(
+            tenancy_id=self.tenancy.pk,
+            actor=self.owner,
+            validated_data={"units": Decimal(value), "read_on": on, "notes": notes},
+            idempotency_key=key or uuid.uuid4(),
+        ).reading
+
+    def test_units_are_added_to_the_baseline_when_nothing_is_read_yet(self):
+        reading = self.units("163", date(2026, 10, 31))
+        self.assertEqual(reading.reading, Decimal("2563"))
+        self.assertEqual(reading.entered_units, Decimal("163"))
+
+    def test_units_are_added_to_the_newest_reading_billed_or_not(self):
+        self.read("2563", date(2026, 10, 31))
+        self.read("2876", date(2026, 11, 30))
+        reading = self.units("109", date(2026, 12, 31))
+        self.assertEqual(reading.reading, Decimal("2985"))
+
+    def test_a_reading_entered_after_units_is_measured_from_them(self):
+        self.units("163", date(2026, 10, 31))
+        reading = self.read("2700", date(2026, 11, 30))
+        self.assertIsNone(reading.entered_units)
+        self.assertEqual(reading.reading, Decimal("2700"))
+
+    def test_units_can_start_on_the_day_tracking_started(self):
+        self.assertEqual(self.units("0", date(2026, 9, 30)).reading, Decimal("2400"))
+
+    def test_units_are_dated_after_the_newest_reading(self):
+        self.read("2563", date(2026, 10, 31))
+        self.read("2876", date(2026, 11, 30))
+        for on in (date(2026, 11, 15), date(2026, 11, 30)):
+            with self.subTest(on=on), self.assertRaises(InvalidReadingError) as error:
+                self.units("50", on)
+            self.assertEqual(error.exception.field, "readOn")
+            self.assertIn("2876 on 30 Nov 2026", error.exception.detail)
+        # A day no reading can have says why, not that it's before the latest reading.
+        with self.assertRaises(InvalidReadingError) as error:
+            self.units("50", date(2026, 9, 29))
+        self.assertIn("before meter tracking started on 30 Sep 2026", error.exception.detail)
+
+    def test_void_readings_are_not_what_units_are_added_to(self):
+        self.read("2563", date(2026, 10, 31))
+        wrong = self.read("9999", date(2026, 11, 30))
+        void_meter_reading(
+            tenancy_id=self.tenancy.pk, reading_id=wrong.pk, actor=self.owner, reason="Typo"
+        )
+        self.assertEqual(self.units("100", date(2026, 12, 1)).reading, Decimal("2663"))
+
+    def change(self, reading, new=None):
+        """Voids the reading, or corrects it to the value `new`."""
+        kwargs = {
+            "tenancy_id": self.tenancy.pk,
+            "reading_id": reading.pk,
+            "actor": self.owner,
+            "reason": "Wrong",
+        }
+        if new is None:
+            return void_meter_reading(**kwargs)
+        return correct_meter_reading(
+            **kwargs,
+            validated_data={"reading": Decimal(new), "read_on": reading.read_on},
+            idempotency_key=uuid.uuid4(),
+        )
+
+    def test_a_reading_units_were_added_to_cannot_be_corrected_or_voided(self):
+        october = self.read("2563", date(2026, 10, 31))
+        november = self.units("100", date(2026, 11, 30))
+        self.assertEqual(november.reading, Decimal("2663"))
+        for new in ("2500", None):
+            with self.subTest(new=new), self.assertRaises(ReadingFeedsUnitsError) as error:
+                self.change(october, new)
+            self.assertEqual(error.exception.readings, [november])
+        october.refresh_from_db()
+        november.refresh_from_db()
+        self.assertEqual(october.status, MeterReading.Status.ACTIVE)
+        self.assertEqual(november.reading, Decimal("2663"))
+
+    def test_the_whole_run_of_units_is_listed_newest_first_up_to_a_typed_reading(self):
+        october = self.read("2563", date(2026, 10, 31))
+        november = self.units("100", date(2026, 11, 30))
+        december = self.units("50", date(2026, 12, 31))
+        self.read("2900", date(2027, 1, 10))
+        self.units("20", date(2027, 1, 15))
+        with self.assertRaises(ReadingFeedsUnitsError) as error:
+            self.change(october, "2500")
+        self.assertEqual(error.exception.readings, [december, november])
+
+    def test_voiding_the_units_newest_first_frees_the_reading_before(self):
+        october = self.read("2563", date(2026, 10, 31))
+        november = self.units("100", date(2026, 11, 30))
+        december = self.units("50", date(2026, 12, 31))
+        with self.assertRaises(ReadingFeedsUnitsError):
+            self.change(november, "2650")
+        self.change(december)
+        self.change(november)
+        result = self.change(october, "2500")
+        self.assertEqual(result.replacement.reading, Decimal("2500"))
+        # The units are entered again from the corrected reading.
+        self.assertEqual(self.units("100", date(2026, 11, 30)).reading, Decimal("2600"))
+
+    def test_a_typed_reading_after_it_does_not_depend_on_the_reading_before(self):
+        october = self.read("2563", date(2026, 10, 31))
+        self.read("2700", date(2026, 11, 30))
+        self.change(october, "2500")
+
+    def test_a_reading_with_nothing_after_it_can_change_even_when_entered_as_units(self):
+        november = self.units("100", date(2026, 11, 30))
+        result = self.change(november, "2480")
+        self.assertEqual(result.replacement.reading, Decimal("2480"))
+
+    def test_the_other_checks_still_apply(self):
+        with self.assertRaises(InvalidReadingError) as error:
+            self.units("10", date(2027, 1, 21))
+        self.assertEqual(error.exception.field, "readOn")
+        with self.assertRaises(InvalidReadingError) as error:
+            self.units("9999999", date(2026, 10, 31))
+        self.assertEqual(error.exception.field, "units")
+        bare = make_tenancy(self.property, flat_number="302")
+        with self.assertRaises(MeterNotSetUpError):
+            record_meter_reading(
+                tenancy_id=bare.pk,
+                actor=self.owner,
+                validated_data={"units": Decimal("5"), "read_on": date(2026, 10, 31)},
+                idempotency_key=uuid.uuid4(),
+            )
+
+    def test_a_retry_returns_the_same_reading_even_after_a_later_one(self):
+        key = uuid.uuid4()
+        first = self.units("163", date(2026, 10, 31), key=key)
+        self.read("2700", date(2026, 11, 30))
+        self.assertEqual(self.units("163", date(2026, 10, 31), key=key).pk, first.pk)
+        with self.assertRaises(ReadingIdempotencyConflictError):
+            self.units("164", date(2026, 10, 31), key=key)
+        with self.assertRaises(ReadingIdempotencyConflictError):
+            # The same figure as a reading is another request.
+            record_meter_reading(
+                tenancy_id=self.tenancy.pk,
+                actor=self.owner,
+                validated_data={"reading": Decimal("163"), "read_on": date(2026, 10, 31)},
+                idempotency_key=key,
+            )
+
+
 class CorrectionTests(MeterTestCase):
     def test_tc15_a_reading_no_bill_uses_is_corrected_with_an_audit_trail(self):
         reading = self.read("2867", date(2026, 11, 30))
@@ -316,6 +465,7 @@ class ReadingGuardTests(MeterTestCase):
             {"notes": "Changed"},
             {"tenancy": other},
             {"created_by": make_user("other")},
+            {"entered_units": Decimal("5")},
         ):
             self.assert_refused(lambda change=change: MeterReading.objects.filter(pk=reading.pk).update(**change))
         reading.refresh_from_db()
@@ -418,6 +568,37 @@ class MeterApiTests(MeterTestCase):
         response = self.post({"reading": "2563", "readOn": "2026-10-31"})
         self.assertEqual(response.json()["code"], "duplicate_reading_day")
 
+    def test_records_units_and_shows_how_each_reading_was_entered(self):
+        response = self.post({"units": "163", "readOn": "2026-10-31"})
+        self.assertEqual(response.status_code, 201, response.content)
+        self.post({"reading": "2700", "readOn": "2026-11-30"})
+        readings = self.client.get(self.url).json()["readings"]
+        self.assertEqual(
+            [(r["reading"], r["enteredUnits"], r["consumption"]) for r in readings],
+            [("2700.000", None, "137.000"), ("2563.000", "163.000", "163.000")],
+        )
+
+    def test_takes_the_reading_or_the_units(self):
+        for body, field in (
+            ({"readOn": "2026-10-31"}, "reading"),
+            ({"reading": "2563", "units": "163", "readOn": "2026-10-31"}, "units"),
+            ({"units": "-1", "readOn": "2026-10-31"}, "units"),
+            ({"units": "1.2345", "readOn": "2026-10-31"}, "units"),
+        ):
+            with self.subTest(body=body):
+                response = self.post(body)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
+    def test_a_correction_takes_the_reading_not_units(self):
+        reading_id = self.post({"units": "163", "readOn": "2026-10-31"}).json()["reading"]
+        response = self.post(
+            {"reason": "Wrong", "units": "150", "readOn": "2026-10-31"},
+            url=f"{self.url}{reading_id}/correction/",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("units", response.json())
+
     def test_needs_a_key(self):
         response = self.client.post(self.url, {"reading": "2563", "readOn": "2026-10-31"}, format="json")
         self.assertEqual(response.status_code, 400)
@@ -426,6 +607,24 @@ class MeterApiTests(MeterTestCase):
         stranger = make_user("stranger")
         self.client.force_authenticate(stranger)
         self.assertEqual(self.client.get(self.url).status_code, 404)
+
+    def test_changing_a_reading_units_were_added_to_is_a_conflict_listing_them(self):
+        october = self.post({"reading": "2563", "readOn": "2026-10-31"}).json()["reading"]
+        november = self.post({"units": "100", "readOn": "2026-11-30"}).json()["reading"]
+        for response in (
+            self.post(
+                {"reason": "Wrong", "reading": "2500", "readOn": "2026-10-31"},
+                url=f"{self.url}{october}/correction/",
+            ),
+            self.post({"reason": "Wrong"}, url=f"{self.url}{october}/void/"),
+        ):
+            self.assertEqual(response.status_code, 409, response.content)
+            body = response.json()
+            self.assertEqual(body["code"], "reading_feeds_units")
+            self.assertEqual(
+                body["readings"],
+                [{"id": november, "reading": "2663.000", "readOn": "2026-11-30"}],
+            )
 
     def test_correction_endpoint(self):
         reading_id = self.post({"reading": "2867", "readOn": "2026-11-30"}).json()["reading"]

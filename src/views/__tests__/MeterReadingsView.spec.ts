@@ -132,6 +132,33 @@ describe('MeterReadingsView', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
   })
 
+  it('lists the units-entered readings to void first, keeping the dialog open', async () => {
+    withMeter()
+    setFakeMeter('tenant-001', baseline, [makeReading({ reading: 2563, readOn: '2026-10-31' })])
+    await openMeter()
+    vi.mocked(meterReadingService.voidReading).mockRejectedValueOnce(
+      new ApiError(
+        'conflict',
+        'Conflict',
+        'reading_feeds_units',
+        {},
+        { readings: [{ id: 'nov', reading: '2663.000', readOn: '2026-11-30' }] },
+      ),
+    )
+
+    await view!.get('[aria-label="Void reading 2,563"]').trigger('click')
+    await flushPromises()
+    await body.get('#void-reading-reason').setValue('Wrong tenant')
+    await body.get('form').trigger('submit')
+    await flushPromises()
+
+    const listed = body.get('[data-testid="blocking-readings"]').text()
+    expect(listed).toContain('Void these readings first')
+    expect(listed).toContain('2,663')
+    expect(listed).toContain('30 Nov 2026')
+    expect(body.find('[data-testid="blocking-bills"]').exists()).toBe(false)
+  })
+
   it('shows a failed load as an error with Retry, never an empty meter', async () => {
     withMeter()
     setFakeMeter('tenant-001', baseline)

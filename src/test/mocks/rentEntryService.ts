@@ -36,6 +36,9 @@ export const fakeEntries = {
   // Where a meter bill starts (the "last billed reading"): a bill sent with a closing reading is
   // measured from it, as the backend measures from the tenancy's.
   meterOpening: { id: null, reading: 0, readOn: '2026-08-31' } as MeterPoint,
+  // The newest reading, which units entered are added to (as the backend adds them); the opening
+  // when null, as when nothing has been read since the last bill.
+  meterLatest: null as MeterPoint | null,
 }
 
 let nextId = 1
@@ -165,6 +168,7 @@ export function resetRentEntryService() {
   fakeEntries.paymentKeys = new Map()
   fakeEntries.correctionKeys = new Map()
   fakeEntries.meterOpening = { id: null, reading: 0, readOn: '2026-08-31' }
+  fakeEntries.meterLatest = null
   nextId = 1
   for (const hook of resetHooks) hook()
 
@@ -202,7 +206,19 @@ export function resetRentEntryService() {
         // Electricity as the backend works it out: left off (0 units), from the meter (the
         // closing reading less the last billed one), or the typed units.
         const included = input.includeElectricity ?? true
-        const closing = input.closingReading ?? null
+        const closingInput = input.closingReading ?? null
+        // Units entered are added to the newest reading, as the backend adds them.
+        const newest = fakeEntries.meterLatest ?? fakeEntries.meterOpening
+        const closing =
+          closingInput === null
+            ? null
+            : {
+                reading:
+                  closingInput.units !== undefined
+                    ? newest.reading + closingInput.units
+                    : closingInput.reading,
+                readOn: closingInput.readOn,
+              }
         const meter = included && closing !== null
         const entry = makeEntry({
           id: nextFakeId('saved'),
