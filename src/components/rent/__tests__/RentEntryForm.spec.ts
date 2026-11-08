@@ -594,8 +594,39 @@ describe('RentEntryForm electricity', () => {
 
   describe('entering units used instead of the reading', () => {
     async function byUnits() {
-      await wrapper!.get('[data-testid="entry-units"]').setValue(true)
+      await wrapper!.get('#closingByUnits').trigger('click')
     }
+
+    it('puts the switch before Include electricity, on by default', () => {
+      mountMeter()
+      const switches = wrapper!.findAll('[role="switch"]').map((s) => s.attributes('id'))
+      expect(switches.slice(0, 2)).toEqual(['closingByUnits', 'includeElectricity'])
+      // On: the meter's reading is recorded; off: the units used.
+      expect(wrapper!.get('#closingByUnits').attributes('aria-checked')).toBe('true')
+      expect(wrapper!.find('#closingReading').exists()).toBe(true)
+    })
+
+    it('enters units instead of closing on a recorded reading, and back', async () => {
+      const recorded = { id: 'reading-nov', reading: 2876, readOn: '2026-10-02' }
+      mountMeter({ latestReading: recorded, unbilledReadings: [recorded] })
+      expect(text('recorded-reading')).toContain('2,876')
+
+      await byUnits()
+      expect(wrapper!.find('[data-testid="recorded-reading"]').exists()).toBe(false)
+      expect(wrapper!.find('#closingUnits').exists()).toBe(true)
+
+      await wrapper!
+        .findAll('button')
+        .find((b) => b.text().includes('recorded reading'))!
+        .trigger('click')
+      expect(text('recorded-reading')).toContain('2,876')
+      expect(wrapper!.get('#closingByUnits').attributes('aria-checked')).toBe('true')
+    })
+
+    it('has no switch for a tenant without a meter', () => {
+      mountForm()
+      expect(wrapper!.find('#closingByUnits').exists()).toBe(false)
+    })
 
     it('adds them to the last reading and sends the units', async () => {
       mountMeter()
