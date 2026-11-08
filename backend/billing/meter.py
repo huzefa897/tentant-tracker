@@ -255,6 +255,8 @@ def reading_from_units(tenancy: Tenancy, units: Decimal, read_on: date) -> Decim
         raise MeterNotSetUpError()
     if units < 0:
         raise InvalidReadingError("units", "Units used can't be negative.")
+    # A day no reading can have says why first, rather than that it's before the latest.
+    _check_reading_date(tenancy, baseline(tenancy), read_on)
     from_baseline = latest.reading_id is None
     if read_on < latest.read_on or (read_on == latest.read_on and not from_baseline):
         raise InvalidReadingError(
@@ -268,14 +270,8 @@ def reading_from_units(tenancy: Tenancy, units: Decimal, read_on: date) -> Decim
     return value
 
 
-def _check_reading_fits(tenancy: Tenancy, value: Decimal, read_on: date, *, ignore=None) -> None:
-    """The order checks every new reading passes, against the baseline and the tenancy's other
-    active readings (`ignore` is the one being corrected)."""
-    start = baseline(tenancy)
-    if start is None:
-        raise MeterNotSetUpError()
-    if value < 0:
-        raise InvalidReadingError("reading", "A meter reading can't be negative.")
+def _check_reading_date(tenancy: Tenancy, start: MeterPoint, read_on: date) -> None:
+    """A reading's day: not ahead, within the tenancy, and not before tracking started."""
     if read_on > business_date():
         raise InvalidReadingError("readOn", "A reading can't be dated in the future.")
     if read_on < tenancy.start_date or (tenancy.end_date and read_on > tenancy.end_date):
@@ -286,6 +282,17 @@ def _check_reading_fits(tenancy: Tenancy, value: Decimal, read_on: date, *, igno
             f"The reading can't be dated before meter tracking started on "
             f"{start.read_on:%d %b %Y}.",
         )
+
+
+def _check_reading_fits(tenancy: Tenancy, value: Decimal, read_on: date, *, ignore=None) -> None:
+    """The order checks every new reading passes, against the baseline and the tenancy's other
+    active readings (`ignore` is the one being corrected)."""
+    start = baseline(tenancy)
+    if start is None:
+        raise MeterNotSetUpError()
+    if value < 0:
+        raise InvalidReadingError("reading", "A meter reading can't be negative.")
+    _check_reading_date(tenancy, start, read_on)
     if value < start.reading:
         raise InvalidReadingError(
             "reading", f"The reading can't be below the baseline of {start.reading.normalize()}."

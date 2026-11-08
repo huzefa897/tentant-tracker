@@ -553,6 +553,10 @@ def _receipt_meter_fields(entry: RentEntry) -> dict:
             opening_read_on=None if from_baseline else entry.meter_opening_date,
             closing_reading=closing.reading,
             closing_read_on=closing.read_on,
+            # The baseline (no opening reading) is the meter's own figure.
+            opening_from_units=entry.opening_reading is not None
+            and entry.opening_reading.from_units,
+            closing_from_units=closing.from_units,
         )
     return fields
 

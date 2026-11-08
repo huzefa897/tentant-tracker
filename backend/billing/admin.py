@@ -245,6 +245,8 @@ class ReceiptAdmin(ViewOnlyAdminMixin, admin.ModelAdmin):
         "opening_read_on",
         "closing_reading",
         "closing_read_on",
+        "opening_from_units",
+        "closing_from_units",
         "water_amount",
         "total_due",
         "total_paid",

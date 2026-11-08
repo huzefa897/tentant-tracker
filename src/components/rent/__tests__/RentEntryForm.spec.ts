@@ -606,6 +606,18 @@ describe('RentEntryForm electricity', () => {
       expect(wrapper!.find('#closingReading').exists()).toBe(true)
     })
 
+    it('drops what was typed the other way when switching', async () => {
+      mountMeter()
+      await fill({ closingReading: '2985' })
+      await byUnits()
+      await fill({ closingUnits: '109' })
+      await byUnits()
+
+      expect(wrapper!.get<HTMLInputElement>('#closingReading').element.value).toBe('')
+      await byUnits()
+      expect(wrapper!.get<HTMLInputElement>('#closingUnits').element.value).toBe('')
+    })
+
     it('enters units instead of closing on a recorded reading, and back', async () => {
       const recorded = { id: 'reading-nov', reading: 2876, readOn: '2026-10-02' }
       mountMeter({ latestReading: recorded, unbilledReadings: [recorded] })

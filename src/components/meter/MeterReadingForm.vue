@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, reactive, ref, useTemplateRef, watch } from 'vue'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -56,6 +56,11 @@ const draft = reactive<
   reason: '',
 })
 const entryMode = ref<ReadingEntryMode>('reading')
+// What was typed the other way is dropped, never kept out of sight.
+watch(entryMode, () => {
+  draft.reading = ''
+  draft.units = ''
+})
 const byUnits = computed(() => !props.correcting && entryMode.value === 'units')
 
 type Field = 'reading' | 'units' | 'readOn' | 'reason'

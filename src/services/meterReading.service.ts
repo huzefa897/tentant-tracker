@@ -17,12 +17,19 @@ export interface MeterPointDto {
   id?: string | null
   reading: string // "2563.000"
   readOn: string // YYYY-MM-DD
+  fromUnits?: boolean // bills' and receipts' readings
 }
 
 // A receipt's opening reading: readOn is null when it's the baseline.
 export interface ReceiptMeterPointDto {
   reading: string
   readOn: string | null
+  fromUnits?: boolean
+}
+
+// fromUnits, kept only when the backend sent it.
+function fromUnitsOf(dto: { fromUnits?: boolean }): { fromUnits?: boolean } {
+  return dto.fromUnits === undefined ? {} : { fromUnits: dto.fromUnits }
 }
 
 export interface MeterReadingDto {
@@ -80,6 +87,9 @@ export function parseMeterPoint(
   const dated = typeof value.readOn === 'string' && DATE.test(value.readOn)
   if (!dated && !(undated && value.readOn === null)) invalid(`${what}.readOn`)
   if (withId) optionalId(value.id, `${what}.id`)
+  if (value.fromUnits !== undefined && typeof value.fromUnits !== 'boolean') {
+    invalid(`${what}.fromUnits`)
+  }
   return value as unknown as MeterPointDto
 }
 
@@ -89,11 +99,14 @@ export function toMeterPoint(dto: MeterPointDto | null): MeterPoint | null {
     ...(dto.id === undefined ? {} : { id: dto.id }),
     reading: Number(dto.reading),
     readOn: dto.readOn,
+    ...fromUnitsOf(dto),
   }
 }
 
 export function toReceiptMeterPoint(dto: ReceiptMeterPointDto | null): ReceiptMeterPoint | null {
-  return dto === null ? null : { reading: Number(dto.reading), readOn: dto.readOn }
+  return dto === null
+    ? null
+    : { reading: Number(dto.reading), readOn: dto.readOn, ...fromUnitsOf(dto) }
 }
 
 // A bill's (`withIds`) or receipt's electricity: its mode, and readings exactly when it's a

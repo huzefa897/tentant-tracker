@@ -289,8 +289,10 @@ class UnitsEntryTests(MeterTestCase):
                 self.units("50", on)
             self.assertEqual(error.exception.field, "readOn")
             self.assertIn("2876 on 30 Nov 2026", error.exception.detail)
-        with self.assertRaises(InvalidReadingError):
+        # A day no reading can have says why, not that it's before the latest reading.
+        with self.assertRaises(InvalidReadingError) as error:
             self.units("50", date(2026, 9, 29))
+        self.assertIn("before meter tracking started on 30 Sep 2026", error.exception.detail)
 
     def test_void_readings_are_not_what_units_are_added_to(self):
         self.read("2563", date(2026, 10, 31))

@@ -141,6 +141,9 @@ const useRecorded = computed(
 // Units are always a new reading: switching to them leaves a recorded reading for a later bill,
 // and going back to a recorded reading is going back to meter readings.
 watch(closingEntry, (entry) => {
+  // What was typed the other way is dropped, never kept out of sight.
+  closingReading.value = ''
+  closingUnits.value = ''
   if (entry === 'units') closingChoice.value = 'new'
 })
 function useRecordedReading() {

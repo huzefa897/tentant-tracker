@@ -430,6 +430,40 @@ class ReceiptTests(MeterBillTestCase):
         self.assertEqual(receipt.electricity_units, Decimal("422"))
         self.assertEqual(receipt.electricity_amount, Decimal("3376.00"))
 
+    def test_a_receipt_says_which_readings_were_worked_out_from_units(self):
+        october = create_rent_entry(
+            tenancy=self.tenancy,
+            actor=self.owner,
+            validated_data={
+                "billing_month": OCTOBER,
+                "water_amount": Decimal("0.00"),
+                "closing_reading": {"units": Decimal("163"), "read_on": date(2026, 10, 31)},
+            },
+            creation_key=uuid.uuid4(),
+        ).entry
+        receipt = self.receipt_for(october)
+        # The opening is the baseline, the meter's own figure; the closing came from units.
+        self.assertEqual(receipt.closing_reading, Decimal("2563"))
+        self.assertEqual((receipt.opening_from_units, receipt.closing_from_units), (False, True))
+
+        # The next bill opens on that worked-out reading and closes on one read off the meter.
+        november = self.bill(NOVEMBER, ("2700", date(2026, 11, 30)))
+        receipt = self.receipt_for(november)
+        self.assertEqual((receipt.opening_from_units, receipt.closing_from_units), (True, False))
+
+        url = f"/api/v1/properties/{self.property.id}/tenancies/{self.tenancy.id}/entries/"
+        client = APIClient()
+        client.force_authenticate(self.owner)
+        bills = {bill["billingMonth"]: bill for bill in client.get(url).json()["results"]}
+        self.assertTrue(bills["2026-10"]["closingReading"]["fromUnits"])
+        self.assertFalse(bills["2026-10"]["openingReading"]["fromUnits"])
+        self.assertTrue(bills["2026-11"]["openingReading"]["fromUnits"])
+        self.assertFalse(bills["2026-11"]["closingReading"]["fromUnits"])
+
+    def test_a_receipt_from_before_has_no_readings_from_units(self):
+        receipt = self.receipt_for(self.bill(OCTOBER, ("2563", date(2026, 10, 31))))
+        self.assertEqual((receipt.opening_from_units, receipt.closing_from_units), (False, False))
+
     def test_tc12_a_not_charged_receipt_says_so(self):
         receipt = self.receipt_for(self.bill(NOVEMBER, include=False))
         self.assertEqual(receipt.electricity_mode, "not_charged")
@@ -523,7 +557,7 @@ class MeterBillApiTests(MeterBillTestCase):
         body = response.json()
         self.assertEqual(body["electricityMode"], "meter")
         self.assertEqual(body["electricityUnits"], "163.000")
-        self.assertEqual(body["openingReading"], {"reading": "2400.000", "readOn": "2026-09-30", "id": None})
+        self.assertEqual(body["openingReading"], {"reading": "2400.000", "readOn": "2026-09-30", "id": None, "fromUnits": False})
         self.assertEqual(body["closingReading"]["reading"], "2563.000")
 
         again = self.client.post(

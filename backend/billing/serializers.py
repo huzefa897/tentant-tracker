@@ -229,8 +229,10 @@ def reading_text(value: Decimal) -> str:
     return f"{value:.3f}"
 
 
-def meter_point(reading, read_on, reading_id=None) -> dict | None:
-    """{reading, readOn, id?}; readOn is null only on a receipt opening on the baseline."""
+def meter_point(reading, read_on, reading_id=None, from_units=None) -> dict | None:
+    """{reading, readOn, id?, fromUnits?}; readOn is null only on a receipt opening on the
+    baseline. fromUnits (a bill's or receipt's readings): worked out from units reported rather
+    than read off the meter."""
     if reading is None:
         return None
     point = {
@@ -239,6 +241,8 @@ def meter_point(reading, read_on, reading_id=None) -> dict | None:
     }
     if reading_id is not False:
         point["id"] = None if reading_id is None else str(reading_id)
+    if from_units is not None:
+        point["fromUnits"] = from_units
     return point
 
 
@@ -278,10 +282,16 @@ class ReceiptSerializer(serializers.BaseSerializer):
                 "electricityMode": receipt.electricity_mode,
                 # The readings a meter bill was measured between, as saved; else null.
                 "openingReading": meter_point(
-                    receipt.opening_reading, receipt.opening_read_on, reading_id=False
+                    receipt.opening_reading,
+                    receipt.opening_read_on,
+                    reading_id=False,
+                    from_units=receipt.opening_from_units,
                 ),
                 "closingReading": meter_point(
-                    receipt.closing_reading, receipt.closing_read_on, reading_id=False
+                    receipt.closing_reading,
+                    receipt.closing_read_on,
+                    reading_id=False,
+                    from_units=receipt.closing_from_units,
                 ),
                 "waterAmount": money(receipt.water_amount),
             },
@@ -634,12 +644,18 @@ def entry_meter_data(entry: RentEntry) -> dict:
             "closingReading": None,
         }
     closing = entry.closing_reading
+    opening = entry.opening_reading  # None from the baseline: the meter's own figure.
     return {
         "electricityMode": entry.electricity_mode,
         "openingReading": meter_point(
-            entry.meter_opening, entry.meter_opening_date, entry.opening_reading_id
+            entry.meter_opening,
+            entry.meter_opening_date,
+            entry.opening_reading_id,
+            from_units=opening is not None and opening.from_units,
         ),
-        "closingReading": meter_point(closing.reading, closing.read_on, closing.pk),
+        "closingReading": meter_point(
+            closing.reading, closing.read_on, closing.pk, from_units=closing.from_units
+        ),
     }
 
 

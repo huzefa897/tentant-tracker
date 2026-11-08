@@ -14,6 +14,9 @@ export interface ElectricityCharge {
 
 export const NOT_CHARGED = 'Not charged'
 
+// Said of a reading worked out from units reported rather than read off the meter.
+export const FROM_UNITS_REPORTED = 'from units reported'
+
 export function formatReading(value: number): string {
   return value.toLocaleString('en-IN', { maximumFractionDigits: 3 })
 }

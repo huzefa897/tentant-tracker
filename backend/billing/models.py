@@ -608,6 +608,10 @@ class Receipt(models.Model):
     opening_read_on = models.DateField(null=True, blank=True)
     closing_reading = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
     closing_read_on = models.DateField(null=True, blank=True)
+    # Whether each reading was worked out from units reported (MeterReading.entered_units)
+    # rather than read off the meter: the receipt says so, as it may not match the dial.
+    opening_from_units = models.BooleanField(default=False)
+    closing_from_units = models.BooleanField(default=False)
     water_amount = models.DecimalField(max_digits=10, decimal_places=2)
     total_due = models.DecimalField(max_digits=12, decimal_places=2)
     total_paid = models.DecimalField(
@@ -686,6 +690,11 @@ class Receipt(models.Model):
                     )
                 ),
                 name="receipt_meter_readings_with_meter_mode",
+            ),
+            models.CheckConstraint(
+                condition=Q(electricity_mode="meter")
+                | Q(opening_from_units=False, closing_from_units=False),
+                name="receipt_from_units_with_meter_mode",
             ),
         ]
 
@@ -815,6 +824,11 @@ class MeterReading(models.Model):
 
     def __str__(self):
         return f"{self.reading} on {self.read_on:%d %b %Y} — {self.tenancy}"
+
+    @property
+    def from_units(self) -> bool:
+        """Worked out from units reported, not read off the meter: it may not match the dial."""
+        return self.entered_units is not None
 
 
 class LegacyRecord(models.Model):

@@ -9,6 +9,9 @@ export interface MeterPoint {
   id?: string | null
   reading: number
   readOn: string // YYYY-MM-DD
+  // On a bill's or receipt's readings: worked out from units reported rather than read off the
+  // meter, so it may not match the dial.
+  fromUnits?: boolean
 }
 
 // A receipt's opening reading: no date when it's where tracking started (the baseline has a
@@ -16,6 +19,7 @@ export interface MeterPoint {
 export interface ReceiptMeterPoint {
   reading: number
   readOn: string | null // YYYY-MM-DD
+  fromUnits?: boolean
 }
 
 export type MeterReadingStatus = 'active' | 'void'
