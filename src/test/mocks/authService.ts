@@ -19,6 +19,10 @@ export const authService = {
   onAuthStateChanged: vi.fn(),
   signInWithGoogle: vi.fn(),
   getIdToken: vi.fn(),
+  getAuthorization: vi.fn(),
+  devLoginEmail: vi.fn(),
+  isDevUser: vi.fn(),
+  signInAsDev: vi.fn(),
   logout: vi.fn(),
 }
 
@@ -30,6 +34,12 @@ export function resetAuthService() {
   })
   authService.signInWithGoogle.mockReset().mockResolvedValue(testUser)
   authService.getIdToken.mockReset().mockResolvedValue('test-id-token')
+  authService.getAuthorization.mockReset().mockResolvedValue('Bearer test-id-token')
+  authService.devLoginEmail.mockReset().mockReturnValue(null)
+  authService.isDevUser
+    .mockReset()
+    .mockImplementation((user: AuthUser | null) => user?.id.startsWith('dev:') ?? false)
+  authService.signInAsDev.mockReset().mockReturnValue(testUser)
   authService.logout.mockReset().mockResolvedValue(undefined)
 }
 

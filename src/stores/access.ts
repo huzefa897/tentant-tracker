@@ -11,6 +11,9 @@ export type AccessStatus = 'idle' | 'loading' | 'ready' | 'error'
 export const NOT_REGISTERED_MESSAGE =
   "This Google account isn't registered. Contact the property owner to be added."
 
+export const DEV_LOGIN_REFUSED_MESSAGE =
+  'The backend refused dev login. Run it with DJANGO_ENV=dev in backend/.env, from this machine.'
+
 function messageFor(error: unknown): string {
   const kind = error instanceof ApiError ? error.kind : 'unknown'
 
@@ -91,6 +94,13 @@ export const useAccessStore = defineStore('access', () => {
         if (err instanceof ApiError && err.code === 'not_registered') {
           clear()
           await authStore.endSession(NOT_REGISTERED_MESSAGE)
+          return
+        }
+
+        // Dev login (local development only) refused: retrying won't help, so say what to fix.
+        if (err instanceof ApiError && err.kind === 'unauthorized' && authStore.isDevSession) {
+          clear()
+          await authStore.endSession(DEV_LOGIN_REFUSED_MESSAGE)
           return
         }
 
