@@ -69,25 +69,25 @@ export const authService = {
       )
     }
 
-    // Dev login (local development only): a saved dev session needs no Firebase, and without
-    // one Firebase is optional, so a machine with no config can still reach the login page.
+    // Dev login (local development only). Firebase is still followed, so a Google sign-in after a
+    // dev logout is tracked as usual, but it's optional (a machine with no config can still reach
+    // the login page) and ignored while a dev session is active.
     const stopDev = subscribeToDevSession(listener)
     const session = readDevSession()
-    if (session) {
-      listener(session)
-      return stopDev
-    }
+    if (session) listener(session)
+
+    let stopFirebase = () => {}
     try {
-      const stopFirebase = onAuthStateChanged(getFirebaseAuth(), (user) =>
-        listener(user ? toAuthUser(user) : null),
-      )
-      return () => {
-        stopDev()
-        stopFirebase()
-      }
+      stopFirebase = onAuthStateChanged(getFirebaseAuth(), (user) => {
+        if (!readDevSession()) listener(user ? toAuthUser(user) : null)
+      })
     } catch {
-      listener(null)
-      return stopDev
+      // No Firebase config: only dev login can sign in.
+      if (!session) listener(null)
+    }
+    return () => {
+      stopDev()
+      stopFirebase()
     }
   },
 

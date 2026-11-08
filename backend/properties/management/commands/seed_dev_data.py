@@ -18,11 +18,12 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db.models import Sum
 from django.utils import timezone
 
 from accounts.models import User
 from billing.calculations import calculate_total_due
-from billing.models import Payment, RentEntry
+from billing.models import Payment, RentEntry, month_end
 from billing.services import create_rent_entry, issue_payment_receipt, record_payment
 from properties.models import (
     PaymentTiming,
@@ -94,10 +95,6 @@ WATER = (Decimal("0"), Decimal("200"), Decimal("250"))
 def add_months(day: date, months: int) -> date:
     index = day.year * 12 + day.month - 1 + months
     return date(index // 12, index % 12 + 1, 1)
-
-
-def month_end(first: date) -> date:
-    return add_months(first, 1) - timedelta(days=1)
 
 
 def key(*parts) -> uuid.UUID:
@@ -244,7 +241,9 @@ class Command(BaseCommand):
 
             if RentEntry.objects.active().filter(tenancy=tenancy, billing_month=month).exists():
                 entry = RentEntry.objects.active().get(tenancy=tenancy, billing_month=month)
-                if seed.meter:
+                # A meter bill continues from its closing reading; any other kind (say, recreated
+                # by hand with electricity left off) leaves the running reading as it is.
+                if entry.closing_reading_id is not None:
                     reading = entry.closing_reading.reading
             else:
                 entry = create_rent_entry(
@@ -259,28 +258,36 @@ class Command(BaseCommand):
             total = calculate_total_due(
                 entry.rent_amount, units, entry.electricity_rate, entry.water_amount
             )
+            paid = Payment.objects.filter(entry=entry).effective().aggregate(
+                total=Sum("amount")
+            )["total"] or Decimal("0")
             from_end = len(months) - index  # 1 for the newest bill
             if from_end <= unpaid:
-                if seed.outcome != PARTIAL or Payment.objects.filter(entry=entry).exists():
+                # Unpaid, or for PARTIAL half paid; a rerun leaves it as it is.
+                if seed.outcome != PARTIAL or paid:
                     continue
-                amount = (total / 2).quantize(Decimal("0.01"))
+                target = (total / 2).quantize(Decimal("0.01"))
             else:
-                amount = total
+                # Settled in full: a bill part paid on an earlier run (it was the newest then)
+                # gets the rest now.
+                target = total
 
-            paid_date = min(month + timedelta(days=seed.due_day + 2), self.today)
-            if tenancy.end_date is not None:
-                paid_date = min(paid_date, tenancy.end_date)
-            payment = Payment.objects.filter(entry=entry).first()
-            if payment is None:
-                payment = record_payment(
+            if paid < target:
+                paid_date = min(month + timedelta(days=seed.due_day + 2), self.today)
+                if tenancy.end_date is not None:
+                    paid_date = min(paid_date, tenancy.end_date)
+                record_payment(
                     entry_id=entry.pk,
                     actor=owner,
-                    idempotency_key=key("payment", entry.pk),
-                    validated_data={"amount": amount, "paid_date": paid_date, "notes": ""},
-                ).payment
+                    # One key per payment: the first, then the top-up on a later run.
+                    idempotency_key=key("payment", entry.pk, *(["rest"] if paid else [])),
+                    validated_data={"amount": target - paid, "paid_date": paid_date, "notes": ""},
+                )
                 payments += 1
-            if amount == total and not hasattr(payment, "receipt"):
-                issue_payment_receipt(payment_id=payment.pk, actor=owner)
-                receipts += 1
+
+            if target == total:
+                for payment in Payment.objects.filter(entry=entry, receipt__isnull=True).effective():
+                    issue_payment_receipt(payment_id=payment.pk, actor=owner)
+                    receipts += 1
 
         return bills, payments, receipts

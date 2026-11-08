@@ -65,6 +65,22 @@ describe('dev login', () => {
       expect(readDevSession()).toBeNull()
     })
 
+    it('hears another tab signing out, until unsubscribed', () => {
+      startDevSession()
+      const listener = vi.fn()
+      const unsubscribe = subscribeToDevSession(listener)
+
+      // What another tab's endDevSession() looks like from here.
+      window.localStorage.removeItem('rent-tracker.dev-login-email')
+      window.dispatchEvent(new StorageEvent('storage', { key: 'rent-tracker.dev-login-email' }))
+      window.dispatchEvent(new StorageEvent('storage', { key: 'something-else' }))
+      unsubscribe()
+      window.dispatchEvent(new StorageEvent('storage', { key: 'rent-tracker.dev-login-email' }))
+
+      expect(listener).toHaveBeenCalledTimes(1)
+      expect(listener).toHaveBeenCalledWith(null)
+    })
+
     it('tells subscribers when a session starts and ends, until they unsubscribe', () => {
       const listener = vi.fn()
       const unsubscribe = subscribeToDevSession(listener)

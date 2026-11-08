@@ -1,12 +1,15 @@
+from datetime import timedelta
 from io import StringIO
+from unittest import mock
 
 from django.core.management import CommandError, call_command
 from django.test import TestCase, override_settings
 
 from accounts.models import User
+from billing.calculations import calculate_total_due
 from billing.models import Payment, Receipt, RentEntry
-from properties.management.commands.seed_dev_data import PROPERTIES, TENANCIES
-from properties.models import Property, PropertyMembership, Tenancy
+from properties.management.commands.seed_dev_data import PARTIAL, PROPERTIES, TENANCIES
+from properties.models import Property, PropertyMembership, Tenancy, business_date
 
 EMAIL = "Seeder@Example.test"
 
@@ -70,6 +73,35 @@ class SeedDevDataTests(TestCase):
             ),
         )
         self.assertIn("added 0 bills, 0 payments, 0 receipts", output)
+
+    def test_a_rerun_a_month_later_settles_the_bill_that_was_part_paid(self):
+        today = business_date()
+        a_month_ago = today - timedelta(days=31)
+        with mock.patch(
+            "properties.management.commands.seed_dev_data.business_date", return_value=a_month_ago
+        ):
+            seed()
+        seed()
+
+        for name in (seed_.name for seed_ in TENANCIES if seed_.outcome == PARTIAL):
+            bills = list(
+                RentEntry.objects.active()
+                .filter(tenancy__name=name)
+                .order_by("-billing_month")
+            )
+            with self.subTest(tenant=name):
+                self.assertEqual(
+                    [self.outstanding(bill) > 0 for bill in bills],
+                    [True] + [False] * (len(bills) - 1),
+                )
+
+    @staticmethod
+    def outstanding(bill):
+        paid = sum(p.amount for p in Payment.objects.filter(entry=bill).effective())
+        due = calculate_total_due(
+            bill.rent_amount, bill.electricity_units, bill.electricity_rate, bill.water_amount
+        )
+        return due - paid
 
     def test_a_password_is_optional(self):
         seed("--password", "local-only-password")

@@ -137,14 +137,34 @@ describe('dev login', () => {
     await expect(authService.getAuthorization()).resolves.toBeNull()
   })
 
-  it('restores a saved dev session without touching Firebase', () => {
+  it('restores a saved dev session, ignoring Firebase while it lasts', () => {
     authService.signInAsDev()
     const listener = vi.fn()
 
     authService.onAuthStateChanged(listener)
+    const firebaseListener = vi.mocked(onAuthStateChanged).mock.calls[0]![1] as (
+      user: unknown,
+    ) => void
+    firebaseListener(null)
 
+    expect(listener).toHaveBeenCalledTimes(1)
     expect(listener).toHaveBeenCalledWith({ id: 'dev:dev@example.test', email: 'dev@example.test' })
-    expect(onAuthStateChanged).not.toHaveBeenCalled()
+  })
+
+  it('follows Firebase again after a dev logout, so a later Google session is tracked', async () => {
+    authService.signInAsDev()
+    const listener = vi.fn()
+    authService.onAuthStateChanged(listener)
+    const firebaseListener = vi.mocked(onAuthStateChanged).mock.calls[0]![1] as (
+      user: unknown,
+    ) => void
+
+    await authService.logout()
+    firebaseListener(firebaseUser)
+    firebaseListener(null)
+
+    expect(listener).toHaveBeenNthCalledWith(3, { id: 'firebase-uid-1', email })
+    expect(listener).toHaveBeenLastCalledWith(null)
   })
 
   it('reaches the login page with no Firebase config', () => {

@@ -6,6 +6,7 @@
 // `if (true)`, so the minifier drops the rest and none of this ships (checked by
 // scripts/check-no-dev-login.sh in CI).
 
+import { AuthError } from '@/services/authErrors'
 import type { AuthUser } from '@/types/auth'
 
 type Listener = (user: AuthUser | null) => void
@@ -42,9 +43,9 @@ export function readDevSession(): AuthUser | null {
 }
 
 export function startDevSession(): AuthUser {
-  if (!import.meta.env.DEV) throw new Error('Dev login is off.')
+  if (!import.meta.env.DEV) throw new AuthError('not-configured', 'Dev login is off.')
   const email = devLoginEmail()
-  if (!email) throw new Error('Dev login is off.')
+  if (!email) throw new AuthError('not-configured', 'Dev login is off.')
   storage()?.setItem(storageKey(), email)
   const user = toUser(email)
   listeners.forEach((listener) => listener(user))
@@ -57,9 +58,18 @@ export function endDevSession(): void {
   listeners.forEach((listener) => listener(null))
 }
 
-// Told when a dev session starts or ends (not with the current state: read it with readDevSession).
+// Told when a dev session starts or ends, in this tab or another one (not with the current state:
+// read it with readDevSession).
 export function subscribeToDevSession(listener: Listener): () => void {
   if (!import.meta.env.DEV) return () => {}
   listeners.add(listener)
-  return () => listeners.delete(listener)
+  // Another tab signing in or out changes localStorage, which fires `storage` here.
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === storageKey() || event.key === null) listener(readDevSession())
+  }
+  window.addEventListener('storage', onStorage)
+  return () => {
+    listeners.delete(listener)
+    window.removeEventListener('storage', onStorage)
+  }
 }
