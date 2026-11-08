@@ -140,14 +140,16 @@ function handleVoid(reason: string) {
   run(() => meterStore.voidReading(props.tenantId, current.reading.id, reason))
 }
 
-// Once, when the meter first shows and the user may record.
-let recordOpened = false
+// + Record asks for a reading with ?record=1. The request is met once the meter shows and the
+// user may record, then taken out of the URL: asking again, even from this very page (the page
+// is reused when the tenant is the same), is a new navigation that the watch sees, and going
+// back never reopens the form.
 watch(
-  () => !!meter.value && canEdit.value,
-  (ready) => {
-    if (!ready || !props.record || recordOpened) return
-    recordOpened = true
+  [() => props.record, () => !!meter.value && canEdit.value],
+  ([requested, ready]) => {
+    if (!requested || !ready) return
     open({ kind: 'record' })
+    router.replace({ name: 'meter-readings', params: { tenantId: props.tenantId } })
   },
   { immediate: true },
 )

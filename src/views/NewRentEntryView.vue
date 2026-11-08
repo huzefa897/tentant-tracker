@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
+import {
+  onBeforeRouteLeave,
+  onBeforeRouteUpdate,
+  useRoute,
+  useRouter,
+  type RouteLocationNormalized,
+  type RouteLocationRaw,
+} from 'vue-router'
 import { ChevronRight, CircleCheck, User } from '@lucide/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -136,7 +143,7 @@ const discardDialogOpen = ref(false)
 let pendingRoute: RouteLocationRaw | null = null
 let discardConfirmed = false
 
-onBeforeRouteLeave((to) => {
+function confirmLeave(to: RouteLocationNormalized) {
   // While a save is in flight the page stays: leaving (or discarding) then would still create
   // the bill. Signing out is the exception, since the session has already ended.
   if (saving.value) return Boolean(to.meta.guestOnly)
@@ -145,7 +152,31 @@ onBeforeRouteLeave((to) => {
   pendingRoute = to.fullPath
   discardDialogOpen.value = true
   return false
-})
+}
+
+onBeforeRouteLeave(confirmLeave)
+
+// This page is reused, not left, when + Record opens a bill for another tenant: the same guard
+// applies to that move. Changing only the query (the month) is the same bill.
+onBeforeRouteUpdate((to) => (to.params.tenantId === props.tenantId ? true : confirmLeave(to)))
+
+// Once that move is accepted, nothing of the first tenant's bill carries over: not its saved
+// confirmation, its error, its creation key (a retry of that bill) or its unsaved state. The
+// form itself is keyed by tenant, so it starts fresh.
+watch(
+  () => props.tenantId,
+  () => {
+    savedEntry.value = null
+    saveError.value = null
+    existingEntry.value = null
+    previewedRent.value = null
+    previewedRate.value = null
+    creationKey = null
+    isDirty.value = false
+    discardConfirmed = false
+    pendingRoute = null
+  },
+)
 
 function goToDashboard() {
   router.push({ name: 'dashboard' })

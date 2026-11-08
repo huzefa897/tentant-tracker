@@ -541,6 +541,99 @@ describe('NewRentEntryView', () => {
       expect(body.find('[role="alertdialog"]').exists()).toBe(true)
     })
   })
+
+  describe('when + Record opens a bill for another tenant', () => {
+    const otherTenant = '/tenants/tenant-002/entries/new'
+
+    it('asks before discarding unsaved changes, then starts the other tenant’s bill clean', async () => {
+      await openEntryPage()
+      await fill({ notes: 'Paid via UPI' })
+
+      await router.push(otherTenant)
+      await flushPromises()
+
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
+      expect(body.get('[role="alertdialog"]').text()).toContain('Discard this bill?')
+
+      await button('Discard changes').trigger('click')
+      await flushPromises()
+
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
+      expect(app!.get('[data-testid="tenant-chip"]').text()).toContain('Mohammed Yusuf')
+      expect(app!.get<HTMLInputElement>('#notes').element.value).toBe('')
+      expect(createEntry).not.toHaveBeenCalled()
+    })
+
+    it('stays on the first tenant with Keep editing', async () => {
+      await openEntryPage()
+      await fill({ notes: 'Paid via UPI' })
+
+      await router.push(otherTenant)
+      await flushPromises()
+      await button('Keep editing').trigger('click')
+      await flushPromises()
+
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
+      expect(app!.get<HTMLInputElement>('#notes').element.value).toBe('Paid via UPI')
+    })
+
+    it('moves freely when nothing was changed', async () => {
+      await openEntryPage()
+
+      await router.push(otherTenant)
+      await flushPromises()
+
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
+      expect(body.find('[role="alertdialog"]').exists()).toBe(false)
+      expect(app!.get('[data-testid="tenant-chip"]').text()).toContain('Mohammed Yusuf')
+    })
+
+    it('stays on the first tenant while its save is in flight', async () => {
+      let finish!: () => void
+      createEntry.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = () => resolve(makeEntry({ id: 'slow', billingMonth: '2026-09' }))
+          }),
+      )
+      await openEntryPage()
+      await fill(validEntry)
+      await app!.get('form').trigger('submit')
+
+      await router.push(otherTenant)
+      await flushPromises()
+
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-001')
+      expect(body.find('[role="alertdialog"]').exists()).toBe(false)
+
+      finish()
+      await flushPromises()
+      expect(app!.get('#entry-saved-heading').text()).toBe('Bill saved')
+    })
+
+    it('leaves a saved bill behind, so the other tenant gets a new form and a new key', async () => {
+      await openEntryPage()
+      await fill(validEntry)
+      await save()
+      expect(app!.get('#entry-saved-heading').text()).toBe('Bill saved')
+
+      await router.push(otherTenant)
+      await flushPromises()
+
+      expect(router.currentRoute.value.params.tenantId).toBe('tenant-002')
+      expect(body.find('[role="alertdialog"]').exists()).toBe(false)
+      expect(app!.find('[data-testid="saved-summary"]').exists()).toBe(false)
+      expect(app!.get('[data-testid="tenant-chip"]').text()).toContain('Mohammed Yusuf')
+
+      await fill(validEntry)
+      await save()
+
+      expect(createEntry).toHaveBeenCalledTimes(2)
+      const [first, second] = createEntry.mock.calls
+      expect(second![1]).toBe('tenant-002')
+      expect(second![3]).not.toBe(first![3])
+    })
+  })
 })
 
 describe('NewRentEntryView when tenants fail to load', () => {
