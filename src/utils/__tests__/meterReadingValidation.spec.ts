@@ -114,9 +114,9 @@ describe('validateUnitsDraft', () => {
     expect(
       validateUnitsDraft({ units: 5, readOn: '2026-10-31' }, { after, today }).readOn,
     ).toContain('Units are added to the reading of')
-    expect(
-      validateUnitsDraft({ units: 5, readOn: '2026-11-06' }, { after, today }).readOn,
-    ).toBe("The reading can't be dated in the future.")
+    expect(validateUnitsDraft({ units: 5, readOn: '2026-11-06' }, { after, today }).readOn).toBe(
+      "The reading can't be dated in the future.",
+    )
   })
 })
 
