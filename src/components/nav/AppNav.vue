@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { House, Plus, UserRound, Users } from '@lucide/vue'
+import { House, UserRound, Users, Zap } from '@lucide/vue'
 import type { Component } from 'vue'
 
 import type { NavLink, NavSection } from '@/types/nav'
 
-// The app's sections and its + Record action. `bar` floats at the bottom of a phone screen;
+// The app's sections and its Quick entry action. `bar` floats at the bottom of a phone screen;
 // `header` is the same links in a row, for wider screens. Each item is a real link; a plain
 // click is handed to the parent to navigate in the app, so nothing here knows the router.
 const props = defineProps<{
@@ -15,7 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   navigate: [section: NavSection]
-  record: []
+  quickEntry: []
 }>()
 
 const ICONS: Record<NavSection, Component> = { home: House, tenants: Users, account: UserRound }
@@ -28,7 +28,7 @@ function handleClick(event: MouseEvent, section: NavSection) {
   emit('navigate', section)
 }
 
-// Record sits in the middle of the bar, after the first half of the links.
+// Quick entry sits in the middle of the bar, after the first half of the links.
 const half = Math.ceil(props.links.length / 2)
 </script>
 
@@ -56,11 +56,11 @@ const half = Math.ceil(props.links.length / 2)
         <button
           type="button"
           class="flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-[inset_0_1px_0_oklch(1_0_0/0.35),0_6px_16px_-4px_oklch(0.2_0.06_268/0.5)] outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-          aria-label="Record"
-          data-testid="nav-record"
-          @click="emit('record')"
+          aria-label="Quick entry"
+          data-testid="nav-quick-entry"
+          @click="emit('quickEntry')"
         >
-          <Plus class="size-6" aria-hidden="true" />
+          <Zap class="size-6" aria-hidden="true" />
         </button>
       </li>
       <li v-for="link in links.slice(half)" :key="link.section">
@@ -102,11 +102,11 @@ const half = Math.ceil(props.links.length / 2)
         <button
           type="button"
           class="ml-1 flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground shadow-[inset_0_1px_0_oklch(1_0_0/0.35)] outline-none hover:bg-primary/90 focus-visible:ring-3 focus-visible:ring-white/50"
-          data-testid="nav-record"
-          @click="emit('record')"
+          data-testid="nav-quick-entry"
+          @click="emit('quickEntry')"
         >
-          <Plus class="size-4" aria-hidden="true" />
-          Record
+          <Zap class="size-4" aria-hidden="true" />
+          Quick entry
         </button>
       </li>
     </ul>

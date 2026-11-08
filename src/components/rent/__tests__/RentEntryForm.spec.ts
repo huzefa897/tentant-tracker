@@ -706,3 +706,75 @@ describe('RentEntryForm electricity', () => {
     expect(wrapper!.emitted('retryMeter')).toHaveLength(1)
   })
 })
+
+describe('RentEntryForm as Quick entry steps', () => {
+  function mountWizard(wizard: 'charges' | 'payment' | 'confirm') {
+    wrapper = mount(RentEntryForm, { props: { tenant, wizard }, attachTo: document.body })
+    return wrapper
+  }
+
+  function visible(selector: string) {
+    return wrapper!.get(selector).isVisible()
+  }
+
+  it('shows rent and utilities on the first step, without the summary', () => {
+    mountWizard('charges')
+
+    expect(visible('#rentAmount')).toBe(true)
+    expect(visible('#electricityUnits')).toBe(true)
+    expect(visible('#paymentAmount')).toBe(false)
+    expect(visible('[data-testid="summary"]')).toBe(false)
+  })
+
+  it('moves on from the charges only when they are valid', async () => {
+    mountWizard('charges')
+    await fill({ rentAmount: '' })
+    await save()
+    expect(wrapper!.emitted('advance')).toBeUndefined()
+    expect(wrapper!.text()).toContain('Rent')
+
+    await fill({ rentAmount: '15000', electricityUnits: '100' })
+    await save()
+    expect(wrapper!.emitted('advance')).toHaveLength(1)
+    expect(wrapper!.emitted('save')).toBeUndefined()
+  })
+
+  it('shows the payment with the running total, and checks the amount against it', async () => {
+    mountWizard('payment')
+    await fill({ rentAmount: '15000', electricityUnits: '100', paymentAmount: '99999' })
+
+    expect(visible('#paymentAmount')).toBe(true)
+    expect(visible('#rentAmount')).toBe(false)
+    expect(text('total-due')).toBe('₹15,600')
+    await save()
+    expect(wrapper!.emitted('advance')).toBeUndefined()
+
+    await fill({ paymentAmount: '5000' })
+    await save()
+    expect(wrapper!.emitted('advance')).toHaveLength(1)
+    expect(text('outstanding')).toBe('₹10,600')
+  })
+
+  it('asks before saving, and saves only on yes', async () => {
+    mountWizard('confirm')
+    await fill({ electricityUnits: '100', paymentAmount: '5000', paidDate: '2026-10-03' })
+
+    expect(wrapper!.get('[data-testid="wizard-actions"]').text()).toContain('Save this bill?')
+    expect(visible('#rentAmount')).toBe(false)
+    expect(visible('[data-testid="summary"]')).toBe(true)
+
+    await save()
+    expect(wrapper!.emitted('save')).toHaveLength(1)
+  })
+
+  it('goes back from the confirmation', async () => {
+    mountWizard('confirm')
+
+    await wrapper!
+      .findAll('button')
+      .find((button) => button.text() === 'Go back')!
+      .trigger('click')
+
+    expect(wrapper!.emitted('back')).toHaveLength(1)
+  })
+})

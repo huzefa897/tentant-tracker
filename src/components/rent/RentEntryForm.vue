@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import type { MeterPoint, ReadingEntryMode } from '@/types/meterReading'
 import type { NewRentEntrySubmission } from '@/types/rentEntry'
+import type { WizardStep } from '@/types/nav'
 import type { Tenant } from '@/types/tenant'
 import { formatINR } from '@/utils/currency'
 import { formatDateValue, toDateValue, toMonthValue } from '@/utils/date'
@@ -64,6 +65,10 @@ const props = withDefaults(
     unbilledReadings?: MeterPoint[]
     meterLoading?: boolean
     meterError?: string | null
+    // Quick entry shows the form one step at a time: the charges, the payment (with the running
+    // summary), then a confirmation. Each Continue checks only that step. Left out, the form is
+    // whole, as on the New bill page.
+    wizard?: WizardStep | null
   }>(),
   {
     month: null,
@@ -74,6 +79,7 @@ const props = withDefaults(
     unbilledReadings: () => [],
     meterLoading: false,
     meterError: null,
+    wizard: null,
   },
 )
 
@@ -82,6 +88,8 @@ const emit = defineEmits<{
   cancel: []
   dirtyChange: [dirty: boolean]
   retryMeter: []
+  advance: []
+  back: []
 }>()
 
 const PLACEHOLDER = EMPTY_VALUE
@@ -232,6 +240,12 @@ const paidAmount = computed(() => {
 })
 const paymentRecorded = computed(() => paidAmount.value !== null && paidAmount.value > 0)
 
+// In Quick entry a payment is dated today as soon as one is entered (still changeable), so the
+// step can move on without a second field to fill.
+watch(paymentRecorded, (recorded) => {
+  if (props.wizard && recorded && !paidDate.value) paidDate.value = today
+})
+
 const electricityAmount = computed(() => {
   const units = toAmount(effectiveUnits.value)
   return units !== null && units >= 0
@@ -356,8 +370,38 @@ function fieldAttrs(field: Field) {
 
 const formRef = useTemplateRef<HTMLFormElement>('form')
 
+// In the wizard, Continue checks the fields of the step it is on and moves on; only the last step
+// (Confirm) saves, after checking everything.
+const STEP_FIELDS: Partial<Record<WizardStep, Field[]>> = {
+  charges: [
+    'billingMonth',
+    'rentAmount',
+    'electricityUnits',
+    'waterAmount',
+    'closingReading',
+    'closingUnits',
+    'readOn',
+  ],
+  payment: ['paymentAmount', 'paidDate', 'paymentNotes', 'notes'],
+}
+
+async function advanceStep(step: WizardStep) {
+  const fields = STEP_FIELDS[step] ?? []
+  for (const field of fields) touched[field] = true
+  const blocked =
+    fields.some((field) => errors.value[field]) ||
+    (step === 'charges' && Boolean(meterErrors.value.meter))
+  if (!blocked) {
+    emit('advance')
+    return
+  }
+  await nextTick()
+  formRef.value?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+}
+
 async function handleSubmit() {
   if (props.saving) return
+  if (props.wizard && props.wizard !== 'confirm') return advanceStep(props.wizard)
   submitted.value = true
 
   // Validate again here: the inputs alone can't be trusted to hold valid values.
@@ -401,12 +445,22 @@ const lockedClass =
 <template>
   <form
     ref="form"
-    class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_22rem]"
+    class="grid gap-6"
+    :class="!wizard && 'lg:grid-cols-[minmax(0,1fr)_18rem] xl:grid-cols-[minmax(0,1fr)_22rem]'"
     novalidate
     @submit.prevent="handleSubmit"
   >
-    <fieldset class="min-w-0 space-y-5" :disabled="saving" data-testid="fields">
-      <section :class="sectionClass" aria-labelledby="rent-details-heading">
+    <fieldset
+      v-show="wizard !== 'confirm'"
+      class="min-w-0 space-y-5"
+      :disabled="saving"
+      data-testid="fields"
+    >
+      <section
+        v-show="!wizard || wizard === 'charges'"
+        :class="sectionClass"
+        aria-labelledby="rent-details-heading"
+      >
         <div>
           <h2 id="rent-details-heading" class="font-semibold">Rent details</h2>
           <p class="text-sm text-muted-foreground">Billing month and rent for this bill.</p>
@@ -464,7 +518,11 @@ const lockedClass =
         </div>
       </section>
 
-      <section :class="sectionClass" aria-labelledby="utility-details-heading">
+      <section
+        v-show="!wizard || wizard === 'charges'"
+        :class="sectionClass"
+        aria-labelledby="utility-details-heading"
+      >
         <div>
           <h2 id="utility-details-heading" class="font-semibold">Utility details</h2>
           <p class="text-sm text-muted-foreground">
@@ -778,7 +836,11 @@ const lockedClass =
         </div>
       </section>
 
-      <section :class="sectionClass" aria-labelledby="payment-heading">
+      <section
+        v-show="!wizard || wizard === 'payment'"
+        :class="sectionClass"
+        aria-labelledby="payment-heading"
+      >
         <div>
           <h2 id="payment-heading" class="font-semibold">Payment</h2>
           <p class="text-sm text-muted-foreground">
@@ -873,7 +935,11 @@ const lockedClass =
         </div>
       </section>
 
-      <section :class="sectionClass" aria-labelledby="notes-heading">
+      <section
+        v-show="!wizard || wizard === 'payment'"
+        :class="sectionClass"
+        aria-labelledby="notes-heading"
+      >
         <div class="flex items-baseline justify-between gap-2">
           <h2 id="notes-heading" class="font-semibold">
             <Label for="notes" class="text-base">
@@ -898,8 +964,9 @@ const lockedClass =
       </section>
     </fieldset>
 
-    <div class="space-y-4 lg:sticky lg:top-6 lg:self-start">
+    <div class="space-y-4" :class="!wizard && 'lg:sticky lg:top-6 lg:self-start'">
       <section
+        v-show="!wizard || wizard !== 'charges'"
         class="rounded-xl border bg-card p-4 sm:p-5"
         aria-labelledby="summary-heading"
         data-testid="summary"
@@ -940,8 +1007,26 @@ const lockedClass =
 
       <p v-if="saveError" class="text-sm text-destructive" role="alert">{{ saveError }}</p>
 
+      <!-- Quick entry: Continue through the steps; the last asks before saving. -->
+      <div v-if="wizard" class="grid gap-3" data-testid="wizard-actions">
+        <p v-if="wizard === 'confirm'" class="text-center font-medium">Save this bill?</p>
+        <Button type="submit" class="h-12 text-base" :disabled="saving">
+          {{ wizard === 'confirm' ? (saving ? 'Saving…' : 'Yes, save bill') : 'Continue' }}
+        </Button>
+        <Button
+          v-if="wizard === 'confirm'"
+          type="button"
+          variant="secondary"
+          class="h-12 text-base"
+          :disabled="saving"
+          @click="emit('back')"
+        >
+          Go back
+        </Button>
+      </div>
+
       <!-- Save first when stacked; Cancel on the left when side by side. -->
-      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+      <div v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
         <Button type="submit" class="h-12 text-base sm:order-last lg:order-none" :disabled="saving">
           {{ saving ? 'Saving…' : 'Save bill' }}
         </Button>

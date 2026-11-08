@@ -11,13 +11,13 @@ const links: NavLink[] = [
 ]
 
 describe('AppNav', () => {
-  it('puts Record in the middle of the bar', () => {
+  it('puts Quick entry in the middle of the bar', () => {
     const bar = mount(AppNav, { props: { links, variant: 'bar' } })
 
     const items = bar.findAll('li')
 
     expect(items.map((item) => item.text())).toEqual(['Home', 'Tenants', '', 'Account'])
-    expect(items[2]!.find('[data-testid="nav-record"]').exists()).toBe(true)
+    expect(items[2]!.find('[data-testid="nav-quick-entry"]').exists()).toBe(true)
   })
 
   it('marks only the current section', () => {
@@ -46,11 +46,11 @@ describe('AppNav', () => {
     expect(nav.emitted('navigate')).toBeUndefined()
   })
 
-  it('asks to record', async () => {
+  it('asks for quick entry', async () => {
     const nav = mount(AppNav, { props: { links, variant: 'header' } })
 
-    await nav.get('[data-testid="nav-record"]').trigger('click')
+    await nav.get('[data-testid="nav-quick-entry"]').trigger('click')
 
-    expect(nav.emitted('record')).toHaveLength(1)
+    expect(nav.emitted('quickEntry')).toHaveLength(1)
   })
 })
