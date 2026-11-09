@@ -1,25 +1,35 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, reactive, ref, useTemplateRef, watch } from 'vue'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import type { MeterPoint, MeterReading, MeterReadingInput } from '@/types/meterReading'
+import ReadingEntryToggle from '@/components/meter/ReadingEntryToggle.vue'
+import type {
+  MeterPoint,
+  MeterReading,
+  MeterReadingInput,
+  ReadingEntryMode,
+} from '@/types/meterReading'
 import { formatDateValue, toDateValue } from '@/utils/date'
 import { formatReading } from '@/utils/electricity'
 import {
   REASON_MAX_LENGTH,
+  readingFromUnits,
   unitsBetween,
   validateMeterReadingDraft,
   validateReason,
+  validateUnitsDraft,
   type MeterReadingDraft,
 } from '@/utils/meterReadingValidation'
-import { NOTES_MAX_LENGTH } from '@/utils/rentEntryValidation'
+import { NOTES_MAX_LENGTH, type NumberInputValue } from '@/utils/rentEntryValidation'
 
-// Records a meter reading, or (with `correcting`) its replacement and why. It checks what it
-// knows (not below `after`, not in the future); the backend checks it against every reading.
-// Recording one never bills anything.
+// Records a meter reading, or (with `correcting`) its replacement and why. A new reading is
+// entered as what the meter says or as the units used since `after`, which the backend adds to
+// the newest reading; a correction is always the reading itself. It checks what it knows (not
+// below `after`, not in the future); the backend checks it against every reading. Recording one
+// never bills anything.
 const props = defineProps<{
   // The reading it must follow, shown for reference: the latest active one, else the baseline.
   after: MeterPoint | null
@@ -36,22 +46,32 @@ const emit = defineEmits<{
 
 const today = toDateValue(new Date())
 
-const draft = reactive<MeterReadingDraft & { notes: string; reason: string }>({
+const draft = reactive<
+  MeterReadingDraft & { units: NumberInputValue; notes: string; reason: string }
+>({
   reading: props.correcting?.reading ?? '',
+  units: '',
   readOn: props.correcting?.readOn ?? today,
   notes: props.correcting?.notes ?? '',
   reason: '',
 })
+const entryMode = ref<ReadingEntryMode>('reading')
+// What was typed the other way is dropped, never kept out of sight.
+watch(entryMode, () => {
+  draft.reading = ''
+  draft.units = ''
+})
+const byUnits = computed(() => !props.correcting && entryMode.value === 'units')
 
-type Field = 'reading' | 'readOn' | 'reason'
+type Field = 'reading' | 'units' | 'readOn' | 'reason'
 const submitted = ref(false)
 const touched = reactive<Partial<Record<Field, boolean>>>({})
 
 const errors = computed(() => {
-  const found: Partial<Record<Field, string>> = validateMeterReadingDraft(draft, {
-    after: props.after,
-    today,
-  })
+  const context = { after: props.after, today }
+  const found: Partial<Record<Field, string>> = byUnits.value
+    ? validateUnitsDraft(draft, context)
+    : validateMeterReadingDraft(draft, context)
   if (props.correcting) {
     const reason = validateReason(draft.reason, 'reading is being corrected')
     if (reason) found.reason = reason
@@ -73,23 +93,26 @@ function fieldAttrs(field: Field) {
 }
 
 const units = computed(() => unitsBetween(props.after, draft.reading))
+// What the units make, as a preview: the backend adds them to the newest reading.
+const unitsReading = computed(() => readingFromUnits(props.after, draft.units))
 
 const formRef = useTemplateRef<HTMLFormElement>('form')
 
 async function handleSubmit() {
   if (props.saving) return
   submitted.value = true
-  if (Object.keys(errors.value).length > 0 || draft.reading === '') {
+  const value = byUnits.value ? draft.units : draft.reading
+  if (Object.keys(errors.value).length > 0 || value === '') {
     await nextTick()
     formRef.value?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
     return
   }
-  emit('submit', {
-    reading: draft.reading,
-    readOn: draft.readOn,
-    notes: draft.notes.trim(),
-    ...(props.correcting ? { reason: draft.reason.trim() } : {}),
-  })
+  const rest = { readOn: draft.readOn, notes: draft.notes.trim() }
+  // Validation guarantees a number.
+  const input: MeterReadingInput = byUnits.value
+    ? { units: value as number, ...rest }
+    : { reading: value as number, ...rest }
+  emit('submit', { ...input, ...(props.correcting ? { reason: draft.reason.trim() } : {}) })
 }
 </script>
 
@@ -100,8 +123,38 @@ async function handleSubmit() {
     </p>
 
     <fieldset class="min-w-0 space-y-4" :disabled="saving">
+      <ReadingEntryToggle v-if="!correcting" id="meter-by-units" v-model="entryMode" />
       <div class="grid gap-4 sm:grid-cols-2">
-        <div class="space-y-2">
+        <div v-if="byUnits" class="space-y-2">
+          <Label for="meter-units">Units used</Label>
+          <Input
+            id="meter-units"
+            v-model.number="draft.units"
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="any"
+            required
+            class="h-11 bg-background"
+            v-bind="fieldAttrs('units')"
+          />
+          <p
+            v-if="errorFor('units')"
+            id="meter-units-error"
+            class="text-sm text-destructive"
+            role="alert"
+          >
+            {{ errorFor('units') }}
+          </p>
+          <p
+            v-else-if="unitsReading !== null"
+            class="text-sm text-muted-foreground"
+            data-testid="meter-units-reading"
+          >
+            The reading becomes {{ formatReading(unitsReading) }}
+          </p>
+        </div>
+        <div v-else class="space-y-2">
           <Label for="meter-reading">Meter reading</Label>
           <Input
             id="meter-reading"

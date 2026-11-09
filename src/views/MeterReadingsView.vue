@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ArrowLeft, Gauge, Plus, User } from '@lucide/vue'
+import { PhGauge, PhPlus, PhUser } from '@phosphor-icons/vue'
 import { useRouter } from 'vue-router'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -23,14 +23,23 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { useAccessStore } from '@/stores/access'
-import { type BlockingEntry, MeterReadingError, useMeterReadingStore } from '@/stores/meterReading'
+import {
+  type BlockingEntry,
+  type BlockingReading,
+  MeterReadingError,
+  useMeterReadingStore,
+} from '@/stores/meterReading'
 import type { MeterPoint, MeterReading, MeterReadingInput } from '@/types/meterReading'
 import { formatDateValue, formatMonthValue } from '@/utils/date'
 import { formatReading } from '@/utils/electricity'
 
 // A tenant's meter: its baseline, the last billed reading, and every reading with its
 // consumption. Readings are recorded, corrected and voided here; none of it bills anything.
-const props = defineProps<{ tenantId: string }>()
+const props = defineProps<{
+  tenantId: string
+  // Open Record reading as soon as the meter is shown (from Quick entry).
+  record?: boolean
+}>()
 
 const router = useRouter()
 const accessStore = useAccessStore()
@@ -73,10 +82,12 @@ const dialog = ref<Dialog | null>(null)
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 const blocking = ref<BlockingEntry[]>([])
+const blockingReadings = ref<BlockingReading[]>([])
 
 function open(next: Dialog) {
   saveError.value = null
   blocking.value = []
+  blockingReadings.value = []
   dialog.value = next
 }
 
@@ -89,12 +100,16 @@ async function run(action: () => Promise<void>) {
   saving.value = true
   saveError.value = null
   blocking.value = []
+  blockingReadings.value = []
   try {
     await action()
     dialog.value = null
   } catch (error) {
     saveError.value = error instanceof Error ? error.message : "Couldn't save the reading."
-    if (error instanceof MeterReadingError) blocking.value = error.blockingEntries
+    if (error instanceof MeterReadingError) {
+      blocking.value = error.blockingEntries
+      blockingReadings.value = error.blockingReadings
+    }
   } finally {
     saving.value = false
   }
@@ -106,10 +121,14 @@ function handleRecord(input: MeterReadingInput) {
 
 function handleCorrect(input: MeterReadingInput & { reason?: string }) {
   const current = dialog.value
-  if (current?.kind !== 'correct') return
+  // A correction is always the reading itself: the form offers no units there.
+  if (current?.kind !== 'correct' || input.reading === undefined) return
+  const reading = input.reading
   run(() =>
     meterStore.correctReading(props.tenantId, current.reading.id, {
-      ...input,
+      reading,
+      readOn: input.readOn,
+      notes: input.notes,
       reason: input.reason ?? '',
     }),
   )
@@ -121,12 +140,26 @@ function handleVoid(reason: string) {
   run(() => meterStore.voidReading(props.tenantId, current.reading.id, reason))
 }
 
+// Quick entry asks for a reading with ?record=1. The request is met once the meter shows and the
+// user may record, then taken out of the URL: asking again, even from this very page (the page
+// is reused when the tenant is the same), is a new navigation that the watch sees, and going
+// back never reopens the form.
+watch(
+  [() => props.record, () => !!meter.value && canEdit.value],
+  ([requested, ready]) => {
+    if (!requested || !ready) return
+    open({ kind: 'record' })
+    router.replace({ name: 'meter-readings', params: { tenantId: props.tenantId } })
+  },
+  { immediate: true },
+)
+
 function openBill(entryId: string) {
   router.push({ name: 'rent-entry-details', params: { tenantId: props.tenantId, entryId } })
 }
 
-function goToDashboard() {
-  router.push({ name: 'dashboard' })
+function goToTenants() {
+  router.push({ name: 'tenants' })
 }
 
 const pageLoading = computed(
@@ -138,17 +171,6 @@ const pageLoading = computed(
 
 <template>
   <AppLayout>
-    <template #back>
-      <Button
-        variant="ghost"
-        class="-ml-3 h-11 text-primary hover:text-primary"
-        @click="goToDashboard"
-      >
-        <ArrowLeft aria-hidden="true" />
-        Back to dashboard
-      </Button>
-    </template>
-
     <LoadingRegion v-if="pageLoading" label="Loading meter readings…" data-testid="meter-loading">
       <header class="mb-6">
         <Skeleton class="h-9 w-64 sm:h-10" />
@@ -173,9 +195,9 @@ const pageLoading = computed(
     >
       <h1 class="text-lg font-semibold">Tenant not found</h1>
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
-        This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
+        This tenant doesn't exist or has been removed. Choose one from Tenants.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToTenants">Go to tenants</Button>
     </div>
 
     <template v-else>
@@ -185,7 +207,7 @@ const pageLoading = computed(
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
           data-testid="tenant-chip"
         >
-          <User class="size-4" aria-hidden="true" />
+          <PhUser class="size-4" aria-hidden="true" />
           {{ tenant.name }} · Flat {{ tenant.flatNumber }}
         </p>
       </header>
@@ -231,14 +253,14 @@ const pageLoading = computed(
               </div>
             </dl>
             <Button v-if="canEdit" class="mt-5 h-11 px-6" @click="open({ kind: 'record' })">
-              <Plus aria-hidden="true" />
+              <PhPlus aria-hidden="true" />
               Record reading
             </Button>
           </section>
 
           <section aria-labelledby="meter-history">
             <h2 id="meter-history" class="mb-3 flex items-center gap-2 font-semibold">
-              <Gauge class="size-4" aria-hidden="true" />
+              <PhGauge class="size-4" aria-hidden="true" />
               Readings
             </h2>
             <MeterReadingHistory
@@ -287,6 +309,19 @@ const pageLoading = computed(
                 >
                   {{ formatMonthValue(bill.billingMonth) }} bill
                 </button>
+              </li>
+            </ul>
+          </div>
+
+          <div
+            v-if="blockingReadings.length"
+            class="rounded-lg bg-warning/10 p-3 text-sm"
+            data-testid="blocking-readings"
+          >
+            <p>Void these readings first, in this order (newest first):</p>
+            <ul class="mt-2 space-y-1">
+              <li v-for="item in blockingReadings" :key="item.id" class="font-medium">
+                {{ formatReading(Number(item.reading)) }} on {{ formatDateValue(item.readOn) }}
               </li>
             </ul>
           </div>

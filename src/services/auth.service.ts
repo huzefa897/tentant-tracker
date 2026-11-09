@@ -7,6 +7,14 @@ import {
 } from 'firebase/auth'
 
 import { AuthError, type AuthErrorCode } from '@/services/authErrors'
+import {
+  devLoginEmail,
+  endDevSession,
+  isDevUser,
+  readDevSession,
+  startDevSession,
+  subscribeToDevSession,
+} from '@/services/devLogin'
 import { getFirebaseAuth } from '@/services/firebase'
 import type { AuthUser } from '@/types/auth'
 
@@ -56,7 +64,41 @@ function toAuthUser(user: User): AuthUser {
 export const authService = {
   // Called once with the restored session (or null), then on every sign-in/out.
   onAuthStateChanged(listener: (user: AuthUser | null) => void): () => void {
-    return onAuthStateChanged(getFirebaseAuth(), (user) => listener(user ? toAuthUser(user) : null))
+    if (!devLoginEmail()) {
+      return onAuthStateChanged(getFirebaseAuth(), (user) =>
+        listener(user ? toAuthUser(user) : null),
+      )
+    }
+
+    // Dev login (local development only). Firebase is still followed, so a Google sign-in after a
+    // dev logout is tracked as usual, but it's optional (a machine with no config can still reach
+    // the login page) and ignored while a dev session is active.
+    const stopDev = subscribeToDevSession(listener)
+    const session = readDevSession()
+    if (session) listener(session)
+
+    let stopFirebase = () => {}
+    try {
+      stopFirebase = onAuthStateChanged(getFirebaseAuth(), (user) => {
+        if (!readDevSession()) listener(user ? toAuthUser(user) : null)
+      })
+    } catch {
+      // No Firebase config: only dev login can sign in.
+      if (!session) listener(null)
+    }
+    return () => {
+      stopDev()
+      stopFirebase()
+    }
+  },
+
+  // The email dev login signs in as, or null when it's off (always in production builds).
+  devLoginEmail,
+  isDevUser,
+
+  // Local development only: signs in as devLoginEmail() without Google.
+  signInAsDev(): AuthUser {
+    return startDevSession()
   },
 
   // Opens Google's account chooser in a popup; call it straight from a click, or the browser
@@ -81,7 +123,26 @@ export const authService = {
     return auth.currentUser ? auth.currentUser.getIdToken() : null
   },
 
+  // The Authorization header for the API: a dev session's email, else the Firebase ID token.
+  async getAuthorization(): Promise<string | null> {
+    const dev = readDevSession()
+    if (dev) return `Dev ${dev.email}`
+    const token = await this.getIdToken()
+    return token ? `Bearer ${token}` : null
+  },
+
   async logout(): Promise<void> {
+    if (readDevSession()) {
+      endDevSession()
+      // Also end any Google session Firebase kept, so a reload doesn't sign back in as it.
+      // Optional: dev login works without Firebase config.
+      try {
+        await signOut(getFirebaseAuth())
+      } catch {
+        // No Firebase config, or nothing to sign out of.
+      }
+      return
+    }
     await signOut(getFirebaseAuth())
   },
 }

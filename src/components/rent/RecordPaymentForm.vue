@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, useTemplateRef } from 'vue'
-import { IndianRupee } from '@lucide/vue'
+import { PhCurrencyInr } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -137,7 +137,7 @@ const inputClass = 'h-11 bg-background'
       <div class="space-y-2">
         <Label for="payment-amount">Amount received (₹)</Label>
         <div class="relative">
-          <IndianRupee
+          <PhCurrencyInr
             class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden="true"
           />

@@ -32,6 +32,8 @@ export const useAuthStore = defineStore('auth', () => {
   const error = ref<string | null>(null)
 
   const isAuthenticated = computed(() => user.value !== null)
+  // Signed in through dev login (local development only), not Google.
+  const isDevSession = computed(() => authService.isDevUser(user.value))
 
   let readyPromise: Promise<void> | null = null
 
@@ -75,6 +77,13 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // Local development only (dev login, no Google); the backend must run with DJANGO_ENV=dev.
+  function signInAsDev() {
+    error.value = null
+    loginNotice.value = null
+    user.value = authService.signInAsDev()
+  }
+
   function clearError() {
     error.value = null
   }
@@ -99,8 +108,11 @@ export const useAuthStore = defineStore('auth', () => {
     loading,
     error,
     isAuthenticated,
+    isDevSession,
     init,
     signInWithGoogle,
+    signInAsDev,
+    devLoginEmail: authService.devLoginEmail,
     clearError,
     logout,
     endSession,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
-import { ArrowLeft, User } from '@lucide/vue'
+import { PhUser } from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -139,25 +139,13 @@ function backToEntry() {
   })
 }
 
-function goToDashboard() {
-  router.push({ name: 'dashboard' })
+function goToTenants() {
+  router.push({ name: 'tenants' })
 }
 </script>
 
 <template>
   <AppLayout>
-    <template #back>
-      <Button
-        variant="ghost"
-        class="-ml-3 h-11 text-primary hover:text-primary"
-        :disabled="saving"
-        @click="backToEntry"
-      >
-        <ArrowLeft aria-hidden="true" />
-        Back to the bill
-      </Button>
-    </template>
-
     <LoadingRegion v-if="pageLoading" label="Loading entry…" data-testid="correction-loading">
       <header class="mb-6">
         <Skeleton class="h-9 w-64 sm:h-10" />
@@ -182,9 +170,9 @@ function goToDashboard() {
     >
       <h1 class="text-lg font-semibold">Tenant not found</h1>
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
-        This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
+        This tenant doesn't exist or has been removed. Choose one from Tenants.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToTenants">Go to tenants</Button>
     </div>
 
     <RentEntriesLoadError
@@ -213,7 +201,7 @@ function goToDashboard() {
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
           data-testid="tenant-chip"
         >
-          <User class="size-4" aria-hidden="true" />
+          <PhUser class="size-4" aria-hidden="true" />
           {{ tenant.name }} · Flat {{ tenant.flatNumber }}
         </p>
       </header>

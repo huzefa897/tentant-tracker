@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { accessService } from '@/services/access.service'
 import { ApiError, type ApiErrorKind } from '@/services/apiError'
 import { authService } from '@/services/auth.service'
-import { NOT_REGISTERED_MESSAGE, useAccessStore } from '@/stores/access'
+import { DEV_LOGIN_REFUSED_MESSAGE, NOT_REGISTERED_MESSAGE, useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
@@ -211,6 +211,19 @@ describe('access store', () => {
     expect(useAuthStore().loginNotice).toBe(NOT_REGISTERED_MESSAGE)
     expect(store.status).toBe('idle')
     expect(store.identity).toBeNull()
+  })
+
+  it('ends a dev session the backend refuses, saying how to turn dev login on', async () => {
+    vi.mocked(accessService.getMe).mockRejectedValue(new ApiError('unauthorized'))
+    signInAs({ id: 'dev:dev@example.test', email: 'dev@example.test' })
+    await useAuthStore().init()
+    const store = useAccessStore()
+
+    await store.load()
+
+    expect(authService.logout).toHaveBeenCalled()
+    expect(useAuthStore().loginNotice).toBe(DEV_LOGIN_REFUSED_MESSAGE)
+    expect(store.status).toBe('idle')
   })
 
   it('treats other refusals as errors without signing out', async () => {

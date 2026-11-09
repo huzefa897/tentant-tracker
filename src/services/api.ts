@@ -13,10 +13,10 @@ export const api = axios.create({
 })
 
 api.interceptors.request.use(async (config) => {
-  const token = await authService.getIdToken()
+  const authorization = await authService.getAuthorization()
 
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+  if (authorization) {
+    config.headers.Authorization = authorization
   }
 
   return config

@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
-import { ArrowLeft, Ban, CircleCheck, Link2, PencilLine, Plus, User } from '@lucide/vue'
+import {
+  PhCheckCircle,
+  PhLink,
+  PhPencilLine,
+  PhPlus,
+  PhProhibit,
+  PhUser,
+} from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -35,19 +42,17 @@ import {
   PaymentSaveError,
   useRentEntryStore,
 } from '@/stores/rentEntry'
-import { useTenantStore } from '@/stores/tenant'
+import type { MeterPoint } from '@/types/meterReading'
 import type { Payment, PaymentInput } from '@/types/payment'
 import type { RentEntry } from '@/types/rentEntry'
 import { formatINR } from '@/utils/currency'
-import { formatReading, NOT_CHARGED } from '@/utils/electricity'
+import { formatReading, FROM_UNITS_REPORTED, NOT_CHARGED } from '@/utils/electricity'
 import { formatDateValue, formatMonthValue, formatTimestamp } from '@/utils/date'
 import { formatPaymentTiming } from '@/utils/rentCalculations'
 
 const props = defineProps<{
   tenantId: string
   entryId: string
-  // Where the page was opened from, so the back button returns there.
-  from?: 'dashboard' | 'history'
   // Opened as the replacement just made by correcting a bill.
   corrected?: boolean
   // Opened to record a payment: the dialog opens once the bill has loaded, if it takes one.
@@ -55,7 +60,6 @@ const props = defineProps<{
 }>()
 
 const rentEntryStore = useRentEntryStore()
-const tenantStore = useTenantStore()
 const accessStore = useAccessStore()
 const router = useRouter()
 
@@ -309,6 +313,14 @@ const charges = computed(() => {
   ]
 })
 
+// "2,985 (31 Dec 2026)", and "from units reported" when it wasn't read off the meter.
+function readingText(point: MeterPoint): string {
+  const day = formatDateValue(point.readOn)
+  return point.fromUnits
+    ? `${formatReading(point.reading)} (${day}, ${FROM_UNITS_REPORTED})`
+    : `${formatReading(point.reading)} (${day})`
+}
+
 // A meter bill's readings, then its units; "Not charged" alone when electricity was left off.
 function electricityRows(value: RentEntry) {
   if (value.electricityMode === 'not_charged') {
@@ -317,14 +329,8 @@ function electricityRows(value: RentEntry) {
   const readings =
     value.electricityMode === 'meter' && value.openingReading && value.closingReading
       ? [
-          {
-            label: 'Opening reading',
-            value: `${formatReading(value.openingReading.reading)} (${formatDateValue(value.openingReading.readOn)})`,
-          },
-          {
-            label: 'Closing reading',
-            value: `${formatReading(value.closingReading.reading)} (${formatDateValue(value.closingReading.readOn)})`,
-          },
+          { label: 'Opening reading', value: readingText(value.openingReading) },
+          { label: 'Closing reading', value: readingText(value.closingReading) },
         ]
       : []
   return [
@@ -335,18 +341,10 @@ function electricityRows(value: RentEntry) {
   ]
 }
 
-function goToDashboard() {
-  router.push({ name: 'dashboard' })
+function goToTenants() {
+  router.push({ name: 'tenants' })
 }
 
-// Back to the dashboard with this tenant selected, as it was when the summary was opened (a
-// refresh clears the selection).
-function backToDashboard() {
-  if (tenant.value) tenantStore.selectTenant(tenant.value.id)
-  goToDashboard()
-}
-
-// Explicit route, not router.back(): a direct link has no in-app page to go back to.
 function goToHistory() {
   router.push({ name: 'rent-entry-history', params: { tenantId: props.tenantId } })
 }
@@ -354,29 +352,6 @@ function goToHistory() {
 
 <template>
   <AppLayout>
-    <template #back>
-      <Button
-        v-if="tenant && from !== 'dashboard'"
-        variant="ghost"
-        class="-ml-3 h-11 text-primary hover:text-primary"
-        :disabled="busy()"
-        @click="goToHistory"
-      >
-        <ArrowLeft aria-hidden="true" />
-        Back to bills
-      </Button>
-      <Button
-        v-else
-        variant="ghost"
-        class="-ml-3 h-11 text-primary hover:text-primary"
-        :disabled="busy()"
-        @click="backToDashboard"
-      >
-        <ArrowLeft aria-hidden="true" />
-        Back to dashboard
-      </Button>
-    </template>
-
     <!-- The page's own shape while it loads, so nothing jumps when the bill arrives. -->
     <LoadingRegion v-if="pageLoading" label="Loading entry…" data-testid="entry-loading">
       <header class="mb-6">
@@ -410,9 +385,9 @@ function goToHistory() {
     >
       <h1 class="text-lg font-semibold">Tenant not found</h1>
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
-        This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
+        This tenant doesn't exist or has been removed. Choose one from Tenants.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToTenants">Go to tenants</Button>
     </div>
 
     <SlowLoadScreen
@@ -430,7 +405,7 @@ function goToHistory() {
       <p class="mt-1 max-w-sm text-sm text-muted-foreground">
         This bill doesn't exist for {{ tenant.name }}, Flat {{ tenant.flatNumber }}.
       </p>
-      <Button class="mt-6 h-11 px-6" @click="goToHistory">Back to bills</Button>
+      <Button class="mt-6 h-11 px-6" @click="goToHistory">Go to bills</Button>
     </div>
 
     <template v-else>
@@ -453,7 +428,7 @@ function goToHistory() {
           class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
           data-testid="tenant-chip"
         >
-          <User class="size-4" aria-hidden="true" />
+          <PhUser class="size-4" aria-hidden="true" />
           {{ tenant.name }} · Flat {{ tenant.flatNumber }}
         </p>
 
@@ -465,7 +440,7 @@ function goToHistory() {
           data-testid="void-notice"
         >
           <p class="flex items-center gap-2 text-lg font-bold tracking-wide text-destructive">
-            <Ban class="size-5" aria-hidden="true" />
+            <PhProhibit class="size-5" aria-hidden="true" />
             VOID
           </p>
           <p class="mt-1 text-sm">
@@ -488,7 +463,7 @@ function goToHistory() {
             :to="linkedEntry(entry.replacedByEntryId)"
             class="inline-flex min-h-11 items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
           >
-            <Link2 class="size-4" aria-hidden="true" />
+            <PhLink class="size-4" aria-hidden="true" />
             Replaced by bill · {{ formatMonthValue(entry.billingMonth) }}
           </RouterLink>
           <RouterLink
@@ -496,14 +471,14 @@ function goToHistory() {
             :to="linkedEntry(entry.replacesEntryId)"
             class="inline-flex min-h-11 items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
           >
-            <Link2 class="size-4" aria-hidden="true" />
+            <PhLink class="size-4" aria-hidden="true" />
             Replaces void bill · {{ formatMonthValue(entry.billingMonth) }}
           </RouterLink>
         </p>
 
         <div v-if="canCorrect" class="mt-4 flex flex-wrap gap-3" data-testid="bill-actions">
           <Button variant="outline" class="h-11" :disabled="busy()" @click="goToCorrection">
-            <PencilLine aria-hidden="true" />
+            <PhPencilLine aria-hidden="true" />
             Correct bill
           </Button>
           <Button
@@ -512,7 +487,7 @@ function goToHistory() {
             :disabled="busy() || entryPayments?.status !== 'ready'"
             @click="openVoid"
           >
-            <Ban aria-hidden="true" />
+            <PhProhibit aria-hidden="true" />
             Void bill
           </Button>
         </div>
@@ -523,7 +498,7 @@ function goToHistory() {
           class="mt-4 flex animate-rise-in flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
         >
           <p class="flex items-center gap-2" role="status">
-            <CircleCheck class="size-5 shrink-0" aria-hidden="true" />
+            <PhCheckCircle class="size-5 shrink-0" aria-hidden="true" />
             {{ confirmation }}
           </p>
           <Button
@@ -534,7 +509,7 @@ function goToHistory() {
             data-testid="record-replacement"
             @click="openPaymentDialog"
           >
-            <Plus aria-hidden="true" />
+            <PhPlus aria-hidden="true" />
             Record replacement payment
           </Button>
         </div>
@@ -583,11 +558,11 @@ function goToHistory() {
             class="mt-4 flex h-11 items-center justify-center gap-2 rounded-lg bg-success/10 font-medium text-success"
             data-testid="fully-paid"
           >
-            <CircleCheck class="size-5" aria-hidden="true" />
+            <PhCheckCircle class="size-5" aria-hidden="true" />
             Fully paid
           </p>
           <Button v-else class="mt-4 h-11 w-full" @click="openPaymentDialog">
-            <Plus aria-hidden="true" />
+            <PhPlus aria-hidden="true" />
             Record payment
           </Button>
         </section>

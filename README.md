@@ -40,7 +40,9 @@ adding a membership for your user (see "Granting access" in the backend README).
 
 The dashboard lists the selected property's current tenancies from the
 backend. Add them in Django admin (**Tenancies**), or add three fictional ones
-for development with `create_dev_tenancies` (see the backend README). Search by
+for development with `create_dev_tenancies`, or fill a local database with properties, tenancies,
+bills, payments and receipts in one go with `seed_dev_data --email you@gmail.com` (see the
+backend README). Search by
 name or flat number (e.g. `zahid` or `202`) to view a tenant's details.
 
 Rent entries (bills) and payments are saved in the backend, which calculates

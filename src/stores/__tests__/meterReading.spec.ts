@@ -93,6 +93,24 @@ describe('useMeterReadingStore', () => {
     expect(meter.readings.map((r) => [r.reading, r.consumption])).toEqual([[2600, 200]])
   })
 
+  it('records units used, which the backend adds to the latest reading', async () => {
+    const store = await signedIn()
+    await store.recordReading(TENANT, { units: 163, readOn: '2026-10-15', notes: '' })
+    const [reading] = store.meterFor(TENANT).meter!.readings
+    expect(reading).toMatchObject({ reading: 2563, enteredUnits: 163, consumption: 163 })
+  })
+
+  it('sends units and the same figure as a reading with different keys', async () => {
+    const store = await signedIn()
+    recordReading.mockRejectedValueOnce(new ApiError('network'))
+    await store
+      .recordReading(TENANT, { units: 2600, readOn: '2026-10-15', notes: '' })
+      .catch(() => {})
+    await store.recordReading(TENANT, { reading: 2600, readOn: '2026-10-15', notes: '' })
+    const [first, second] = recordReading.mock.calls.map((call) => call[3])
+    expect(second).not.toBe(first)
+  })
+
   it('refuses an invalid reading without asking the backend', async () => {
     const store = await signedIn()
     await expect(
@@ -160,6 +178,21 @@ describe('useMeterReadingStore', () => {
     expect((error as MeterReadingError).blockingEntries).toEqual([
       { id: 'entry-1', billingMonth: '2026-10' },
     ])
+  })
+
+  it('lists the units-entered readings that block voiding the reading they were added to', async () => {
+    const store = await signedIn()
+    const october = makeReading({ reading: 2563, readOn: '2026-10-31' })
+    setFakeMeter(TENANT, undefined, [october])
+    const feeding = [{ id: 'r-nov', reading: '2663.000', readOn: '2026-11-30' }]
+    vi.mocked(meterReadingService.voidReading).mockRejectedValueOnce(
+      new ApiError('conflict', 'Conflict', 'reading_feeds_units', {}, { readings: feeding }),
+    )
+    const error = await store.voidReading(TENANT, october.id, 'Misread').catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(MeterReadingError)
+    expect((error as MeterReadingError).blockingReadings).toEqual(feeding)
+    expect((error as MeterReadingError).blockingEntries).toEqual([])
+    expect((error as MeterReadingError).message).toContain('worked out from this one')
   })
 
   it('needs a reason to void or correct', async () => {

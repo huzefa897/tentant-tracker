@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RefreshCw } from '@lucide/vue'
+import { PhArrowsClockwise } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 
@@ -179,7 +179,7 @@ function reload() {
     </div>
 
     <Button class="h-11 px-6" @click="reload">
-      <RefreshCw class="size-4" aria-hidden="true" />
+      <PhArrowsClockwise class="size-4" aria-hidden="true" />
       Reload
     </Button>
   </div>

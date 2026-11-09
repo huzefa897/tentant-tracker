@@ -46,6 +46,40 @@ describe('MeterReadingForm', () => {
     wrapper.unmount()
   })
 
+  it('takes the units used instead, previewing the reading they make', async () => {
+    const wrapper = mountForm({ after: { id: 'r', ...after } })
+
+    await wrapper.get('#meter-by-units').trigger('click')
+    expect(wrapper.find('#meter-reading').exists()).toBe(false)
+    await wrapper.get('#meter-units').setValue('109')
+    expect(wrapper.get('[data-testid="meter-units-reading"]').text()).toBe(
+      'The reading becomes 2,672',
+    )
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('submit')).toEqual([[{ units: 109, readOn: '2026-11-05', notes: '' }]])
+    wrapper.unmount()
+  })
+
+  it('dates units after the previous reading, which they are added to', async () => {
+    const wrapper = mountForm({ after: { id: 'r', ...after } })
+
+    await wrapper.get('#meter-by-units').trigger('click')
+    await wrapper.get('#meter-units').setValue('109')
+    await wrapper.get('#meter-readOn').setValue('2026-10-31')
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.get('#meter-readOn-error').text()).toContain('Units are added to the reading of')
+    wrapper.unmount()
+  })
+
+  it('corrects with the reading only: no units', () => {
+    const wrapper = mountForm({ correcting: makeReading({ reading: 2867, readOn: '2026-11-30' }) })
+    expect(wrapper.find('[data-testid="reading-entry-toggle"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('refuses a reading below the previous one, inline', async () => {
     const wrapper = mountForm()
 

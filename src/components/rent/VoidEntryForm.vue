@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef } from 'vue'
-import { TriangleAlert } from '@lucide/vue'
+import { PhWarning } from '@phosphor-icons/vue'
 
 import EntryPaymentsToReverse from '@/components/rent/EntryPaymentsToReverse.vue'
 import { Button } from '@/components/ui/button'
@@ -73,7 +73,7 @@ async function handleSubmit() {
         class="flex gap-3 rounded-lg bg-warning/10 p-3 text-sm text-foreground"
         data-testid="void-effects"
       >
-        <TriangleAlert class="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+        <PhWarning class="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
         <ul class="space-y-1">
           <li>It stays in the history, marked <strong>VOID</strong>, with its charges.</li>
           <li>It no longer counts towards any total or balance.</li>

@@ -8,6 +8,7 @@ function reading(overrides: Partial<MeterReading>): MeterReading {
     id: 'r',
     reading: 2563,
     readOn: '2026-10-31',
+    enteredUnits: null,
     notes: '',
     status: 'active',
     consumption: null,

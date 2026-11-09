@@ -246,7 +246,7 @@ def entry_with_details(entry_id) -> RentEntry:
     return (
         RentEntry.objects.with_amounts()
         .with_due()
-        .select_related("voided_by", "replaced_by", "closing_reading")
+        .select_related("voided_by", "replaced_by", "opening_reading", "closing_reading")
         .get(pk=entry_id)
     )
 
@@ -287,7 +287,7 @@ class RentEntryViewSet(
             RentEntry.objects.filter(tenancy=self.get_tenancy())
             .with_amounts()
             .with_due()
-            .select_related("voided_by", "replaced_by", "closing_reading")
+            .select_related("voided_by", "replaced_by", "opening_reading", "closing_reading")
             .order_by("-billing_month", "-created_at")
         )
 
@@ -378,7 +378,9 @@ class RentEntryViewSet(
                 }
             ) from None
         except InvalidReadingError as error:
-            field = "closingReading" if error.field in ("reading", "readOn") else error.field
+            field = (
+                "closingReading" if error.field in ("reading", "units", "readOn") else error.field
+            )
             raise exceptions.ValidationError({field: [error.detail]}) from None
         except DuplicateReadingDayError:
             raise exceptions.ValidationError(

@@ -125,4 +125,32 @@ describe('LoginView', () => {
     )
     view.unmount()
   })
+
+  it('offers no dev sign-in by default', async () => {
+    const view = await mountView()
+
+    expect(view.text()).not.toContain('Dev sign-in')
+    view.unmount()
+  })
+
+  it('signs in as the dev email without Google when dev login is on', async () => {
+    vi.mocked(authService.devLoginEmail).mockReturnValue('dev@example.test')
+    const view = await mountView()
+    // The shared test router's guards may use an earlier test's stores, so this checks the
+    // navigation asked for rather than where the guards end up.
+    const replace = vi.spyOn(router, 'replace').mockResolvedValue(undefined)
+    await vi.waitFor(() => expect(view.text()).toContain('Dev sign-in')) // loaded on demand
+
+    const button = view.findAll('button').find((b) => b.text().startsWith('Dev sign-in'))!
+    expect(button.text()).toBe('Dev sign-in as dev@example.test')
+    await button.trigger('click')
+    await flushPromises()
+
+    expect(authService.signInAsDev).toHaveBeenCalled()
+    expect(authService.signInWithGoogle).not.toHaveBeenCalled()
+    expect(useAuthStore().user).not.toBeNull()
+    expect(replace).toHaveBeenCalledWith({ name: 'dashboard' })
+    replace.mockRestore()
+    view.unmount()
+  })
 })

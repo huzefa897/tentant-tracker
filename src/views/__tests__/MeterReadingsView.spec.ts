@@ -112,6 +112,57 @@ describe('MeterReadingsView', () => {
     expect(body.find('#meter-reading').exists()).toBe(false)
   })
 
+  it('opens Record reading by itself when opened to record one (?record=1)', async () => {
+    withMeter()
+    setFakeMeter('tenant-001', baseline)
+    view = await openPage('/tenants/tenant-001/meter?record=1')
+
+    expect(body.get('[role="dialog"]').text()).toContain('Record reading')
+    expect(body.find('#meter-reading').exists()).toBe(true)
+  })
+
+  it('takes the request out of the URL once it is met, so going back never reopens it', async () => {
+    withMeter()
+    setFakeMeter('tenant-001', baseline)
+    view = await openPage('/tenants/tenant-001/meter?record=1')
+
+    await vi.waitFor(() => expect(router.currentRoute.value.query).toEqual({}))
+    expect(body.find('#meter-reading').exists()).toBe(true)
+  })
+
+  it('opens Record reading each time it is asked for, on the page already open', async () => {
+    withMeter()
+    setFakeMeter('tenant-001', baseline)
+    await openMeter()
+    expect(body.find('[role="dialog"]').exists()).toBe(false)
+    const record = {
+      name: 'meter-readings',
+      params: { tenantId: 'tenant-001' },
+      query: { record: '1' },
+    }
+
+    await router.push(record)
+    await flushPromises()
+    expect(body.find('#meter-reading').exists()).toBe(true)
+
+    await button('Cancel').trigger('click')
+    await flushPromises()
+    expect(body.find('[role="dialog"]').exists()).toBe(false)
+
+    // Asked for again from the same page: the URL was cleared, so this is a new navigation.
+    await router.push(record)
+    await flushPromises()
+    expect(body.find('#meter-reading').exists()).toBe(true)
+  })
+
+  it('waits to be asked without ?record=1', async () => {
+    withMeter()
+    setFakeMeter('tenant-001', baseline)
+    await openMeter()
+
+    expect(body.find('[role="dialog"]').exists()).toBe(false)
+  })
+
   it('lists the bills that block voiding a billed reading, keeping the dialog open', async () => {
     withMeter()
     setFakeMeter('tenant-001', baseline, [
@@ -130,6 +181,33 @@ describe('MeterReadingsView', () => {
 
     await button('October 2026 bill').trigger('click')
     await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
+  })
+
+  it('lists the units-entered readings to void first, keeping the dialog open', async () => {
+    withMeter()
+    setFakeMeter('tenant-001', baseline, [makeReading({ reading: 2563, readOn: '2026-10-31' })])
+    await openMeter()
+    vi.mocked(meterReadingService.voidReading).mockRejectedValueOnce(
+      new ApiError(
+        'conflict',
+        'Conflict',
+        'reading_feeds_units',
+        {},
+        { readings: [{ id: 'nov', reading: '2663.000', readOn: '2026-11-30' }] },
+      ),
+    )
+
+    await view!.get('[aria-label="Void reading 2,563"]').trigger('click')
+    await flushPromises()
+    await body.get('#void-reading-reason').setValue('Wrong tenant')
+    await body.get('form').trigger('submit')
+    await flushPromises()
+
+    const listed = body.get('[data-testid="blocking-readings"]').text()
+    expect(listed).toContain('Void these readings first')
+    expect(listed).toContain('2,663')
+    expect(listed).toContain('30 Nov 2026')
+    expect(body.find('[data-testid="blocking-bills"]').exists()).toBe(false)
   })
 
   it('shows a failed load as an error with Retry, never an empty meter', async () => {

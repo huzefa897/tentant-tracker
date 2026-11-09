@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Gauge, History, Plus, User } from '@lucide/vue'
+import { PhClockCounterClockwise, PhGauge, PhPlus, PhUser } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import type { Tenant } from '@/types/tenant'
@@ -54,7 +54,7 @@ const details = computed(() => [
           class="flex size-12 shrink-0 items-center justify-center rounded-full bg-secondary text-primary"
           aria-hidden="true"
         >
-          <User class="size-6" />
+          <PhUser class="size-6" />
         </div>
         <div class="min-w-0">
           <h2 id="tenant-name" class="truncate text-xl font-semibold sm:text-2xl">
@@ -86,11 +86,11 @@ const details = computed(() => [
 
       <div class="mt-6 flex flex-col gap-3 sm:flex-row">
         <Button class="h-11 px-6" @click="emit('addEntry')">
-          <Plus aria-hidden="true" />
+          <PhPlus aria-hidden="true" />
           New bill
         </Button>
         <Button variant="outline" class="h-11 px-6" @click="emit('viewEntries')">
-          <History aria-hidden="true" />
+          <PhClockCounterClockwise aria-hidden="true" />
           Bills<template v-if="entryCount != null"> ({{ entryCount }})</template>
         </Button>
         <Button
@@ -99,7 +99,7 @@ const details = computed(() => [
           class="h-11 px-6"
           @click="emit('viewMeter')"
         >
-          <Gauge aria-hidden="true" />
+          <PhGauge aria-hidden="true" />
           Meter readings
         </Button>
       </div>

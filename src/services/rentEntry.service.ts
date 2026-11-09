@@ -1,6 +1,11 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
-import { parseElectricity, toMeterPoint, type MeterPointDto } from '@/services/meterReading.service'
+import {
+  parseElectricity,
+  toMeterPoint,
+  toReadingValueDto,
+  type MeterPointDto,
+} from '@/services/meterReading.service'
 import type { ElectricityMode } from '@/types/meterReading'
 import type {
   BillStatus,
@@ -74,7 +79,8 @@ export interface CreateRentEntryDto {
   // Sent as false to leave electricity off the bill.
   includeElectricity?: boolean
   // A meter tenancy's closing reading, recorded with the bill.
-  closingReading?: { reading: string; readOn: string }
+  // The reading, or the units used since the latest reading (the backend adds them to it).
+  closingReading?: ({ reading: string } | { units: string }) & { readOn: string }
   closingReadingId?: string
   waterAmount: string
   notes: string
@@ -237,7 +243,7 @@ export function toCreateRentEntryDto(
     ...(input.closingReading
       ? {
           closingReading: {
-            reading: input.closingReading.reading.toFixed(3),
+            ...toReadingValueDto(input.closingReading),
             readOn: input.closingReading.readOn,
           },
         }

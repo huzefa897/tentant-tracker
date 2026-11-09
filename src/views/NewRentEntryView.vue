@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
-import { ArrowLeft, ChevronRight, CircleCheck, User } from '@lucide/vue'
+import {
+  onBeforeRouteLeave,
+  onBeforeRouteUpdate,
+  useRoute,
+  useRouter,
+  type RouteLocationNormalized,
+  type RouteLocationRaw,
+} from 'vue-router'
+import { PhCaretRight, PhCheckCircle, PhUser } from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -136,7 +143,7 @@ const discardDialogOpen = ref(false)
 let pendingRoute: RouteLocationRaw | null = null
 let discardConfirmed = false
 
-onBeforeRouteLeave((to) => {
+function confirmLeave(to: RouteLocationNormalized) {
   // While a save is in flight the page stays: leaving (or discarding) then would still create
   // the bill. Signing out is the exception, since the session has already ended.
   if (saving.value) return Boolean(to.meta.guestOnly)
@@ -145,10 +152,38 @@ onBeforeRouteLeave((to) => {
   pendingRoute = to.fullPath
   discardDialogOpen.value = true
   return false
-})
+}
+
+onBeforeRouteLeave(confirmLeave)
+
+// This page is reused, not left, when Quick entry opens a bill for another tenant: the same guard
+// applies to that move. Changing only the query (the month) is the same bill.
+onBeforeRouteUpdate((to) => (to.params.tenantId === props.tenantId ? true : confirmLeave(to)))
+
+// Once that move is accepted, nothing of the first tenant's bill carries over: not its saved
+// confirmation, its error, its creation key (a retry of that bill) or its unsaved state. The
+// form itself is keyed by tenant, so it starts fresh.
+watch(
+  () => props.tenantId,
+  () => {
+    savedEntry.value = null
+    saveError.value = null
+    existingEntry.value = null
+    previewedRent.value = null
+    previewedRate.value = null
+    creationKey = null
+    isDirty.value = false
+    discardConfirmed = false
+    pendingRoute = null
+  },
+)
 
 function goToDashboard() {
   router.push({ name: 'dashboard' })
+}
+
+function goToTenants() {
+  router.push({ name: 'tenants' })
 }
 
 function viewEntry(entryId: string) {
@@ -169,18 +204,6 @@ function handleDialogOpenChange(open: boolean) {
 
 <template>
   <AppLayout>
-    <template #back>
-      <Button
-        variant="ghost"
-        class="-ml-3 h-11 text-primary hover:text-primary"
-        :disabled="saving"
-        @click="goToDashboard"
-      >
-        <ArrowLeft aria-hidden="true" />
-        Back to dashboard
-      </Button>
-    </template>
-
     <!-- The form's own shape while the tenant loads, so nothing jumps when it arrives. -->
     <LoadingRegion
       v-if="tenantStatus === 'loading'"
@@ -213,9 +236,9 @@ function handleDialogOpenChange(open: boolean) {
       >
         <h1 class="text-lg font-semibold">Tenant not found</h1>
         <p class="mt-1 max-w-sm text-sm text-muted-foreground">
-          This tenant doesn't exist or has been removed. Choose a tenant from the dashboard.
+          This tenant doesn't exist or has been removed. Choose one from Tenants.
         </p>
-        <Button class="mt-6 h-11 px-6" @click="goToDashboard">Back to dashboard</Button>
+        <Button class="mt-6 h-11 px-6" @click="goToTenants">Go to tenants</Button>
       </div>
     </template>
 
@@ -229,7 +252,7 @@ function handleDialogOpenChange(open: boolean) {
           class="mb-4 flex size-16 items-center justify-center rounded-full bg-success/10 text-success"
           aria-hidden="true"
         >
-          <CircleCheck class="size-9" />
+          <PhCheckCircle class="size-9" />
         </div>
         <h1 id="entry-saved-heading" class="text-2xl font-bold tracking-tight sm:text-3xl">
           Bill saved
@@ -307,11 +330,9 @@ function handleDialogOpenChange(open: boolean) {
           @click="viewEntry(savedSummary.entry.id)"
         >
           View Entry
-          <ChevronRight aria-hidden="true" />
+          <PhCaretRight aria-hidden="true" />
         </Button>
-        <Button class="mt-3 h-12 w-full text-base" @click="goToDashboard">
-          Back to dashboard
-        </Button>
+        <Button class="mt-3 h-12 w-full text-base" @click="goToDashboard">Go to dashboard</Button>
       </section>
 
       <template v-else>
@@ -322,7 +343,7 @@ function handleDialogOpenChange(open: boolean) {
             class="mt-4 inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-sm text-secondary-foreground"
             data-testid="tenant-chip"
           >
-            <User class="size-4" aria-hidden="true" />
+            <PhUser class="size-4" aria-hidden="true" />
             {{ tenant.name }} · Flat {{ tenant.flatNumber }}
           </p>
         </header>
@@ -338,7 +359,7 @@ function handleDialogOpenChange(open: boolean) {
           </p>
           <Button variant="outline" class="h-10 shrink-0" @click="viewEntry(existingEntry.id)">
             Open saved entry
-            <ChevronRight aria-hidden="true" />
+            <PhCaretRight aria-hidden="true" />
           </Button>
         </div>
 
