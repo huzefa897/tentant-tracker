@@ -60,6 +60,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 - Backend secrets (`DJANGO_SECRET_KEY`, the database password, the Firebase service-account key's path, or its fields as variables) come from the gitignored `backend/.env`. The service-account JSON lives outside the repository. The key as variables is named so Django's error pages mask it (`FIREBASE_SERVICE_ACCOUNT_KEY`); never log it. In production they come from the gitignored `.env.production` on the server, each container gets only the ones it needs, and the key is mounted read-only; neither image contains any (their `.dockerignore` files are allowlists). [deployment.md](deployment.md) says how to keep a copy for recovery.
 - `VITE_*` variables are bundled into the app and are **public**: never put a secret in one. The Firebase web config is public by design.
+- **Database dumps** hold every record, so they're secrets too. The server's stay in a `700` folder on the server and off-site; Supabase's are encrypted with age before they leave the job that makes them, and are kept only in a private repository ([deployment.md](deployment.md#backups-on-supabase)). The age private key is kept only in a password manager. `.gitignore` refuses `*.dump` files, and no workflow in this repository uploads a dump.
 - Apps Script secrets live in Script Properties, never in the code. The repo is public: never commit tenant data, phone numbers, emails, sheet or script IDs.
 
 ## 7. No secrets in logs

@@ -82,5 +82,6 @@ anyone using the app. Never put secrets in them.
 The app runs as three containers (Caddy with the built app, Django, PostgreSQL) from
 `compose.prod.yaml`, configured by `.env.production` (`.env.production.example` lists every
 value). `scripts/deploy.sh` releases, `scripts/rollback.sh` goes back, `scripts/backup-db.sh`
-and `scripts/restore-test.sh` keep the data safe. See [docs/deployment.md](docs/deployment.md),
+and `scripts/restore-test.sh` keep the data safe (on Render and Supabase, a nightly job in a
+private repository does, from `deploy/backups-repo/`). See [docs/deployment.md](docs/deployment.md),
 and [docs/data-import.md](docs/data-import.md) for importing the owners' Google Sheet.
