@@ -84,8 +84,8 @@ const rows = computed(() =>
               class="px-3 py-2 text-right whitespace-nowrap tabular-nums"
               data-testid="period-outstanding"
             >
-              <span class="font-semibold">{{ formatINR(row.period.outstanding!) }}</span
-              ><template v-if="row.partlyPaid"
+              <span class="font-semibold">{{ formatINR(row.period.outstanding!) }}</span><template
+                v-if="row.partlyPaid"
                 >{{ ' '
                 }}<span class="block text-sm text-muted-foreground">{{
                   `of ${formatINR(row.period.totalDue!)}`
