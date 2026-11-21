@@ -30,7 +30,7 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 
 ## Step 3: Scheduling
 
-- Render's free plan has no cron jobs: a GitHub Actions schedule, every hour, calls a POST endpoint protected by a secret (compared in constant time) and rate limited, which runs the runner. It allows for Render waking up (about a minute) and GitHub running late.
+- Render's free plan has no cron jobs: a GitHub Actions schedule, every hour, calls a POST endpoint protected by a secret (compared in constant time) and rate limited, which runs the runner. Hourly because each property sends at its own time in its own time zone, and so a late or skipped GitHub run (they happen) is caught up the next hour; runs are safe to repeat. The API doesn't sleep (the uptime monitor keeps it awake, [deployment.md](deployment.md#render-and-supabase)); if it ever does, the call waits about a minute for it to wake.
 - The single server: `send_messages` from crontab, every hour.
 - **Pass `MESSAGING_PROVIDER` and the provider's settings through** to the backend: `compose.prod.yaml` gives it only the variables it lists, so one set only in `.env.production` never reaches Django (that leaves `DisabledSender`, which is safe). Never in `backend/.env.example` with real values, CI, or the restore scripts' environments. `render.yaml` (`sync: false` for the secret and the provider's credentials), `compose.prod.yaml`, `.env.production.example`, and `deployment.md` and `security.md` updated. Logs carry ids, never a full phone number.
 - Scheduled workflows in a public repository stop after 60 days without activity: say how to notice and turn it back on.
