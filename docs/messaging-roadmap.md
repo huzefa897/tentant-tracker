@@ -10,7 +10,7 @@ The terms (Message, Rent Due Reminder, Payment Message, Due, Follow-up, reminder
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------- |
 | 1    | The `messaging` app, per-property settings, clock and time zones                                                                               | #89                                                         | In review   |
 | 2a   | Rent Due Reminders without a provider: messages, reminder items, policy, composer, runner, sender interface, `send_messages`, history in admin | [#90](https://github.com/huzefa897/tentant-tracker/pull/90) | In review   |
-| 2b   | The TextBee sender                                                                                                                             |                                                             | Not started |
+| 2b   | The TextBee sender                                                                                                                             |                                                             | In review   |
 | 3    | Scheduling: the hourly trigger on Render, crontab on the single server                                                                         |                                                             | Not started |
 | 4    | Payment Messages                                                                                                                               |                                                             | Not started |
 
@@ -27,20 +27,6 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 - **Provider agnostic**: the rules in [messaging.md](messaging.md#providers).
 - **SOLID**: a pure policy, an injected clock and sender, new message types without changing the runner.
 - Settings in a 1:1 table beside `Property`; `messaging` is its own app, and `properties` and `billing` never import it.
-
-## Step 2b: TextBee sender
-
-Step 2a is built: [messaging.md](messaging.md) describes it. What's left is `TextBeeSender`, under [Providers](messaging.md#providers)' rules, and `MESSAGING_PROVIDER=textbee` in `get_sender()`.
-
-From TextBee's docs (textbee.dev, read 2026-11-21):
-
-- **Send:** `POST https://api.textbee.dev/api/v1/gateway/send-sms`, header `x-api-key`, JSON `{"recipients": ["+91…"], "message": "…", "deviceId": "…"}`. 200 answers `{"data": {"success": true, "smsBatchId": "…", "recipientCount": 1}}`: record `smsBatchId` as the provider's message id. One recipient per request.
-- **Outcomes:** 200 is `sent` (queued on the phone); 400 (no enabled device, bad number, too long), 401 (bad key), 403 (account can't send), 404 (unknown device) and 429 (daily or monthly plan limit used up: nothing was sent) are `failed`, with a short reason; a timeout, a connection error, a 5xx or an answer that can't be read is `unknown`. The error body's field name (`error` or `message`) isn't consistent in their docs: read either.
-- **No idempotency key**, so a retried request could send twice: never retry inside the sender. The reservation before sending is what prevents duplicates.
-- **Settings:** `TEXTBEE_API_KEY`, `TEXTBEE_DEVICE_ID` (and a base URL with that default); no provider without both. A short timeout (10 s).
-- **Free plan:** 50 SMS a day, 300 a month, 1 device. Enough for one property; a 429 shows as `failed` with the reason.
-- **Delivery reports, later:** TextBee can call a webhook (`MESSAGE_SENT`, `MESSAGE_DELIVERED`, `MESSAGE_FAILED`, signed with `X-Textbee-Signature`, HMAC-SHA256 over `"<t>.<body>"`), or the batch can be looked up (`GET …/devices/{id}/sms-batch/{smsBatchId}`). A `delivered` status needs one of them: not in 2b.
-- **Tests:** the shared sender tests, with HTTP faked; never a real request.
 
 ## Step 3: Scheduling
 

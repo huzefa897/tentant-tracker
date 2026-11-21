@@ -100,6 +100,11 @@ SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 # nothing. Set it in production only: development, CI and restored backups hold real tenants'
 # numbers.
 MESSAGING_PROVIDER = os.getenv("MESSAGING_PROVIDER", "").strip().lower()
+# TextBee (MESSAGING_PROVIDER=textbee): the API key and the phone's device id, from the
+# TextBee dashboard. Secrets: never commit or log them.
+TEXTBEE_API_KEY = os.getenv("TEXTBEE_API_KEY", "").strip()
+TEXTBEE_DEVICE_ID = os.getenv("TEXTBEE_DEVICE_ID", "").strip()
+TEXTBEE_BASE_URL = os.getenv("TEXTBEE_BASE_URL", "https://api.textbee.dev/api/v1").strip()
 
 # Where Django admin is served. Set another path in production so it isn't at the default
 # address bots try; its logins are throttled either way (config/middleware.py).
