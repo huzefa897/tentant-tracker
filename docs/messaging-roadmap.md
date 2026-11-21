@@ -42,6 +42,14 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 - The text says what was received and towards which month, never that it's settled when it isn't: _"Hi Ali, we've received your payment of Rs. 12,000 towards November 2026 rent. Thank you."_
 - Reminders stop by themselves once a month is paid, since the policy checks it.
 
+## Later: the property's time zone for the whole app
+
+Not needed while every property is in India; do it before adding one that isn't. Messaging already follows the property's zone; the rest of the app doesn't yet.
+
+- **The rule, already followed:** moments (sent, recorded, started) are stored in UTC (`USE_TZ`); local rules (11:30 each day, due on the 11th) are stored as local time plus an IANA zone and converted when checked, since a fixed UTC time drifts an hour with daylight saving. Dates and deadlines follow the **property's** zone, never the viewer's: an owner abroad sees the same overdue bills.
+- **Today:** `business_date()` ([properties/models.py](../backend/properties/models.py)) is India's date for tenancy status, rental periods and the dashboard, from `TIME_ZONE = "Asia/Kolkata"`. Keep `TIME_ZONE` as it is: making it UTC changes no stored timestamp, only "today", which would lag India's from midnight to 05:30.
+- **The change:** move `time_zone` from `PropertyMessagingSettings` onto `Property` (a data migration copies it; messaging reads the property's), and make `business_date(prop)` use it, passing the property everywhere it's called. Tests for a property outside India: a tenancy's status and a month's due date flip at that property's midnight.
+
 ## Acceptance tests
 
 From the original spec; each is a test in the step that builds it, marked with its ID (`# TC-05`) in `backend/messaging/tests/`.
