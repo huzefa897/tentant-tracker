@@ -7,14 +7,19 @@ the only place they're kept off Supabase.
 
 The source of these files is `deploy/backups-repo/` in the app's repository: change them
 there, then copy them here. How backups fit with releases and restores is in its
-`docs/deployment.md` (Render and Supabase > Backups).
+`docs/deployment.md` (Render and Supabase > Backups on Supabase).
 
 ## What each run does
 
-1. Dumps the `public` schema (Django's tables) over Supabase's session pooler.
-2. Checks it: it must list the payments table, restore with no errors into an empty
-   PostgreSQL 17 that the job starts, and hold the same number of rows in every table as the
-   live database (sessions and rate-limit counts aside).
+1. Dumps the `public` schema (Django's tables) over Supabase's session pooler, plus the
+   extensions it uses, listed in `backup.sh` (`btree_gist`, for the no-overlapping-tenancies
+   constraint). The run fails if a table in `public` belongs to an extension, because its
+   rows wouldn't be in the backup.
+2. Checks it: it must list the payments table and restore with no errors into an empty
+   PostgreSQL 17 that the job starts. The restored database must then have the same tables
+   as the live one, with the same number of rows in each. Three tables that change by
+   themselves are left out: `django_session` (sessions), `django_cache` (rate-limit counts)
+   and `accounts_adminloginattempts` (login-attempt counts).
 3. Encrypts it with [age](https://age-encryption.org) to the public key in `AGE_RECIPIENT`.
    The private key is never here, so nothing in GitHub can read the backups.
 4. Commits `rent-tracker/<year>/<month>/rent-tracker-<time>.dump.age`.
@@ -56,4 +61,5 @@ scripts/restore-test.sh --supabase .env.supabase --identity key.txt <file>.dump.
 
 Git keeps every file it was ever given, so deleting old backups doesn't make the repository
 smaller. At about a megabyte a night that's a few hundred MB a year, well inside GitHub's
-limits. If it ever passes 1 GB, start a fresh history (keep an archive of the old one first).
+limits. If it ever passes 1 GB, you can start a fresh history, after keeping an archive of the
+old one. That's the owner's decision, done by hand, never by the job or a coding agent.
