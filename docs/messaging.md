@@ -86,6 +86,17 @@ The name is the tenancy's, as written. The text is plain ASCII: one character ou
 - **Answers counts only** (`run`, `dryRun`, `propertiesChecked`, `planned`, `sent`, `failed`, `unknown`, `skipped`, `errors`, `stoppedEarly`), never names, numbers or text.
 - **A time budget:** a request must finish within Gunicorn's 30 seconds, and a send can take 10, so the run starts no new message after 15 seconds (`MESSAGING_RUN_TIME_BUDGET`). What's left was never reserved, so the next run sends it; the run is marked **stopped early**. The command has no budget.
 
+## Sent by hand
+
+Besides the runs, an owner or manager can text a tenant a reminder about one bill from its details page (**Send SMS**, beside Void bill). `messaging/manual.py` (`send_bill_reminder`), reached by `POST /api/v1/properties/{id}/tenancies/{id}/entries/{id}/reminder/`:
+
+- **Who:** `Capability.SEND_MESSAGES` (owners and managers); anyone else gets 403, someone without access to the property 404. The app shows the button only where `GET /api/v1/properties/{id}/messaging/` says `enabled` (messaging on), `ready` (its provider is set up on this server) and `canSend` (the role); the endpoint checks all of it again.
+- **When it sends nothing** it answers 409 with a `code`: `messaging_off`, `provider_not_set_up`, `entry_void`, `entry_paid` (nothing outstanding), `no_rental_period`, `number_untextable`, or `already_sent_today`.
+- **One a day per bill.** Inside a transaction it locks the bill's rental period (what the runs lock), re-reads the bill, and refuses when a reminder sent by hand for that month today hasn't failed. A `failed` one can be sent again; a `queued` or `unknown` one can't, since it may have gone. So retrying after no answer never texts twice.
+- **Reserve, then send**, like a run: a `queued` message with one reminder item at the stage **Sent by hand** (`ReminderStage.MANUAL`) and `sent_by` (who sent it), committed, then sent outside the transaction (`runner.deliver`). It answers 201 with `status` (`sent`, `failed` or `unknown`), a short `reason` and `sentAt`.
+- **It never counts as the Due or Follow-up**, which still go out by themselves: the one-per-month constraint covers only the automatic stages. It's in Messaging > Messages like the rest, with its stage.
+- **The text** is about that one month, from what's outstanding on the bill and its due date at the property: _"Hi Ali, your September 2026 rent (Rs. 4,712.50 outstanding) is overdue. Please arrange payment or contact us if you've already paid. Thank you."_ Before the due date it says "a reminder that your … is due on 11 November", on it "is due today", and with no due date "is unpaid".
+
 ## History in admin
 
 Both read-only: nothing is added, edited or deleted there, so the record stays what the runner wrote.

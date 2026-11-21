@@ -1,6 +1,7 @@
 import uuid
 from datetime import date, datetime, time
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
@@ -115,6 +116,13 @@ class MessageType(models.TextChoices):
 class ReminderStage(models.TextChoices):
     DUE = "due", "Due"
     FOLLOW_UP = "follow_up", "Follow-up"
+    # Sent from the bill's page by an owner or manager (messaging/manual.py). Never counts as
+    # the Due or Follow-up, which still go out by themselves.
+    MANUAL = "manual", "Sent by hand"
+
+
+# The stages runs send, each once per month ever.
+AUTOMATIC_STAGES = (ReminderStage.DUE, ReminderStage.FOLLOW_UP)
 
 
 class MessageStatus(models.TextChoices):
@@ -177,6 +185,14 @@ class Message(models.Model):
     run = models.ForeignKey(
         MessagingRun, on_delete=models.SET_NULL, null=True, blank=True, related_name="messages"
     )
+    # Who sent it by hand, from the app; empty for a run's.
+    sent_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
     type = models.CharField(max_length=20, choices=MessageType.choices)
     channel = models.CharField(max_length=10, choices=Channel.choices, default=Channel.SMS)
     status = models.CharField(max_length=10, choices=MessageStatus.choices)
@@ -209,8 +225,9 @@ class Message(models.Model):
 
 
 class RentDueReminderItem(models.Model):
-    """One month at one stage, covered by a Rent Due Reminder. At most one per month and stage,
-    ever: the database refuses a second, so a repeated or overlapping run can't send twice."""
+    """One month at one stage, covered by a Rent Due Reminder. At most one per month for each
+    automatic stage, ever: the database refuses a second, so a repeated or overlapping run can't
+    send twice. Sent by hand ones are limited to one a day instead (messaging/manual.py)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     message = models.ForeignKey(Message, on_delete=models.PROTECT, related_name="reminder_items")
@@ -224,7 +241,9 @@ class RentDueReminderItem(models.Model):
         ordering = ("rental_period__period_month",)
         constraints = [
             models.UniqueConstraint(
-                fields=["rental_period", "stage"], name="one_reminder_per_period_and_stage"
+                fields=["rental_period", "stage"],
+                condition=Q(stage__in=["due", "follow_up"]),
+                name="one_reminder_per_period_and_stage",
             ),
         ]
 

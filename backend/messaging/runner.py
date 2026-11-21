@@ -264,18 +264,26 @@ class MessageRunner:
         return message, reminders
 
     def _send(self, run, message, sender):
-        try:
-            outcome = sender.send(message.recipient, message.body)
-        except Exception as exc:
-            # A sender shouldn't raise, but one that does may have sent it: never retry blindly.
-            log_failure("sending message", message.pk, exc)
-            outcome = SendResult(SendOutcome.UNKNOWN, reason="The sender stopped unexpectedly.")
-        now = timezone.now()
-        Message.objects.filter(pk=message.pk, status=MessageStatus.QUEUED).update(
-            status=MessageStatus(outcome.outcome.value),
-            provider_message_id=outcome.provider_message_id[:100],
-            reason=outcome.reason[:300],
-            attempted_at=now,
-            updated_at=now,
-        )
+        outcome = deliver(message, sender)
         setattr(run, outcome.outcome.value, getattr(run, outcome.outcome.value) + 1)
+
+
+def deliver(message: Message, sender: MessageSender) -> SendResult:
+    """Sends a reserved (`queued`) message, outside any transaction, and records what came of
+    it. Used by runs and by a message sent by hand (messaging/manual.py)."""
+    try:
+        outcome = sender.send(message.recipient, message.body)
+    except Exception as exc:
+        # A sender shouldn't raise, but one that does may have sent it: never retry blindly.
+        log_failure("sending message", message.pk, exc)
+        outcome = SendResult(SendOutcome.UNKNOWN, reason="The sender stopped unexpectedly.")
+    now = timezone.now()
+    Message.objects.filter(pk=message.pk, status=MessageStatus.QUEUED).update(
+        status=MessageStatus(outcome.outcome.value),
+        provider_message_id=outcome.provider_message_id[:100],
+        reason=outcome.reason[:300],
+        attempted_at=now,
+        updated_at=now,
+    )
+    message.refresh_from_db()
+    return outcome
