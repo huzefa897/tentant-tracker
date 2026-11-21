@@ -6,13 +6,13 @@ The terms (Message, Rent Due Reminder, Payment Message, Due, Follow-up, reminder
 
 ## Status
 
-| Step | What                                                                                                                                           | PR  | Status      |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --- | ----------- |
-| 1    | The `messaging` app, per-property settings, clock and time zones                                                                               | #89 | In review   |
-| 2a   | Rent Due Reminders without a provider: messages, reminder items, policy, composer, runner, sender interface, `send_messages`, history in admin |     | In review   |
-| 2b   | The TextBee sender                                                                                                                             |     | Not started |
-| 3    | Scheduling: the hourly trigger on Render, crontab on the single server                                                                         |     | Not started |
-| 4    | Payment Messages                                                                                                                               |     | Not started |
+| Step | What                                                                                                                                           | PR                                                          | Status      |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------- |
+| 1    | The `messaging` app, per-property settings, clock and time zones                                                                               | #89                                                         | In review   |
+| 2a   | Rent Due Reminders without a provider: messages, reminder items, policy, composer, runner, sender interface, `send_messages`, history in admin | [#90](https://github.com/huzefa897/tentant-tracker/pull/90) | In review   |
+| 2b   | The TextBee sender                                                                                                                             |                                                             | Not started |
+| 3    | Scheduling: the hourly trigger on Render, crontab on the single server                                                                         |                                                             | Not started |
+| 4    | Payment Messages                                                                                                                               |                                                             | Not started |
 
 Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and this table updated.
 
