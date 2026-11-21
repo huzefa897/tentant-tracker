@@ -1,0 +1,52 @@
+# Nightly encrypted backup of the rent tracker's Supabase database, committed to this
+# (private) repository. The steps and the checks are in backup.sh; setup is in README.md.
+name: Back up the database
+
+on:
+  schedule:
+    # 21:00 UTC is 02:30 in India. GitHub can start scheduled runs late.
+    - cron: '0 21 * * *'
+  # "Run workflow": before merging a release, so its migrations have a backup just before them.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      # An empty database that every backup is restored into, to prove it restores.
+      restore:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: restore-test-only
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the PostgreSQL 17 client and age
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common age
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Back up
+        run: ./backup.sh
+        env:
+          SUPABASE_HOST: ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_USER: ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+          AGE_RECIPIENT: ${{ vars.AGE_RECIPIENT }}
+          RESTORE_PORT: ${{ job.services.restore.ports['5432'] }}

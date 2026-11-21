@@ -164,7 +164,7 @@ How it differs from the single server:
 - **No shell.** Admin logins, the Sheet import ([data-import.md](data-import.md)) and one-off commands such as `preview_rent_tracking` and `set_rental_period_due_day` ([rent-entries.md](rent-entries.md#rental-periods-and-due-dates)) run from your machine against Supabase, like the admin login below (with the command in place of `createsuperuser`).
 - **Sleeps after 15 minutes without traffic** and takes about a minute to wake. An uptime monitor calling `https://rent-tracker-api-bcwo.onrender.com/api/v1/ready/` every 14 minutes keeps it awake, and its database query keeps the Supabase project from pausing (it pauses after 7 days without activity; a paused project can be restored, with its data, for 90 days). A month awake uses most of the free plan's 750 instance hours, which is enough for this one service; the static site doesn't use them.
 - **Health checks:** Render calls `/api/v1/health/` every few seconds, so `DJANGO_THROTTLE_HEALTH` is raised to 120/minute there (counted in memory, never in the database). Its checks are reported to send `Host: localhost:<port>`, so `localhost` is in `DJANGO_ALLOWED_HOSTS`. If a deploy never goes live, look for `DisallowedHost` in the logs.
-- **Backups are yours to run.** Supabase's free plan has none, and `scripts/backup-db.sh` needs the single server. Take a daily `pg_dump` from another machine using the session pooler's details, encrypt it, and copy it off-site (e.g. `rclone` with a `crypt` remote). Never keep an unencrypted dump anywhere public, such as this public repository's CI artifacts. Test a restore as in [Testing a backup](#testing-a-backup).
+- **Backups run from a private repository**, since Supabase's free plan has none and `scripts/backup-db.sh` needs the single server ([Backups on Supabase](#backups-on-supabase)).
 
 ### Setting it up
 
@@ -187,8 +187,52 @@ How it differs from the single server:
    Admin is at `https://rent-tracker-api-bcwo.onrender.com/<DJANGO_ADMIN_PATH>`.
 
 6. **The uptime monitor** (above), then the [checks after a deploy](#checks-after-a-deploy), with the static site's URL for the app and the API's for `/api/…`.
+7. **Backups** ([below](#backups-on-supabase)).
 
 Each service deploys `main` by itself once its GitHub checks pass (`branch: main`, `autoDeployTrigger: checksPass`), and only when its own files changed (`buildFilter`: the API for `backend/`, the static site for the rest). A change to these settings in the dashboard alone isn't enough: a Blueprint sync applies `render.yaml` again, so sync the Blueprint after changing them. **Manual Deploy** still works for a redeploy. Render keeps the two previous deploys for rollback on the free plan; it doesn't undo migrations ([Rolling back](#rolling-back) applies).
+
+### Backups on Supabase
+
+A nightly GitHub Actions job in a **private** repository (`tenant-tracker-backups`) dumps the database, proves the dump restores, encrypts it and commits it there. Its files live here, in [deploy/backups-repo/](../deploy/backups-repo/) (no secrets in them): change them here and copy them across. Its [README](../deploy/backups-repo/README.md) has the setup. Before copying a change across, let the [Backups](../.github/workflows/backups.yml) workflow pass here: it runs `backup.sh` against a seeded throwaway PostgreSQL set up like Supabase (`btree_gist` in `extensions`), pushes to a local git repository, and restores the result with `restore-test.sh` and `restore-supabase.sh`. It never touches Supabase. It runs on PRs and pushes that change the backup or restore files, migrations or `ledger_summary`.
+
+- **What it backs up:** the `public` schema, which holds every Django table. Supabase's own schemas (`auth`, `storage` and so on) aren't used by the app and are left out.
+- **Every run checks its dump:** it must list the payments table, restore with no errors into an empty PostgreSQL 17 started next to the job, and hold the same number of rows in every table as Supabase (sessions and rate-limit counts aside). A failure fails the run.
+- **Encrypted before it's stored**, with [age](https://age-encryption.org), to a public key. The private key (`key.txt`) is kept in a password manager, with a second copy apart from it: GitHub never holds anything that can read the backups, and without the key nobody can, you included.
+- **Failures are visible:** the job pings a healthchecks.io check, which alerts when a run fails or a day passes without one (GitHub sometimes starts scheduled runs late, or stops them).
+- **Kept for good:** git keeps every file, so the repository grows by roughly the dump's size every night. Restart its history (after archiving it) if it ever passes 1 GB.
+- **A copy outside GitHub:** keep a clone of the backups repository on your own machine and `git pull` it now and then. Nothing on the free plan stops a force-push from rewriting the history on GitHub.
+- **Before a release** with migrations: run the job by hand (Actions > Back up the database > Run workflow) and let it pass before merging the release PR, so there's a backup from just before them.
+- **Never** keep a decrypted dump anywhere public, such as this repository or its CI artifacts. `.gitignore` refuses `*.dump` files here.
+
+**Testing a backup**, monthly, from your machine (it needs Docker and `age`). Build the backend image from the code that's live (`git switch main && git pull`, then `docker build -t rent-tracker-backend backend`), put the session pooler's details in a gitignored `.env.supabase` (`POSTGRES_HOST`, `POSTGRES_PORT=5432`, `POSTGRES_DB=postgres`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_SSLMODE=require`, no quotes), then, right after a backup:
+
+```bash
+scripts/restore-test.sh --supabase .env.supabase --identity key.txt \
+  ../tenant-tracker-backups/rent-tracker/<year>/<month>/rent-tracker-<time>.dump.age
+```
+
+It decrypts the dump into a private temporary folder (deleted on exit), then compares `ledger_summary` as in [Testing a backup](#testing-a-backup). Testing never writes to Supabase; only `restore-supabase.sh`, below, does.
+
+**Restoring Supabase** from a backup, with [scripts/restore-supabase.sh](../scripts/restore-supabase.sh) (from your machine, with Docker and `age`):
+
+1. **Back up what's there first**, if anything is (run the job), so the restore can be undone.
+2. **Stop writes:** suspend the API service in Render.
+3. **An empty `public` schema.** Either a new Supabase project (set up as in [Setting it up](#setting-it-up), Data API off, and change the `POSTGRES_*` values in Render to it), or, in the same project's SQL editor, `drop schema public cascade; create schema public;`, **only once the backup has passed a restore test** (step 4 runs one before touching anything, but not against the data you're about to drop). Dropping the schema also drops `btree_gist` if it was installed there; the restore puts it back.
+4. **Build the backend image from the commit that was live when the backup was taken** (Render's deploy list for the API, or `main`'s history, gives it): `git switch --detach <commit> && docker build -t rent-tracker-backend backend`, then `git switch -` back. Not a later one: the script's `ledger_summary` reads every column the models define, and a column added since the backup doesn't exist in it yet. That's the usual case when restoring the backup taken just before a release.
+5. **Restore**, with the target's session pooler details in a gitignored env file (as `.env.supabase` above; a new project has its own):
+
+   ```bash
+   scripts/restore-supabase.sh --target .env.supabase --identity key.txt \
+     ../tenant-tracker-backups/rent-tracker/<year>/<month>/rent-tracker-<time>.dump.age
+   ```
+
+   It decrypts the backup into a private temporary folder (deleted on exit) and restores it into a throwaway database first, so a backup that doesn't restore stops before Supabase is touched. That database's `ledger_summary` is what Supabase must hold afterwards. It then refuses a target whose `public` schema isn't empty (it never mixes a backup into live data), shows the host, port, database and user, and asks you to type the host (or pass it with `--confirm <host>`). It makes sure `btree_gist` (which the tenancy overlap constraint needs) ends up where it was: a nightly backup creates it itself, in its schema on Supabase (`extensions`), which the script creates first if it's missing; an older dump made without `--extension` doesn't hold it, so the script creates it. Then it restores, in one transaction, so a failure leaves the target's `public` schema empty and you can fix the cause and run it again. Last, it compares the target's `ledger_summary` and every table's row count (meter readings included) with the throwaway one's.
+
+6. **Resume the API service** (it migrates on start if the code is newer than the backup), then the [checks after a deploy](#checks-after-a-deploy). Anything recorded after the backup was taken is lost: tell the owners which day it's from, so they can enter it again.
+
+**Rehearse it once a year**, and after changing the scripts or upgrading PostgreSQL: create a scratch Supabase project (the free plan allows two), restore the latest backup into it, then delete the project. Note the date and how long it took here. Not rehearsed against Supabase yet; rehearsed against a local PostgreSQL 17 on 2026-11-21 (a seeded database: 14 tenancies, 99 bills, 91 payments, in about 10 seconds).
+
+**Keep a second copy of `key.txt`**, apart from the password manager (printed and stored safely, or in a second person's vault). Losing it makes every backup unreadable; the monthly restore test is also what proves the copy you have still works.
 
 ### Branches and releases
 
@@ -200,7 +244,7 @@ Each service deploys `main` by itself once its GitHub checks pass (`branch: main
 
 - **`dev`** is where work lands: branch from it and open PRs against it (it's the repository's default branch, so new PRs and Dependabot's target it). CI runs on every PR and on every push to `dev`. Nothing deploys it.
 - **`main`** is production. Everything on it deploys, so it only moves through the release PR (or a hotfix, below).
-- **The release PR** ([.github/workflows/release.yml](../.github/workflows/release.yml)): after each push to `dev`, the `release-pr` job opens "Release: dev → main", or updates the one already open, listing the commits it brings and which services will deploy. **Merging it is the deploy button.** Merge with **Create a merge commit**, not squash: a squash gives `main` a commit `dev` doesn't have. Check its migrations first; rolling back doesn't undo them.
+- **The release PR** ([.github/workflows/release.yml](../.github/workflows/release.yml)): after each push to `dev`, the `release-pr` job opens "Release: dev → main", or updates the one already open, listing the commits it brings and which services will deploy. **Merging it is the deploy button.** Merge with **Create a merge commit**, not squash: a squash gives `main` a commit `dev` doesn't have. Check its migrations first; rolling back doesn't undo them. If it has any, [back up](#backups-on-supabase) just before merging.
 - **Keeping the two level:** after every push to `main`, the `sync-dev` job merges `main` into `dev` if `dev` lacks anything (a squashed release, a hotfix). If they conflict, it opens a "Sync main into dev (conflicts)" PR from a copy of `main` for you to resolve. It never fails: its result is a check on the `main` commit, and Render deploys only once every check passes. It does nothing until `dev` exists.
 - **A hotfix** can go straight to `main` through a PR against it; `sync-dev` then brings it into `dev`.
 - **Two repository settings it needs** (Settings): _General > Default branch_ is `dev`, which also keeps "Automatically delete head branches" from deleting `dev` when a release merges; and _Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests_, or `release-pr` can't open the PR.

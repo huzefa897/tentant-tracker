@@ -19,6 +19,12 @@ coverage
 .env.*
 !.env.example
 
+# Database dumps and backup keys: never in this public repository (docs/deployment.md)
+*.dump
+*.dump.age
+*.dump.partial
+key.txt
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
