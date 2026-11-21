@@ -18,6 +18,7 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 ## Decisions (2026-11-21)
 
 - **No backlog.** Reminders only for months due on or after the property's **reminders start**, set when messaging is turned on.
+- **No deployment-wide switch** (no `MESSAGING_ENABLED`): each property is turned on in admin. Only an environment with a provider's credentials sends; production is the only one given them.
 - **One message per tenancy per run**, listing all its months, never one per month.
 - **Ended (and future) tenancies are left out**, including the last month of a postpaid tenancy, which falls due after it ends.
 - **A number that can't be texted** is skipped without reserving anything, so the reminder goes out once it's fixed.
@@ -37,7 +38,7 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
   - after a missed week, only the Follow-up, never both stages of one month at once.
 - **`MessageComposer`**: one message listing the tenancy's months and their stages, e.g. _"Hi Ali, your rent for October 2026 (overdue) and November 2026 (due today) is unpaid. Please arrange payment or contact us if you've already paid. Thank you."_ "Rs." rather than "₹" unless decided otherwise (a ₹ makes an SMS part 70 characters instead of 160).
 - **`MessageRunner`**: for each property whose send time has come, reserve first (the items and a `queued` message committed before sending), check the months again, send, then record `sent`, `failed` or `unknown`. `queued` and `unknown` are never resent by themselves. One tenancy's failure never stops the others; nothing writes to bills or payments. Likewise one property's: a time zone no longer in the database (`now_in_zone` raises `ZoneInfoNotFoundError`; admin refuses one on save, but a raw update or a `tzdata` change could leave one) skips that property, with the error recorded on the run.
-- **Senders** behind `MessageSender` ([Providers](messaging.md#providers)): `TextBeeSender`, `FakeSender`, `DisabledSender`, picked by `MESSAGING_PROVIDER`, with the shared sender tests.
+- **Senders** behind `MessageSender` ([Providers](messaging.md#providers)): `TextBeeSender`, `FakeSender`, `DisabledSender` (no provider set, or its credentials missing: nothing sent, and the run says so), picked by `MESSAGING_PROVIDER`, with the shared sender tests.
 - **`send_messages`** management command, with `--dry-run` listing what it would send.
 - **Before starting:** check TextBee's API for delivery reports (a `delivered` status, if it has them) and what it does with a repeated request.
 
@@ -45,7 +46,7 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 
 - Render's free plan has no cron jobs: a GitHub Actions schedule, every hour, calls a POST endpoint protected by a secret (compared in constant time) and rate limited, which runs the runner. It allows for Render waking up (about a minute) and GitHub running late.
 - The single server: `send_messages` from crontab, every hour.
-- **Pass `MESSAGING_ENABLED`, `MESSAGING_PROVIDER` and the provider's settings through** to the backend: `compose.prod.yaml` gives it only the variables it lists, so one set only in `.env.production` never reaches Django (today that leaves messaging off, which is safe). `render.yaml` (`sync: false` for the secret and the provider's credentials), `compose.prod.yaml`, `.env.production.example`, and `deployment.md` and `security.md` updated. Logs carry ids, never a full phone number.
+- **Pass `MESSAGING_PROVIDER` and the provider's settings through** to the backend: `compose.prod.yaml` gives it only the variables it lists, so one set only in `.env.production` never reaches Django (that leaves `DisabledSender`, which is safe). Never in `backend/.env.example` with real values, CI, or the restore scripts' environments. `render.yaml` (`sync: false` for the secret and the provider's credentials), `compose.prod.yaml`, `.env.production.example`, and `deployment.md` and `security.md` updated. Logs carry ids, never a full phone number.
 - Scheduled workflows in a public repository stop after 60 days without activity: say how to notice and turn it back on.
 
 ## Step 4: Payment Messages
@@ -76,7 +77,7 @@ From the original spec; each is a test in the step that builds it.
 | TC-13 | Due message failed, still unpaid on day 7   | Follow-up                                      | 2    |
 | TC-14 | Two tenants due the same day                | Both sent, independently                       | 2    |
 | TC-15 | Tenancy ended before the due date           | No message                                     | 2    |
-| TC-16 | `MESSAGING_ENABLED` off                     | No provider request                            | 2    |
+| TC-16 | No provider configured                      | No provider request                            | 2    |
 | TC-17 | Run late or a day missed                    | Catches up (Due within 6 days, then Follow-up) | 2    |
 | —     | Months due before reminders start           | No message                                     | 2    |
 | —     | Several months owed                         | One message listing them                       | 2    |

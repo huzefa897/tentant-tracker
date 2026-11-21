@@ -33,7 +33,7 @@ class Migration(migrations.Migration):
                     models.BooleanField(
                         db_default=False,
                         default=False,
-                        help_text="Off by default. Nothing is sent while MESSAGING_ENABLED is off either.",
+                        help_text="Off by default. Turn on to text this property's tenants.",
                         verbose_name="send messages",
                     ),
                 ),

@@ -96,10 +96,6 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 
-# Messaging (docs/messaging.md): texting tenants automatically. Off unless turned on here, and
-# then only for properties whose messaging settings are on too.
-MESSAGING_ENABLED = env_bool("MESSAGING_ENABLED")
-
 # Where Django admin is served. Set another path in production so it isn't at the default
 # address bots try; its logins are throttled either way (config/middleware.py).
 ADMIN_PATH = os.getenv("DJANGO_ADMIN_PATH", "admin/").strip("/") + "/"

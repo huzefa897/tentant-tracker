@@ -26,7 +26,7 @@ class PropertyMessagingSettings(models.Model):
         "send messages",
         default=False,
         db_default=False,
-        help_text="Off by default. Nothing is sent while MESSAGING_ENABLED is off either.",
+        help_text="Off by default. Turn on to text this property's tenants.",
     )
     # A name, not a fixed offset, so daylight saving is followed. Checked against the IANA
     # database in Python (validate_time_zone); the database can't check it.

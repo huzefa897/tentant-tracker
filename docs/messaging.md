@@ -26,9 +26,8 @@ The `messaging` app (`backend/messaging/`) owns everything here. It depends on `
 
 ## Turning it on
 
-Two switches, both off by default. Nothing is sent unless both are on:
+Each property is turned on and off on its own, in admin; there's no switch for the whole deployment. Only an environment with a provider's credentials can send (see [Providers](#providers)): set them in production only, never in development, CI, a trial deploy or a database restored from a backup, which hold real tenants' numbers and properties with messaging on.
 
-- **`MESSAGING_ENABLED`** (environment, `backend/.env.example`): for the whole deployment.
 - **A property's messaging settings**, edited in the **Messaging** section of the property's own admin page, one row per property, keyed by it (`PropertyMessagingSettings`, a one-to-one beside `Property` rather than columns on it). A property without a row has messaging off (`PropertyMessagingSettings.for_property` returns unsaved defaults). The row holds:
   - **Send messages** (`enabled`).
   - **Time zone** (`time_zone`, default `Asia/Kolkata`): a standard (IANA) name, picked from a list in admin and checked on save. It's a name, never an offset, so daylight saving is followed.
@@ -52,7 +51,7 @@ Senders arrive in step 2 of the [roadmap](messaging-roadmap.md); these rules are
 
 - **One interface.** `MessageSender.send(to, body) -> SendResult`, where `to` is an E.164 number and the result is the app's own: an outcome (`sent`, `failed` or `unknown`), the provider's message id when it gave one, and a short reason. Nothing else in messaging imports a provider's code or knows its URLs, fields or error codes.
 - **The sender turns the provider's answers into outcomes.** An accepted request is `sent`, a refusal `failed`, and a timeout, a dropped connection or an answer it can't read `unknown`, never `failed`: the message may have gone. It never raises a provider's or HTTP library's error to its caller.
-- **Chosen by a setting.** `MESSAGING_PROVIDER` (`textbee`, later others) picks the sender in one place, a small factory; `MESSAGING_ENABLED` off always gives `DisabledSender`, whatever the provider. Each provider's settings have its own prefix (`TEXTBEE_API_KEY`, `TEXTBEE_DEVICE_ID`), so two can be configured side by side while switching.
+- **Chosen by a setting.** `MESSAGING_PROVIDER` (`textbee`, later others) picks the sender in one place, a small factory. With no provider set, or its credentials missing, it gives `DisabledSender`, which sends nothing: so an environment can text people only once it has been given a provider on purpose. Each provider's settings have its own prefix (`TEXTBEE_API_KEY`, `TEXTBEE_DEVICE_ID`), so two can be configured side by side while switching.
 - **Each message records its provider** with the provider's message id, so old messages still read correctly after a switch, and delivery reports (if a provider sends them) are matched to the right one.
 - **The same tests for every sender**: one shared set of tests (accepted, refused, timeout, unreadable answer, nothing logged but ids) runs against each sender with its HTTP calls faked, and the rest of messaging is tested with `FakeSender`.
 - **Message text is the app's**, written by the composer, never a provider's template, so a switch doesn't change what tenants read.
