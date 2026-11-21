@@ -9,5 +9,6 @@
 !accounts/
 !properties/
 !billing/
+!messaging/
 **/__pycache__
 **/*.py[cod]

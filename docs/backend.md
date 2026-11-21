@@ -7,7 +7,7 @@ Feature rules live in their own docs: sign-in and property access in [auth-and-a
 ## Setup and conventions
 
 - Settings come from the gitignored `backend/.env`; every variable is listed in `backend/.env.example`. Add new ones to both.
-- Apps: `accounts`, `properties` (properties, memberships, tenancies), `billing` (rent entries, payments), `messaging` (texting tenants: [messaging.md](messaging.md)). Tests in `tests.py` or a `tests/` package per app; mock `verify_firebase_token`, never call live Firebase.
+- Apps: `accounts`, `properties` (properties, memberships, tenancies), `billing` (rent entries, payments), `messaging` (texting tenants: [messaging.md](messaging.md)). A new app must also be added to `backend/.dockerignore`, an allowlist: the image leaves out anything not on it, and fails to build without it. Tests in `tests.py` or a `tests/` package per app; mock `verify_firebase_token`, never call live Firebase.
 - Add packages with `pipenv install <name>` and commit `Pipfile.lock`.
 - API JSON is camelCase with explicit serializer fields; never expose whole models.
 - DRF requires authentication by default; a public endpoint opts out with `AllowAny` and `authentication_classes([])` (only `/api/v1/health/` and `/api/v1/ready/` today). CORS is not authentication.
