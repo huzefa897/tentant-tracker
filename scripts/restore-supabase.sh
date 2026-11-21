@@ -13,15 +13,18 @@
 #    here, before Supabase is touched.
 # 3. Refuses unless the target's public schema is empty, so it never mixes a backup into
 #    live data, and asks you to type the target's host (or pass it with --confirm).
-# 4. Restores into the target, then compares its ledger_summary (counts, totals, checksums;
-#    never the records) with the throwaway one's.
+# 4. Restores into the target, in one transaction (a failure leaves it empty), then compares
+#    its ledger_summary (counts, totals, checksums) and every table's row count with the
+#    throwaway one's. Neither prints the records.
 #
 # The target file (gitignored, like every .env.*) is the one restore-test.sh uses:
 # POSTGRES_HOST, POSTGRES_PORT=5432, POSTGRES_DB=postgres, POSTGRES_USER,
 # POSTGRES_PASSWORD and POSTGRES_SSLMODE=require, one NAME=value a line, no quotes. Point it
 # at the session pooler of the project being restored into. It needs Docker, age (for .age
-# files) and the backend image built from the code the backup was taken with or later
-# (docker build -t rent-tracker-backend backend; IMAGE overrides the name).
+# files) and the backend image built from the commit that was live when the backup was taken
+# (git switch --detach <commit>, then docker build -t rent-tracker-backend backend; IMAGE
+# overrides the name). Not a later one: ledger_summary reads every column its models define,
+# and a column added since the backup doesn't exist in it yet. The API migrates on resume.
 #
 # To rehearse against a local PostgreSQL without TLS, set ALLOW_NO_SSL=1.
 set -euo pipefail
@@ -100,7 +103,10 @@ scratch_db_start "rent-tracker-restore-$$"
 scratch_db_args
 echo "Restoring the backup into the empty database first…"
 restore_dump "${scratch_args[@]}" <"$dump"
-summary "${scratch_args[@]}" >"$workdir/expected"
+summary "${scratch_args[@]}" >"$workdir/expected" ||
+  die "couldn't summarise the backup: is the image built from the commit that was live when \
+it was taken? (a later one can need columns the backup doesn't have)"
+table_counts "${scratch_args[@]}" >"$workdir/expected.counts"
 scratch_db_stop
 echo "The backup restores. It holds:"
 cat "$workdir/expected"
@@ -132,12 +138,14 @@ fi
 # 4. The restore, then the check.
 echo "Restoring into $host…"
 restore_dump --env-file "$workdir/target.env" <"$dump" ||
-  die "the restore failed part way (above). $host now holds part of the backup: empty its \
-public schema again before retrying."
+  die "the restore failed (above). It runs in one transaction, so $host's public schema is \
+still empty: fix the cause and run this again."
 
 echo "Comparing $host with the backup…"
 summary --env-file "$target_env" >"$workdir/restored"
-if ! diff -u --label backup --label "$host" "$workdir/expected" "$workdir/restored"; then
+table_counts --env-file "$workdir/target.env" >"$workdir/restored.counts"
+if ! diff -u --label backup --label "$host" "$workdir/expected" "$workdir/restored" ||
+  ! diff -u --label backup --label "$host" "$workdir/expected.counts" "$workdir/restored.counts"; then
   die "$host differs from the backup (above). Don't resume the API: find out why, empty the \
 public schema and restore again."
 fi

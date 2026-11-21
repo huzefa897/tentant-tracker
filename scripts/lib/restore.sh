@@ -40,6 +40,9 @@ check_dump() {
 # ("extensions"), but not that schema: it's created here first, as backup.sh does. Older
 # dumps don't hold it, so it's created here, as the migration does.
 #
+# It restores in one transaction, so a failure part way leaves the target as it was (only the
+# extension's schema, or the extension, created first may stay; both are "if not exists").
+#
 # The dump is copied into the container because --use-list needs it as a file; the container
 # is removed afterwards.
 restore_dump() {
@@ -56,8 +59,22 @@ restore_dump() {
     else
       run_sql "create extension if not exists btree_gist"
     fi
-    pg_restore --exit-on-error --no-owner --no-privileges --use-list=/tmp/restore.list \
-      --dbname="$PGDATABASE" /tmp/backup.dump'
+    pg_restore --exit-on-error --single-transaction --no-owner --no-privileges \
+      --use-list=/tmp/restore.list --dbname="$PGDATABASE" /tmp/backup.dump'
+}
+
+# The number of rows in every table in public, one "name count" line each, sorted: of the
+# database the PG* settings in the docker run arguments name. ledger_summary checks the
+# ledger's contents; this checks every table, meter readings and the rest included. Only
+# names and counts are printed, never the records. PostgreSQL writes the count query itself
+# (\gexec), so every table name is quoted safely.
+table_counts() {
+  docker run --rm -i "$@" postgres:17 psql -XAtq -v ON_ERROR_STOP=1 -F' ' <<'SQL' |
+select string_agg(format('select %L, count(*) from public.%I', relname, relname), ' union all ')
+from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p')
+\gexec
+SQL
+    LC_ALL=C sort
 }
 
 # An empty, throwaway PostgreSQL 17 on a Docker network with no route out, so nothing in the

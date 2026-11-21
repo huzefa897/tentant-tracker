@@ -213,21 +213,22 @@ scripts/restore-test.sh --supabase .env.supabase --identity key.txt \
 
 It decrypts the dump into a private temporary folder (deleted on exit), then compares `ledger_summary` as in [Testing a backup](#testing-a-backup). Testing never writes to Supabase; only `restore-supabase.sh`, below, does.
 
-**Restoring Supabase** from a backup, with [scripts/restore-supabase.sh](../scripts/restore-supabase.sh) (from your machine, with Docker, `age` and the backend image as above):
+**Restoring Supabase** from a backup, with [scripts/restore-supabase.sh](../scripts/restore-supabase.sh) (from your machine, with Docker and `age`):
 
 1. **Back up what's there first**, if anything is (run the job), so the restore can be undone.
 2. **Stop writes:** suspend the API service in Render.
 3. **An empty `public` schema.** Either a new Supabase project (set up as in [Setting it up](#setting-it-up), Data API off, and change the `POSTGRES_*` values in Render to it), or, in the same project's SQL editor, `drop schema public cascade; create schema public;`, **only once the backup has passed a restore test** (step 4 runs one before touching anything, but not against the data you're about to drop). Dropping the schema also drops `btree_gist` if it was installed there; the restore puts it back.
-4. **Restore**, with the target's session pooler details in a gitignored env file (as `.env.supabase` above; a new project has its own):
+4. **Build the backend image from the commit that was live when the backup was taken** (Render's deploy list for the API, or `main`'s history, gives it): `git switch --detach <commit> && docker build -t rent-tracker-backend backend`, then `git switch -` back. Not a later one: the script's `ledger_summary` reads every column the models define, and a column added since the backup doesn't exist in it yet. That's the usual case when restoring the backup taken just before a release.
+5. **Restore**, with the target's session pooler details in a gitignored env file (as `.env.supabase` above; a new project has its own):
 
    ```bash
    scripts/restore-supabase.sh --target .env.supabase --identity key.txt \
      ../tenant-tracker-backups/rent-tracker/<year>/<month>/rent-tracker-<time>.dump.age
    ```
 
-   It decrypts the backup into a private temporary folder (deleted on exit) and restores it into a throwaway database first, so a backup that doesn't restore stops before Supabase is touched. That database's `ledger_summary` is what Supabase must hold afterwards. It then refuses a target whose `public` schema isn't empty (it never mixes a backup into live data), shows the host, port, database and user, and asks you to type the host (or pass it with `--confirm <host>`). It makes sure `btree_gist` (which the tenancy overlap constraint needs) ends up where it was: a nightly backup creates it itself, in its schema on Supabase (`extensions`), which the script creates first if it's missing; an older dump made without `--extension` doesn't hold it, so the script creates it. Then it restores and compares the target's `ledger_summary` with the throwaway one. A failed restore leaves part of the backup behind: empty the schema again before retrying.
+   It decrypts the backup into a private temporary folder (deleted on exit) and restores it into a throwaway database first, so a backup that doesn't restore stops before Supabase is touched. That database's `ledger_summary` is what Supabase must hold afterwards. It then refuses a target whose `public` schema isn't empty (it never mixes a backup into live data), shows the host, port, database and user, and asks you to type the host (or pass it with `--confirm <host>`). It makes sure `btree_gist` (which the tenancy overlap constraint needs) ends up where it was: a nightly backup creates it itself, in its schema on Supabase (`extensions`), which the script creates first if it's missing; an older dump made without `--extension` doesn't hold it, so the script creates it. Then it restores, in one transaction, so a failure leaves the target's `public` schema empty and you can fix the cause and run it again. Last, it compares the target's `ledger_summary` and every table's row count (meter readings included) with the throwaway one's.
 
-5. **Resume the API service** (it migrates on start if the code is newer than the backup), then the [checks after a deploy](#checks-after-a-deploy). Anything recorded after the backup was taken is lost: tell the owners which day it's from, so they can enter it again.
+6. **Resume the API service** (it migrates on start if the code is newer than the backup), then the [checks after a deploy](#checks-after-a-deploy). Anything recorded after the backup was taken is lost: tell the owners which day it's from, so they can enter it again.
 
 **Rehearse it once a year**, and after changing the scripts or upgrading PostgreSQL: create a scratch Supabase project (the free plan allows two), restore the latest backup into it, then delete the project. Note the date and how long it took here. Not rehearsed against Supabase yet; rehearsed against a local PostgreSQL 17 on 2026-11-21 (a seeded database: 14 tenancies, 99 bills, 91 payments, in about 10 seconds).
 
