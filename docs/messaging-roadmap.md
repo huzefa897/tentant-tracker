@@ -24,6 +24,7 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 - **Ended (and future) tenancies are left out**, including the last month of a postpaid tenancy, which falls due after it ends.
 - **A number that can't be texted** is skipped without reserving anything, so the reminder goes out once it's fixed.
 - **11:30 at the property**, in its own time zone, never fixed to India.
+- **cron-job.org starts the runs, no task queue** (decided 2026-11-21). Django-Q2 (or Celery) needs a worker process of its own: a paid Render Background Worker, or squeezed beside Gunicorn in the free instance's 512 MB with nothing restarting it. Revisit on a paid plan, or if Payment Messages are too slow to send in the request; even then, never retry a send (a retry can text twice).
 - **Provider agnostic**: the rules in [messaging.md](messaging.md#providers).
 - **SOLID**: a pure policy, an injected clock and sender, new message types without changing the runner.
 - Settings in a 1:1 table beside `Property`; `messaging` is its own app, and `properties` and `billing` never import it.
