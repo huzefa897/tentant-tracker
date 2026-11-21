@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
-from .clock import DEFAULT_TIME_ZONE, Clock, local_now, validate_time_zone
+from .clock import DEFAULT_TIME_ZONE, Clock, now_in_zone, validate_time_zone
 
 DEFAULT_SEND_TIME = time(11, 30)
 
@@ -83,7 +83,7 @@ class PropertyMessagingSettings(models.Model):
             )
 
     def local_now(self, clock: Clock) -> datetime:
-        return local_now(clock, self.time_zone)
+        return now_in_zone(clock, self.time_zone)
 
     def local_date(self, clock: Clock) -> date:
         """Today at the property, in its own time zone."""

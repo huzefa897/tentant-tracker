@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfoNotFoundError
 
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
@@ -6,7 +7,7 @@ from django.test import SimpleTestCase
 from messaging.clock import (
     FixedClock,
     SystemClock,
-    local_now,
+    now_in_zone,
     time_zone_choices,
     validate_time_zone,
 )
@@ -28,23 +29,23 @@ class SystemClockTests(SimpleTestCase):
         self.assertIsNotNone(SystemClock().now().tzinfo)
 
 
-class LocalNowTests(SimpleTestCase):
+class NowInZoneTests(SimpleTestCase):
     def test_converts_to_the_named_zone(self):
         clock = FixedClock(datetime(2026, 11, 21, 6, 0, tzinfo=UTC))
 
         self.assertEqual(
-            local_now(clock, "Asia/Kolkata").replace(tzinfo=None), datetime(2026, 11, 21, 11, 30)
+            now_in_zone(clock, "Asia/Kolkata").replace(tzinfo=None), datetime(2026, 11, 21, 11, 30)
         )
         self.assertEqual(
-            local_now(clock, "America/New_York").replace(tzinfo=None), datetime(2026, 11, 21, 1, 0)
+            now_in_zone(clock, "America/New_York").replace(tzinfo=None), datetime(2026, 11, 21, 1, 0)
         )
 
     def test_follows_daylight_saving(self):
         summer = FixedClock(datetime(2026, 7, 1, 12, 0, tzinfo=UTC))
         winter = FixedClock(datetime(2026, 1, 1, 12, 0, tzinfo=UTC))
 
-        self.assertEqual(local_now(summer, "Europe/London").hour, 13)
-        self.assertEqual(local_now(winter, "Europe/London").hour, 12)
+        self.assertEqual(now_in_zone(summer, "Europe/London").hour, 13)
+        self.assertEqual(now_in_zone(winter, "Europe/London").hour, 12)
 
 
 class TimeZoneValidationTests(SimpleTestCase):
@@ -63,3 +64,11 @@ class TimeZoneValidationTests(SimpleTestCase):
 
         self.assertIn(("Asia/Kolkata", "Asia/Kolkata"), choices)
         self.assertEqual(choices, sorted(choices))
+
+
+class UnknownZoneTests(SimpleTestCase):
+    def test_a_name_not_in_the_database_raises(self):
+        clock = FixedClock(datetime(2026, 11, 21, 6, 0, tzinfo=UTC))
+
+        with self.assertRaises(ZoneInfoNotFoundError):
+            now_in_zone(clock, "Nowhere/Gone")

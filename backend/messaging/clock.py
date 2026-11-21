@@ -56,6 +56,7 @@ def validate_time_zone(name: str) -> None:
         )
 
 
-def local_now(clock: Clock, time_zone: str) -> datetime:
-    """The clock's current moment in the named time zone."""
+def now_in_zone(clock: Clock, time_zone: str) -> datetime:
+    """The clock's current moment in the named time zone. A name that isn't (or is no longer) in
+    the time zone database raises `ZoneInfoNotFoundError`; admin refuses one on save."""
     return clock.now().astimezone(ZoneInfo(time_zone))

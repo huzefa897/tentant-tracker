@@ -62,5 +62,6 @@ class PropertyMessagingSettingsInline(admin.StackedInline):
 
 # Added from here, not listed in properties/admin.py, so `properties` never imports messaging
 # (docs/messaging.md, "Where it lives"). The property admin reads its inlines on each request.
+# PropertyAdmin's GrantedByMixin.save_formset saves every inline's objects, this one's too.
 if PropertyMessagingSettingsInline not in PropertyAdmin.inlines:
     PropertyAdmin.inlines = (*PropertyAdmin.inlines, PropertyMessagingSettingsInline)
