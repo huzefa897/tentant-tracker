@@ -146,6 +146,8 @@ class MessagingRun(models.Model):
     skipped = models.PositiveIntegerField(default=0)
     # What went wrong for a property or a tenancy, one line each, by id: never a phone number.
     errors = models.TextField(blank=True)
+    # Out of time (a run from the endpoint has a time budget): what's left goes at the next run.
+    stopped_early = models.BooleanField(default=False)
 
     class Meta:
         ordering = ("-started_at",)

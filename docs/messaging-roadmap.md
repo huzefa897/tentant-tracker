@@ -11,7 +11,7 @@ The terms (Message, Rent Due Reminder, Payment Message, Due, Follow-up, reminder
 | 1    | The `messaging` app, per-property settings, clock and time zones                                                                               | #89                                                         | In review   |
 | 2a   | Rent Due Reminders without a provider: messages, reminder items, policy, composer, runner, sender interface, `send_messages`, history in admin | [#90](https://github.com/huzefa897/tentant-tracker/pull/90) | In review   |
 | 2b   | The TextBee sender                                                                                                                             | [#91](https://github.com/huzefa897/tentant-tracker/pull/91) | In review   |
-| 3    | Scheduling: the hourly trigger on Render, crontab on the single server                                                                         |                                                             | Not started |
+| 3    | Scheduling: the run endpoint, called hourly by cron-job.org                                                                                    |                                                             | In review   |
 | 4    | Payment Messages                                                                                                                               |                                                             | Not started |
 
 Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and this table updated.
@@ -27,13 +27,6 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 - **Provider agnostic**: the rules in [messaging.md](messaging.md#providers).
 - **SOLID**: a pure policy, an injected clock and sender, new message types without changing the runner.
 - Settings in a 1:1 table beside `Property`; `messaging` is its own app, and `properties` and `billing` never import it.
-
-## Step 3: Scheduling
-
-- Render's free plan has no cron jobs: a GitHub Actions schedule, every hour, calls a POST endpoint protected by a secret (compared in constant time) and rate limited, which runs the runner. Hourly because each property sends at its own time in its own time zone, and so a late or skipped GitHub run (they happen) is caught up the next hour; runs are safe to repeat. The API doesn't sleep (the uptime monitor keeps it awake, [deployment.md](deployment.md#render-and-supabase)); if it ever does, the call waits about a minute for it to wake.
-- The single server: `send_messages` from crontab, every hour.
-- **Pass `MESSAGING_PROVIDER` and the provider's settings through** to the backend: `compose.prod.yaml` gives it only the variables it lists, so one set only in `.env.production` never reaches Django (that leaves `DisabledSender`, which is safe). Never in `backend/.env.example` with real values, CI, or the restore scripts' environments. `render.yaml` (`sync: false` for the secret and the provider's credentials), `compose.prod.yaml`, `.env.production.example`, and `deployment.md` and `security.md` updated. Logs carry ids, never a full phone number.
-- Scheduled workflows in a public repository stop after 60 days without activity: say how to notice and turn it back on.
 
 ## Step 4: Payment Messages
 
