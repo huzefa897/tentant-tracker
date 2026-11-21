@@ -197,7 +197,7 @@ A nightly GitHub Actions job in a **private** repository (`tenant-tracker-backup
 
 - **What it backs up:** the `public` schema, which holds every Django table. Supabase's own schemas (`auth`, `storage` and so on) aren't used by the app and are left out.
 - **Every run checks its dump:** it must list the payments table, restore with no errors into an empty PostgreSQL 17 started next to the job, and hold the same number of rows in every table as Supabase (sessions and rate-limit counts aside). A failure fails the run.
-- **Encrypted before it's stored**, with [age](https://age-encryption.org), to a public key. The private key (`key.txt`) is kept only in a password manager: GitHub never holds anything that can read the backups, and without the key nobody can, you included.
+- **Encrypted before it's stored**, with [age](https://age-encryption.org), to a public key. The private key (`key.txt`) is kept in a password manager, with a second copy apart from it: GitHub never holds anything that can read the backups, and without the key nobody can, you included.
 - **Failures are visible:** the job pings a healthchecks.io check, which alerts when a run fails or a day passes without one (GitHub sometimes starts scheduled runs late, or stops them).
 - **Kept for good:** git keeps every file, so the repository grows by roughly the dump's size every night. Restart its history (after archiving it) if it ever passes 1 GB.
 - **A copy outside GitHub:** keep a clone of the backups repository on your own machine and `git pull` it now and then. Nothing on the free plan stops a force-push from rewriting the history on GitHub.
@@ -211,25 +211,27 @@ scripts/restore-test.sh --supabase .env.supabase --identity key.txt \
   ../tenant-tracker-backups/rent-tracker/<year>/<month>/rent-tracker-<time>.dump.age
 ```
 
-It decrypts the dump into a private temporary folder (deleted on exit), then compares `ledger_summary` as in [Testing a backup](#testing-a-backup).
+It decrypts the dump into a private temporary folder (deleted on exit), then compares `ledger_summary` as in [Testing a backup](#testing-a-backup). Testing never writes to Supabase; only `restore-supabase.sh`, below, does.
 
-**Restoring Supabase** from a backup:
+**Restoring Supabase** from a backup, with [scripts/restore-supabase.sh](../scripts/restore-supabase.sh) (from your machine, with Docker, `age` and the backend image as above):
 
-1. Back up what's there first, if anything is (run the job), so the restore can be undone.
-2. Stop writes: suspend the API service in Render.
-3. An empty `public` schema: a new Supabase project (set up as in [Setting it up](#setting-it-up), then change the `POSTGRES_*` values in Render), or, in the same project's SQL editor, `drop schema public cascade; create schema public;` **only once the backup has passed a restore test**.
-4. Restore with a PostgreSQL 17 client (or `docker run --rm -it -v "$PWD:/b" postgres:17 bash`). The dump also creates the `public` schema, which exists already, so that entry is skipped:
+1. **Back up what's there first**, if anything is (run the job), so the restore can be undone.
+2. **Stop writes:** suspend the API service in Render.
+3. **An empty `public` schema.** Either a new Supabase project (set up as in [Setting it up](#setting-it-up), Data API off, and change the `POSTGRES_*` values in Render to it), or, in the same project's SQL editor, `drop schema public cascade; create schema public;`, **only once the backup has passed a restore test** (step 4 runs one before touching anything, but not against the data you're about to drop). Dropping the schema also drops `btree_gist` if it was installed there; the restore puts it back.
+4. **Restore**, with the target's session pooler details in a gitignored env file (as `.env.supabase` above; a new project has its own):
 
    ```bash
-   age --decrypt --identity key.txt <file>.dump.age > backup.dump
-   pg_restore --list backup.dump | grep -vE '^[0-9]+; [0-9]+ [0-9]+ SCHEMA - public ' > restore.list
-   pg_restore --exit-on-error --no-owner --no-privileges --use-list=restore.list \
-     -d "host=<pooler host> port=5432 dbname=postgres user=postgres.<project-ref> sslmode=require" \
-     backup.dump
-   rm backup.dump restore.list
+   scripts/restore-supabase.sh --target .env.supabase --identity key.txt \
+     ../tenant-tracker-backups/rent-tracker/<year>/<month>/rent-tracker-<time>.dump.age
    ```
 
-5. Resume the API service (it migrates on start if the code is newer than the backup), then the [checks after a deploy](#checks-after-a-deploy).
+   It decrypts the backup into a private temporary folder (deleted on exit) and restores it into a throwaway database first, so a backup that doesn't restore stops before Supabase is touched. That database's `ledger_summary` is what Supabase must hold afterwards. It then refuses a target whose `public` schema isn't empty (it never mixes a backup into live data), shows the host, port, database and user, and asks you to type the host (or pass it with `--confirm <host>`). It makes sure `btree_gist` (which the tenancy overlap constraint needs) ends up where it was: a nightly backup creates it itself, in its schema on Supabase (`extensions`), which the script creates first if it's missing; an older dump made without `--extension` doesn't hold it, so the script creates it. Then it restores and compares the target's `ledger_summary` with the throwaway one. A failed restore leaves part of the backup behind: empty the schema again before retrying.
+
+5. **Resume the API service** (it migrates on start if the code is newer than the backup), then the [checks after a deploy](#checks-after-a-deploy). Anything recorded after the backup was taken is lost: tell the owners which day it's from, so they can enter it again.
+
+**Rehearse it once a year**, and after changing the scripts or upgrading PostgreSQL: create a scratch Supabase project (the free plan allows two), restore the latest backup into it, then delete the project. Note the date and how long it took here. Not rehearsed against Supabase yet; rehearsed against a local PostgreSQL 17 on 2026-11-21 (a seeded database: 14 tenancies, 99 bills, 91 payments, in about 10 seconds).
+
+**Keep a second copy of `key.txt`**, apart from the password manager (printed and stored safely, or in a second person's vault). Losing it makes every backup unreadable; the monthly restore test is also what proves the copy you have still works.
 
 ### Branches and releases
 
