@@ -10,7 +10,7 @@ The terms (Message, Rent Due Reminder, Payment Message, Due, Follow-up, reminder
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------- |
 | 1    | The `messaging` app, per-property settings, clock and time zones                                                                               | #89                                                         | In review   |
 | 2a   | Rent Due Reminders without a provider: messages, reminder items, policy, composer, runner, sender interface, `send_messages`, history in admin | [#90](https://github.com/huzefa897/tentant-tracker/pull/90) | In review   |
-| 2b   | The TextBee sender                                                                                                                             |                                                             | Not started |
+| 2b   | The TextBee sender                                                                                                                             | [#91](https://github.com/huzefa897/tentant-tracker/pull/91) | In review   |
 | 3    | Scheduling: the hourly trigger on Render, crontab on the single server                                                                         |                                                             | Not started |
 | 4    | Payment Messages                                                                                                                               |                                                             | Not started |
 
@@ -28,23 +28,9 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 - **SOLID**: a pure policy, an injected clock and sender, new message types without changing the runner.
 - Settings in a 1:1 table beside `Property`; `messaging` is its own app, and `properties` and `billing` never import it.
 
-## Step 2b: TextBee sender
-
-Step 2a is built: [messaging.md](messaging.md) describes it. What's left is `TextBeeSender`, under [Providers](messaging.md#providers)' rules, and `MESSAGING_PROVIDER=textbee` in `get_sender()`.
-
-From TextBee's docs (textbee.dev, read 2026-11-21):
-
-- **Send:** `POST https://api.textbee.dev/api/v1/gateway/send-sms`, header `x-api-key`, JSON `{"recipients": ["+91…"], "message": "…", "deviceId": "…"}`. 200 answers `{"data": {"success": true, "smsBatchId": "…", "recipientCount": 1}}`: record `smsBatchId` as the provider's message id. One recipient per request.
-- **Outcomes:** 200 is `sent` (queued on the phone); 400 (no enabled device, bad number, too long), 401 (bad key), 403 (account can't send), 404 (unknown device) and 429 (daily or monthly plan limit used up: nothing was sent) are `failed`, with a short reason; a timeout, a connection error, a 5xx or an answer that can't be read is `unknown`. The error body's field name (`error` or `message`) isn't consistent in their docs: read either.
-- **No idempotency key**, so a retried request could send twice: never retry inside the sender. The reservation before sending is what prevents duplicates.
-- **Settings:** `TEXTBEE_API_KEY`, `TEXTBEE_DEVICE_ID` (and a base URL with that default); no provider without both. A short timeout (10 s).
-- **Free plan:** 50 SMS a day, 300 a month, 1 device. Enough for one property; a 429 shows as `failed` with the reason.
-- **Delivery reports, later:** TextBee can call a webhook (`MESSAGE_SENT`, `MESSAGE_DELIVERED`, `MESSAGE_FAILED`, signed with `X-Textbee-Signature`, HMAC-SHA256 over `"<t>.<body>"`), or the batch can be looked up (`GET …/devices/{id}/sms-batch/{smsBatchId}`). A `delivered` status needs one of them: not in 2b.
-- **Tests:** the shared sender tests, with HTTP faked; never a real request.
-
 ## Step 3: Scheduling
 
-- Render's free plan has no cron jobs: a GitHub Actions schedule, every hour, calls a POST endpoint protected by a secret (compared in constant time) and rate limited, which runs the runner. It allows for Render waking up (about a minute) and GitHub running late.
+- Render's free plan has no cron jobs: a GitHub Actions schedule, every hour, calls a POST endpoint protected by a secret (compared in constant time) and rate limited, which runs the runner. Hourly because each property sends at its own time in its own time zone, and so a late or skipped GitHub run (they happen) is caught up the next hour; runs are safe to repeat. The API doesn't sleep (the uptime monitor keeps it awake, [deployment.md](deployment.md#render-and-supabase)); if it ever does, the call waits about a minute for it to wake.
 - The single server: `send_messages` from crontab, every hour.
 - **Pass `MESSAGING_PROVIDER` and the provider's settings through** to the backend: `compose.prod.yaml` gives it only the variables it lists, so one set only in `.env.production` never reaches Django (that leaves `DisabledSender`, which is safe). Never in `backend/.env.example` with real values, CI, or the restore scripts' environments. `render.yaml` (`sync: false` for the secret and the provider's credentials), `compose.prod.yaml`, `.env.production.example`, and `deployment.md` and `security.md` updated. Logs carry ids, never a full phone number.
 - Scheduled workflows in a public repository stop after 60 days without activity: say how to notice and turn it back on.
@@ -55,6 +41,14 @@ From TextBee's docs (textbee.dev, read 2026-11-21):
 - A retry with the same idempotency key adds none; a reversal or correction sends none; a failed send never affects the payment.
 - The text says what was received and towards which month, never that it's settled when it isn't: _"Hi Ali, we've received your payment of Rs. 12,000 towards November 2026 rent. Thank you."_
 - Reminders stop by themselves once a month is paid, since the policy checks it.
+
+## Later: the property's time zone for the whole app
+
+Not needed while every property is in India; do it before adding one that isn't. Messaging already follows the property's zone; the rest of the app doesn't yet.
+
+- **The rule, already followed:** moments (sent, recorded, started) are stored in UTC (`USE_TZ`); local rules (11:30 each day, due on the 11th) are stored as local time plus an IANA zone and converted when checked, since a fixed UTC time drifts an hour with daylight saving. Dates and deadlines follow the **property's** zone, never the viewer's: an owner abroad sees the same overdue bills.
+- **Today:** `business_date()` ([properties/models.py](../backend/properties/models.py)) is India's date for tenancy status, rental periods and the dashboard, from `TIME_ZONE = "Asia/Kolkata"`. Keep `TIME_ZONE` as it is: making it UTC changes no stored timestamp, only "today", which would lag India's from midnight to 05:30.
+- **The change:** move `time_zone` from `PropertyMessagingSettings` onto `Property` (a data migration copies it; messaging reads the property's), and make `business_date(prop)` use it, passing the property everywhere it's called. Tests for a property outside India: a tenancy's status and a month's due date flip at that property's midnight.
 
 ## Acceptance tests
 

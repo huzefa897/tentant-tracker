@@ -87,7 +87,7 @@ Both read-only: nothing is added, edited or deleted there, so the record stays w
 
 ## Providers
 
-`messaging/senders/` has the interface (`base.py`), `DisabledSender` and `FakeSender`; TextBee's sender is next on the [roadmap](messaging-roadmap.md). `MESSAGING_PROVIDER` (empty by default) picks one in `get_sender()`; an unknown name is a configuration error. Messaging works with any SMS provider: TextBee is the first, and changing to another means one new sender class and new settings, with no change to reminders, messages or their records. For every sender:
+`messaging/senders/` has the interface (`base.py`), `DisabledSender`, `FakeSender` and [`TextBeeSender`](#textbee), and the one HTTP call senders make (`http.py`: the standard library's `urllib`, behind a seam tests fake). `MESSAGING_PROVIDER` (empty by default) picks one in `get_sender()`; an unknown name is a configuration error. Messaging works with any SMS provider: TextBee is the first, and changing to another means one new sender class and new settings, with no change to reminders, messages or their records. For every sender:
 
 - **One interface.** `MessageSender.send(to, body) -> SendResult`, where `to` is an E.164 number and the result is the app's own: an outcome (`sent`, `failed` or `unknown`), the provider's message id when it gave one, and a short reason. Nothing else in messaging imports a provider's code or knows its URLs, fields or error codes.
 - **The sender turns the provider's answers into outcomes.** An accepted request is `sent`, a refusal `failed`, and a timeout, a dropped connection or an answer it can't read `unknown`, never `failed`: the message may have gone. It never raises a provider's or HTTP library's error to its caller.
@@ -95,6 +95,15 @@ Both read-only: nothing is added, edited or deleted there, so the record stays w
 - **Each message records its provider** with the provider's message id, so old messages still read correctly after a switch, and delivery reports (if a provider sends them) are matched to the right one.
 - **The same tests for every sender**: one shared set of tests (accepted, refused, timeout, unreadable answer, nothing logged but ids) runs against each sender with its HTTP calls faked, and the rest of messaging is tested with `FakeSender`.
 - **Message text is the app's**, written by the composer, never a provider's template, so a switch doesn't change what tenants read.
+- **Reasons are the sender's own words**, fixed per refusal, never the provider's answer, which could quote the number back. Logs carry the HTTP status and the exception's type only.
+
+### TextBee
+
+[TextBee](https://textbee.dev) sends SMS through an Android phone running its app, from that phone's SIM. Set `MESSAGING_PROVIDER=textbee`, `TEXTBEE_API_KEY` (a secret) and `TEXTBEE_DEVICE_ID`, both from its dashboard; `TEXTBEE_BASE_URL` defaults to its API and must be https.
+
+- One request per message: `POST /gateway/send-sms` with the key in `x-api-key` and `{"recipients": [to], "message", "deviceId"}`, 10 seconds' timeout, never retried (TextBee has no idempotency key, so a retry could text twice).
+- A 200 with `data.success` is `sent`, recording `data.smsBatchId` as the provider's id. A 200 without success, and any 4xx, is `failed`: 400 (no enabled device, or the number or message rejected), 401 (the key), 403 (the account), 404 (the device), 429 (the plan's daily or monthly limit, 50 and 300 on the free plan). A timeout, a dropped connection, a 5xx or an answer it can't read is `unknown`.
+- `sent` means TextBee accepted it, not that it was delivered: the phone has to be online. Delivery reports (its webhook, or looking up the batch) aren't used yet.
 
 ## What's next
 

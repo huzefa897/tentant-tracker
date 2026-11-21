@@ -60,6 +60,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 - Backend secrets (`DJANGO_SECRET_KEY`, the database password, the Firebase service-account key's path, or its fields as variables) come from the gitignored `backend/.env`. The service-account JSON lives outside the repository. The key as variables is named so Django's error pages mask it (`FIREBASE_SERVICE_ACCOUNT_KEY`); never log it. In production they come from the gitignored `.env.production` on the server, each container gets only the ones it needs, and the key is mounted read-only; neither image contains any (their `.dockerignore` files are allowlists). [deployment.md](deployment.md) says how to keep a copy for recovery.
 - `VITE_*` variables are bundled into the app and are **public**: never put a secret in one. The Firebase web config is public by design.
+- A messaging provider's credentials (`TEXTBEE_API_KEY`) are backend secrets like the rest, given only to production ([messaging.md](messaging.md#textbee)). The sender sends them over https only and never shows them in its `repr`.
 - **Database dumps** hold every record, so they're secrets too. The server's stay in a `700` folder on the server and off-site; Supabase's are encrypted with age before they leave the job that makes them, and are kept only in a private repository ([deployment.md](deployment.md#backups-on-supabase)). The age private key is kept in a password manager, with one copy apart from it, never in a repository. The restore scripts decrypt a backup only into a private temporary folder that they delete on exit. `.gitignore` refuses `*.dump` files, and no workflow in this repository uploads a dump.
 - Apps Script secrets live in Script Properties, never in the code. The repo is public: never commit tenant data, phone numbers, emails, sheet or script IDs.
 
@@ -70,7 +71,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 - **What's logged today:**
   - `accounts/services.py` logs a user id.
   - `accounts/firebase.py` logs exceptions when Firebase is unavailable. Invalid tokens aren't logged.
-  - `messaging/runner.py` logs each run's counts and, on a failure, the property, tenancy or message id with the exception: never a number or a message's text. Runs record their errors the same way, and `send_messages` prints flats and ids only ([messaging.md](messaging.md)).
+  - `messaging/runner.py` logs each run's counts and, on a failure, the property, tenancy or message id with the exception's type and traceback, never its message (a database error can quote the row): never a number or a message's text. `messaging/senders/textbee.py` logs HTTP statuses and exception types, never the API key, number or text. Runs record their errors the same way, and `send_messages` prints flats and ids only ([messaging.md](messaging.md)).
   - `django.request` logs the path of 4xx and 5xx responses, not their headers or bodies.
 - **When hosting:** make sure the proxy's access logs don't record the `Authorization` header.
 
