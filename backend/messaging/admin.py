@@ -1,22 +1,34 @@
 from django import forms
 from django.contrib import admin
 
-from .clock import time_zone_choices
+from properties.admin import PropertyAdmin
+
+from .clock import DEFAULT_TIME_ZONE, time_zone_choices
 from .models import PropertyMessagingSettings
 
+SETTINGS_FIELDS = ("enabled", "time_zone", "send_time", "reminders_start")
 
-class PropertyMessagingSettingsForm(forms.ModelForm):
+
+class MessagingSettingsForm(forms.ModelForm):
     # A list to pick from rather than free text; the choices are read when the form is built,
     # so they're never frozen into a migration.
-    time_zone = forms.ChoiceField(choices=time_zone_choices)
+    time_zone = forms.ChoiceField(choices=time_zone_choices, initial=DEFAULT_TIME_ZONE)
 
     class Meta:
         model = PropertyMessagingSettings
-        fields = ("property", "enabled", "time_zone", "send_time", "reminders_start")
+        fields = SETTINGS_FIELDS
+
+
+class PropertyMessagingSettingsForm(MessagingSettingsForm):
+    class Meta(MessagingSettingsForm.Meta):
+        fields = ("property", *SETTINGS_FIELDS)
 
 
 @admin.register(PropertyMessagingSettings)
 class PropertyMessagingSettingsAdmin(admin.ModelAdmin):
+    """Every property's messaging settings in one list: which are sending, and when. Deleting a
+    row here turns messaging off for that property and forgets its settings."""
+
     form = PropertyMessagingSettingsForm
     list_display = ("property", "enabled", "time_zone", "send_time", "reminders_start")
     list_filter = ("enabled",)
@@ -32,3 +44,23 @@ class PropertyMessagingSettingsAdmin(admin.ModelAdmin):
         readonly = ("created_at", "updated_at")
         # The property is the row's key: a property's settings never move to another one.
         return ("property", *readonly) if obj else readonly
+
+
+class PropertyMessagingSettingsInline(admin.StackedInline):
+    """The property's messaging settings on its own admin page. Left untouched, saving the
+    property creates no row (messaging stays off). Turned off with Send messages, never
+    deleted here, so the time zone, send time and start are kept for turning it back on."""
+
+    model = PropertyMessagingSettings
+    form = MessagingSettingsForm
+    fields = SETTINGS_FIELDS
+    can_delete = False
+    max_num = 1
+    verbose_name = "messaging"
+    verbose_name_plural = "messaging"
+
+
+# Added from here, not listed in properties/admin.py, so `properties` never imports messaging
+# (docs/messaging.md, "Where it lives"). The property admin reads its inlines on each request.
+if PropertyMessagingSettingsInline not in PropertyAdmin.inlines:
+    PropertyAdmin.inlines = (*PropertyAdmin.inlines, PropertyMessagingSettingsInline)

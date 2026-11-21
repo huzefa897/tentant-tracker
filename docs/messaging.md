@@ -29,12 +29,14 @@ The `messaging` app (`backend/messaging/`) owns everything here. It depends on `
 Two switches, both off by default. Nothing is sent unless both are on:
 
 - **`MESSAGING_ENABLED`** (environment, `backend/.env.example`): for the whole deployment.
-- **A property's messaging settings** (admin: Messaging > Property messaging settings), one row per property, keyed by it (`PropertyMessagingSettings`, a one-to-one beside `Property` rather than columns on it). A property without a row has messaging off (`PropertyMessagingSettings.for_property` returns unsaved defaults). The row holds:
+- **A property's messaging settings**, edited in the **Messaging** section of the property's own admin page, one row per property, keyed by it (`PropertyMessagingSettings`, a one-to-one beside `Property` rather than columns on it). A property without a row has messaging off (`PropertyMessagingSettings.for_property` returns unsaved defaults). The row holds:
   - **Send messages** (`enabled`).
   - **Time zone** (`time_zone`, default `Asia/Kolkata`): a standard (IANA) name, picked from a list in admin and checked on save. It's a name, never an offset, so daylight saving is followed.
   - **Send time** (`send_time`, default 11:30), in that time zone.
   - **Reminders start** (`reminders_start`): Rent Due Reminders only for months due on or after it, so turning messaging on never texts tenants about older arrears. Required to turn it on (model validation, and a database check constraint).
-  - The property is fixed once saved; deleting the property deletes its row.
+  - Saving a property with its Messaging section untouched creates no row. That section has no delete: messaging is turned off with **Send messages**, which keeps the rest for turning it back on.
+  - **Messaging > Property messaging settings** lists every property's settings (filter by on or off) to see which are sending. Deleting a row there turns messaging off and forgets its settings. The property is fixed once saved; deleting the property deletes its row.
+  - The section is added to the property admin from `messaging/admin.py`, so `properties` still never imports messaging.
 
 ## Time and time zones
 

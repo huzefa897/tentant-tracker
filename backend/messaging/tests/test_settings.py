@@ -180,3 +180,96 @@ class PropertyMessagingSettingsAdminTests(TestCase):
 
         self.assertContains(response, "Tower")
         self.assertContains(response, "Asia/Kolkata")
+
+
+class PropertyPageMessagingTests(TestCase):
+    """The property's own admin page carries its messaging settings."""
+
+    def setUp(self):
+        admin = get_user_model().objects.create_superuser(username="admin", password="x")
+        self.client.force_login(admin)
+        self.property = Property.objects.create(name="Tower", address="A")
+        self.url = reverse("admin:properties_property_change", args=[self.property.pk])
+
+    def post_property(self, messaging=None, initial=0):
+        data = {
+            "name": "Tower",
+            "address": "A",
+            "is_active": "on",
+            "payment_timing": "postpaid",
+            "memberships-TOTAL_FORMS": "0",
+            "memberships-INITIAL_FORMS": "0",
+            "messaging_settings-TOTAL_FORMS": "1",
+            "messaging_settings-INITIAL_FORMS": str(initial),
+            "messaging_settings-0-property": str(self.property.pk),
+            "messaging_settings-0-time_zone": "Asia/Kolkata",
+            "messaging_settings-0-send_time": "11:30",
+        }
+        for field, value in (messaging or {}).items():
+            data[f"messaging_settings-0-{field}"] = value
+        return self.client.post(self.url, data)
+
+    def test_property_page_shows_messaging(self):
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "messaging_settings-TOTAL_FORMS")
+        self.assertContains(response, "Send messages")
+        self.assertContains(response, '<option value="Asia/Kolkata" selected>')
+
+    def test_saving_the_property_untouched_creates_no_settings(self):
+        response = self.post_property()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(PropertyMessagingSettings.objects.exists())
+
+    def test_turns_messaging_on_from_the_property(self):
+        response = self.post_property({"enabled": "on", "reminders_start": "2026-12-01"})
+
+        self.assertEqual(response.status_code, 302)
+        settings = PropertyMessagingSettings.objects.get(property=self.property)
+        self.assertTrue(settings.enabled)
+        self.assertEqual(settings.reminders_start, date(2026, 12, 1))
+
+    def test_turning_on_without_reminders_start_is_refused(self):
+        response = self.post_property({"enabled": "on"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Set when reminders start before turning messaging on.")
+        self.assertFalse(PropertyMessagingSettings.objects.exists())
+
+    def test_turned_off_keeps_the_other_settings(self):
+        PropertyMessagingSettings.objects.create(
+            property=self.property,
+            enabled=True,
+            send_time=time(10, 0),
+            reminders_start=date(2026, 12, 1),
+        )
+
+        response = self.post_property(
+            {"send_time": "10:00", "reminders_start": "2026-12-01"}, initial=1
+        )
+
+        self.assertEqual(response.status_code, 302)
+        settings = PropertyMessagingSettings.objects.get()
+        self.assertFalse(settings.enabled)
+        self.assertEqual(settings.send_time, time(10, 0))
+        self.assertEqual(settings.reminders_start, date(2026, 12, 1))
+
+    def test_cannot_be_deleted_from_the_property_page(self):
+        PropertyMessagingSettings.objects.create(property=self.property)
+
+        response = self.client.get(self.url)
+
+        self.assertNotContains(response, "messaging_settings-0-DELETE")
+
+    def test_can_be_deleted_from_the_messaging_list(self):
+        PropertyMessagingSettings.objects.create(property=self.property)
+
+        response = self.client.post(
+            reverse("admin:messaging_propertymessagingsettings_delete", args=[self.property.pk]),
+            {"post": "yes"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(PropertyMessagingSettings.objects.exists())
+        self.assertTrue(Property.objects.filter(pk=self.property.pk).exists())

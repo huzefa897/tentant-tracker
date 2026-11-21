@@ -28,7 +28,9 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 
 ## Step 2: Rent Due Reminders
 
-- **Models:** `Message` (tenancy, type, channel, provider and its message id, the number and text as sent, `MessageStatus`, reason, timestamps) and `RentDueReminderItem` (rental period, stage, its message), unique on **(rental period, stage)**. Read-only in admin.
+- **Models:** `Message` (tenancy, type, channel, provider and its message id, the number and text as sent, `MessageStatus`, reason, timestamps) and `RentDueReminderItem` (rental period, stage, its message), unique on **(rental period, stage)**.
+- **Admin: Messaging > Messages**, the history of every message, read-only (nothing is added, edited or deleted there): when, property, tenant, type, stage and months, status with its reason, provider and its message id, newest first; filters for status, type, property and date; search by tenant name. The full number shows only on a message's own page, the list shows its last four digits.
+- **Admin: Messaging > Runs**, one row per run of the runner (`MessagingRun`): when it started and finished, what started it (schedule, command, dry run), how many properties it checked and how many messages were sent, failed, unknown and skipped, and an error if it stopped. So a quiet day (nothing due) still shows the job ran, and a day with no row shows it didn't. Read-only; old runs kept for 90 days.
 - **`ReminderPolicy`** (pure, no database or clock): for each **current** tenancy, each month still owed by the dashboard's definition (a month without a bill is owed, since payments need a bill; not owed months and void bills don't count; reversed payments don't count; part paid is still owed), due on or after reminders start:
   - **Due** from its due date until 6 days after it;
   - **Follow-up** from 7 days after its due date on, whether or not the Due message went out;
