@@ -193,7 +193,7 @@ Each service deploys `main` by itself once its GitHub checks pass (`branch: main
 
 ### Backups on Supabase
 
-A nightly GitHub Actions job in a **private** repository (`tenant-tracker-backups`) dumps the database, proves the dump restores, encrypts it and commits it there. Its files live here, in [deploy/backups-repo/](../deploy/backups-repo/) (no secrets in them): change them here and copy them across. Its [README](../deploy/backups-repo/README.md) has the setup.
+A nightly GitHub Actions job in a **private** repository (`tenant-tracker-backups`) dumps the database, proves the dump restores, encrypts it and commits it there. Its files live here, in [deploy/backups-repo/](../deploy/backups-repo/) (no secrets in them): change them here and copy them across. Its [README](../deploy/backups-repo/README.md) has the setup. Before copying a change across, let the [Backups](../.github/workflows/backups.yml) workflow pass here: it runs `backup.sh` against a seeded throwaway PostgreSQL set up like Supabase (`btree_gist` in `extensions`), pushes to a local git repository, and restores the result with `restore-test.sh` and `restore-supabase.sh`. It never touches Supabase. It runs on PRs and pushes that change the backup or restore files, migrations or `ledger_summary`.
 
 - **What it backs up:** the `public` schema, which holds every Django table. Supabase's own schemas (`auth`, `storage` and so on) aren't used by the app and are left out.
 - **Every run checks its dump:** it must list the payments table, restore with no errors into an empty PostgreSQL 17 started next to the job, and hold the same number of rows in every table as Supabase (sessions and rate-limit counts aside). A failure fails the run.

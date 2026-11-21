@@ -6,7 +6,8 @@ Nightly, encrypted backups of the rent tracker's database (Supabase), made by
 the only place they're kept off Supabase.
 
 The source of these files is `deploy/backups-repo/` in the app's repository: change them
-there, then copy them here. How backups fit with releases and restores is in its
+there, let its Backups workflow pass (it tests them against throwaway databases), then copy
+them here. How backups fit with releases and restores is in its
 `docs/deployment.md` (Render and Supabase > Backups on Supabase).
 
 ## What each run does

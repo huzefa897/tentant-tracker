@@ -47,12 +47,17 @@ trap finish EXIT
 }
 
 # The live database, over the session pooler. Each command gets the password on its own, so
-# the empty restore database below never sees it.
+# the empty restore database below never sees it. SUPABASE_PORT and SUPABASE_SSLMODE are only
+# for the app repository's test of this script (.github/workflows/backups.yml there), against
+# a local database: the workflow here never sets them.
+supabase_port=${SUPABASE_PORT:-5432}
+supabase_sslmode=${SUPABASE_SSLMODE:-require}
 live() {
   local command=$1
   shift
-  PGPASSWORD=$SUPABASE_PASSWORD PGSSLMODE=require "$command" \
-    --host="$SUPABASE_HOST" --port=5432 --username="$SUPABASE_USER" --dbname=postgres "$@"
+  PGPASSWORD=$SUPABASE_PASSWORD PGSSLMODE=$supabase_sslmode "$command" \
+    --host="$SUPABASE_HOST" --port="$supabase_port" --username="$SUPABASE_USER" \
+    --dbname=postgres "$@"
 }
 # The throwaway database the workflow starts next to this job. Its messages, and the
 # client's, are in English (C), so the restore log filter below recognises them.
