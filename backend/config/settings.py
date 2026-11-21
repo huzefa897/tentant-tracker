@@ -96,12 +96,11 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 
-# Messaging (docs/messaging.md): which provider sends messages. Empty (the default) sends
-# nothing. Set it in production only: development, CI and restored backups hold real tenants'
-# numbers.
-MESSAGING_PROVIDER = os.getenv("MESSAGING_PROVIDER", "").strip().lower()
-# TextBee (MESSAGING_PROVIDER=textbee): the API key and the phone's device id, from the
-# TextBee dashboard. Secrets: never commit or log them.
+# Messaging (docs/messaging.md): each property picks its provider in admin; the providers'
+# credentials are here. Set them in production only: development, CI and restored backups hold
+# real tenants' numbers, and a provider without its credentials sends nothing.
+# TextBee: the API key and the phone's device id, from its dashboard. Secrets: never commit
+# or log them.
 TEXTBEE_API_KEY = os.getenv("TEXTBEE_API_KEY", "").strip()
 TEXTBEE_DEVICE_ID = os.getenv("TEXTBEE_DEVICE_ID", "").strip()
 TEXTBEE_BASE_URL = os.getenv("TEXTBEE_BASE_URL", "https://api.textbee.dev/api/v1").strip()

@@ -30,6 +30,7 @@ Each property is turned on and off on its own, in admin; there's no switch for t
 
 - **A property's messaging settings**, edited in the **Messaging** section of the property's own admin page, one row per property, keyed by it (`PropertyMessagingSettings`, a one-to-one beside `Property` rather than columns on it). A property without a row has messaging off (`PropertyMessagingSettings.for_property` returns unsaved defaults). The row holds:
   - **Send messages** (`enabled`).
+  - **Provider** (`provider`, default TextBee): who sends its messages, picked from the registered providers ([Providers](#providers)) and checked on save. Beside it, **Provider set up** says whether this server has that provider's credentials (`Ready`, or which settings are missing); the credentials themselves are never in admin.
   - **Time zone** (`time_zone`, default `Asia/Kolkata`): a standard (IANA) name, picked from a list in admin and checked on save. It's a name, never an offset, so daylight saving is followed.
   - **Send time** (`send_time`, default 11:30), in that time zone.
   - **Reminders start** (`reminders_start`): Rent Due Reminders only for months due on or after it, so turning messaging on never texts tenants about older arrears. Required to turn it on (model validation, and a database check constraint).
@@ -71,7 +72,7 @@ The name is the tenancy's, as written. The text is plain ASCII: one character ou
 
 - A number that can't be texted (not a valid number for the countries `accounts/phone.py` allows) is **skipped**: recorded once a day per tenancy (`message_skipped_once_a_day`) with the reason, and nothing reserved, so the reminder goes out once the number is fixed.
 - A failure for one tenancy, or one property (a time zone no longer in the database, say), is recorded on the run and never stops the others. Messaging never writes to bills or payments.
-- **No provider configured** (`DisabledSender`): the run works out what's due and counts it as planned, and reserves and sends nothing, so the months are still due once a provider is set.
+- **The property's provider isn't set up here** (no credentials, so `DisabledSender`): the run works out that property's messages and counts them as planned, reserves and sends nothing, and records why in its errors, so the months are still due once the credentials are set.
 - A message keeps the number and text **as sent**, so a later change to the tenancy never rewrites one.
 
 ## Running it
@@ -90,15 +91,15 @@ The name is the tenancy's, as written. The text is plain ASCII: one character ou
 Both read-only: nothing is added, edited or deleted there, so the record stays what the runner wrote.
 
 - **Messaging > Messages**: every message, newest first: when, property, tenant and flat, type, months and stages, status and reason, provider, and the number's last four digits (the full number and the text are on the message's own page, with its months). Filters for status, type, property and date; search by tenant name or flat. Kept for good.
-- **Messaging > Messaging runs**: one row per run (`MessagingRun`): when it started and finished, what started it, whether it was a dry run (or had no provider), the provider, properties checked, and how many messages were planned, sent, failed, unknown and skipped, with any errors (by property or tenancy id, never a number). A quiet day still shows the job ran; a run with no finish time stopped part way. Kept for 90 days (`RUN_RETENTION_DAYS`), deleted by later runs; their messages are kept.
+- **Messaging > Messaging runs**: one row per run (`MessagingRun`): when it started and finished, what started it, whether it was a dry run, properties checked, and how many messages were planned, sent, failed, unknown and skipped, with any errors (by property or tenancy id, never a number). A quiet day still shows the job ran; a run with no finish time stopped part way. Kept for 90 days (`RUN_RETENTION_DAYS`), deleted by later runs; their messages are kept.
 
 ## Providers
 
-`messaging/senders/` has the interface (`base.py`), `DisabledSender`, `FakeSender` and [`TextBeeSender`](#textbee), and the one HTTP call senders make (`http.py`: the standard library's `urllib`, behind a seam tests fake). `MESSAGING_PROVIDER` (empty by default) picks one in `get_sender()`; an unknown name is a configuration error. Messaging works with any SMS provider: TextBee is the first, and changing to another means one new sender class and new settings, with no change to reminders, messages or their records. For every sender:
+`messaging/senders/` has the interface (`base.py`), `DisabledSender`, `FakeSender` and [`TextBeeSender`](#textbee), and the one HTTP call senders make (`http.py`: the standard library's `urllib`, behind a seam tests fake). Each property picks its provider in admin, from the **provider registry** (`providers.py`), which builds its sender. Messaging works with any SMS provider: TextBee is the first, and adding another means one new sender class, its settings and one `registry.register(...)`, with no change to reminders, messages or their records; switching a property is a change in admin. For every sender:
 
 - **One interface.** `MessageSender.send(to, body) -> SendResult`, where `to` is an E.164 number and the result is the app's own: an outcome (`sent`, `failed` or `unknown`), the provider's message id when it gave one, and a short reason. Nothing else in messaging imports a provider's code or knows its URLs, fields or error codes.
 - **The sender turns the provider's answers into outcomes.** An accepted request is `sent`, a refusal `failed`, and a timeout, a dropped connection or an answer it can't read `unknown`, never `failed`: the message may have gone. It never raises a provider's or HTTP library's error to its caller.
-- **Chosen by a setting.** `MESSAGING_PROVIDER` (`textbee`, later others) picks the sender in one place, a small factory. With no provider set, or its credentials missing, it gives `DisabledSender`, which sends nothing: so an environment can text people only once it has been given a provider on purpose. Each provider's settings have its own prefix (`TEXTBEE_API_KEY`, `TEXTBEE_DEVICE_ID`), so two can be configured side by side while switching.
+- **Chosen per property, credentials per server.** The property's settings name the provider (a choice from `registry.choices()`, validated, never frozen into a migration); `registry.sender_for(name)` builds its sender from the environment. Credentials stay in the environment, never the database, so a restored backup or a developer's machine can't text anyone: without them (or for a name no longer registered) it gives a `DisabledSender` saying what's missing, which sends nothing. Each provider's settings have its own prefix (`TEXTBEE_API_KEY`, `TEXTBEE_DEVICE_ID`), so two can be set side by side while switching. Tests clear every provider's credentials (`config/test_runner.py`).
 - **Each message records its provider** with the provider's message id, so old messages still read correctly after a switch, and delivery reports (if a provider sends them) are matched to the right one.
 - **The same tests for every sender**: one shared set of tests (accepted, refused, timeout, unreadable answer, nothing logged but ids) runs against each sender with its HTTP calls faked, and the rest of messaging is tested with `FakeSender`.
 - **Message text is the app's**, written by the composer, never a provider's template, so a switch doesn't change what tenants read.
@@ -106,7 +107,7 @@ Both read-only: nothing is added, edited or deleted there, so the record stays w
 
 ### TextBee
 
-[TextBee](https://textbee.dev) sends SMS through an Android phone running its app, from that phone's SIM. Set `MESSAGING_PROVIDER=textbee`, `TEXTBEE_API_KEY` (a secret) and `TEXTBEE_DEVICE_ID`, both from its dashboard; `TEXTBEE_BASE_URL` defaults to its API and must be https.
+[TextBee](https://textbee.dev) sends SMS through an Android phone running its app, from that phone's SIM. Pick it in the property's settings, and set `TEXTBEE_API_KEY` (a secret) and `TEXTBEE_DEVICE_ID`, both from its dashboard; `TEXTBEE_BASE_URL` defaults to its API and must be https.
 
 - One request per message: `POST /gateway/send-sms` with the key in `x-api-key` and `{"recipients": [to], "message", "deviceId"}`, 10 seconds' timeout, never retried (TextBee has no idempotency key, so a retry could text twice).
 - A 200 with `data.success` is `sent`, recording `data.smsBatchId` as the provider's id. A 200 without success, and any 4xx, is `failed`: 400 (no enabled device, or the number or message rejected), 401 (the key), 403 (the account), 404 (the device), 429 (the plan's daily or monthly limit, 50 and 300 on the free plan). A timeout, a dropped connection, a 5xx or an answer it can't read is `unknown`.

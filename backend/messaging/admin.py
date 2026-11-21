@@ -4,15 +4,22 @@ from django.contrib import admin
 from properties.admin import PropertyAdmin
 
 from .clock import DEFAULT_TIME_ZONE, time_zone_choices
+from .senders.providers import DEFAULT_PROVIDER, provider_choices, registry
 from .models import Message, MessagingRun, PropertyMessagingSettings, RentDueReminderItem
 
-SETTINGS_FIELDS = ("enabled", "time_zone", "send_time", "reminders_start")
+SETTINGS_FIELDS = ("enabled", "provider", "time_zone", "send_time", "reminders_start")
 
 
 class MessagingSettingsForm(forms.ModelForm):
     # A list to pick from rather than free text; the choices are read when the form is built,
     # so they're never frozen into a migration.
     time_zone = forms.ChoiceField(choices=time_zone_choices, initial=DEFAULT_TIME_ZONE)
+    # The registered providers (messaging/senders/providers.py), read the same way.
+    provider = forms.ChoiceField(
+        choices=provider_choices,
+        initial=DEFAULT_PROVIDER,
+        help_text=PropertyMessagingSettings._meta.get_field("provider").help_text,
+    )
 
     class Meta:
         model = PropertyMessagingSettings
@@ -30,20 +37,39 @@ class PropertyMessagingSettingsAdmin(admin.ModelAdmin):
     row here turns messaging off for that property and forgets its settings."""
 
     form = PropertyMessagingSettingsForm
-    list_display = ("property", "enabled", "time_zone", "send_time", "reminders_start")
-    list_filter = ("enabled",)
+    list_display = (
+        "property",
+        "enabled",
+        "provider",
+        "provider_ready",
+        "time_zone",
+        "send_time",
+        "reminders_start",
+    )
+    list_filter = ("enabled", "provider")
     search_fields = ("property__name",)
     autocomplete_fields = ("property",)
     fieldsets = (
-        (None, {"fields": ("property", "enabled")}),
+        (None, {"fields": ("property", "enabled", "provider", "provider_ready")}),
         ("When", {"fields": ("time_zone", "send_time", "reminders_start")}),
         ("Technical", {"classes": ("collapse",), "fields": ("created_at", "updated_at")}),
     )
 
     def get_readonly_fields(self, request, obj=None):
-        readonly = ("created_at", "updated_at")
+        readonly = ("provider_ready", "created_at", "updated_at")
         # The property is the row's key: a property's settings never move to another one.
         return ("property", *readonly) if obj else readonly
+
+    @admin.display(description="Provider set up")
+    def provider_ready(self, settings):
+        return provider_status(settings.provider)
+
+
+def provider_status(name: str) -> str:
+    """Whether this server can send with the provider: its credentials are environment
+    settings, so admin can only say whether they're there, never show them."""
+    sender = registry.sender_for(name)
+    return "Ready" if sender.can_send else getattr(sender, "reason", "Not set up")
 
 
 class PropertyMessagingSettingsInline(admin.StackedInline):
@@ -53,11 +79,16 @@ class PropertyMessagingSettingsInline(admin.StackedInline):
 
     model = PropertyMessagingSettings
     form = MessagingSettingsForm
-    fields = SETTINGS_FIELDS
+    fields = (*SETTINGS_FIELDS, "provider_ready")
+    readonly_fields = ("provider_ready",)
     can_delete = False
     max_num = 1
     verbose_name = "messaging"
     verbose_name_plural = "messaging"
+
+    @admin.display(description="Provider set up")
+    def provider_ready(self, settings):
+        return provider_status(settings.provider if settings and settings.pk else DEFAULT_PROVIDER)
 
 
 # Added from here, not listed in properties/admin.py, so `properties` never imports messaging
@@ -167,7 +198,6 @@ class MessagingRunAdmin(ReadOnlyAdmin):
         "finished_at",
         "trigger",
         "dry_run",
-        "provider",
         "properties_checked",
         "planned",
         "sent",
