@@ -22,7 +22,7 @@ Use these words, in code, admin, docs and PRs. Not "notification", "alert" or "p
 
 ## Where it lives
 
-The `messaging` app (`backend/messaging/`) owns everything here. It depends on `properties` and `billing`; neither of them ever imports it. Later, a payment reaches messaging through a signal `billing` sends, so `billing` never knows messaging exists.
+The `messaging` app (`backend/messaging/`) owns everything here. It depends on `properties` (and, once reminders read rental periods, `billing`); neither of them ever imports it. Later, a payment reaches messaging through a signal `billing` sends, so `billing` never knows messaging exists.
 
 ## Turning it on
 

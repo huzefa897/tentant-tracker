@@ -45,7 +45,7 @@ Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and
 
 - Render's free plan has no cron jobs: a GitHub Actions schedule, every hour, calls a POST endpoint protected by a secret (compared in constant time) and rate limited, which runs the runner. It allows for Render waking up (about a minute) and GitHub running late.
 - The single server: `send_messages` from crontab, every hour.
-- `render.yaml` (`sync: false` for the secret and the provider's credentials), `compose.prod.yaml`, `.env.production.example`, and `deployment.md` and `security.md` updated. Logs carry ids, never a full phone number.
+- **Pass `MESSAGING_ENABLED`, `MESSAGING_PROVIDER` and the provider's settings through** to the backend: `compose.prod.yaml` gives it only the variables it lists, so one set only in `.env.production` never reaches Django (today that leaves messaging off, which is safe). `render.yaml` (`sync: false` for the secret and the provider's credentials), `compose.prod.yaml`, `.env.production.example`, and `deployment.md` and `security.md` updated. Logs carry ids, never a full phone number.
 - Scheduled workflows in a public repository stop after 60 days without activity: say how to notice and turn it back on.
 
 ## Step 4: Payment Messages

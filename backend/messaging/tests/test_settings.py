@@ -191,7 +191,7 @@ class PropertyPageMessagingTests(TestCase):
         self.property = Property.objects.create(name="Tower", address="A")
         self.url = reverse("admin:properties_property_change", args=[self.property.pk])
 
-    def post_property(self, messaging=None, initial=0):
+    def post_property(self, messaging=None, initial=0, url=None):
         data = {
             "name": "Tower",
             "address": "A",
@@ -207,7 +207,26 @@ class PropertyPageMessagingTests(TestCase):
         }
         for field, value in (messaging or {}).items():
             data[f"messaging_settings-0-{field}"] = value
-        return self.client.post(self.url, data)
+        if url is not None:  # a new property: no id yet
+            del data["messaging_settings-0-property"]
+        return self.client.post(url or self.url, data)
+
+    def test_new_property_with_messaging_on_in_one_save(self):
+        response = self.post_property(
+            {"enabled": "on", "reminders_start": "2026-12-01"},
+            url=reverse("admin:properties_property_add"),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        created = Property.objects.exclude(pk=self.property.pk).get()
+        self.assertTrue(PropertyMessagingSettings.objects.get(property=created).enabled)
+
+    def test_new_property_without_messaging_creates_no_settings(self):
+        response = self.post_property(url=reverse("admin:properties_property_add"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Property.objects.count(), 2)
+        self.assertFalse(PropertyMessagingSettings.objects.exists())
 
     def test_property_page_shows_messaging(self):
         response = self.client.get(self.url)
