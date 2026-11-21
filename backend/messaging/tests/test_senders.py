@@ -9,8 +9,10 @@ from messaging.senders import (
     FakeSender,
     SendOutcome,
     SendResult,
+    Provider,
+    ProviderRegistry,
     TextBeeSender,
-    get_sender,
+    registry,
 )
 from messaging.senders.http import HttpResponse
 
@@ -159,35 +161,41 @@ class TextBeeSenderTests(SenderContract, SimpleTestCase):
         self.assertNotIn(KEY, repr(self.make(FakePost())))
 
 
-class GetSenderTests(SimpleTestCase):
-    @override_settings(MESSAGING_PROVIDER="")
-    def test_no_provider_sends_nothing(self):  # TC-16
-        sender = get_sender()
-
-        self.assertIsInstance(sender, DisabledSender)
-        self.assertFalse(sender.can_send)
-
-    @override_settings(
-        MESSAGING_PROVIDER="textbee", TEXTBEE_API_KEY=KEY, TEXTBEE_DEVICE_ID="device-1"
-    )
-    def test_textbee(self):
-        sender = get_sender()
+class RegistryTests(SimpleTestCase):
+    @override_settings(TEXTBEE_API_KEY=KEY, TEXTBEE_DEVICE_ID="device-1")
+    def test_textbee_with_its_credentials(self):
+        sender = registry.sender_for("textbee")
 
         self.assertIsInstance(sender, TextBeeSender)
         self.assertEqual(sender.provider, "textbee")
         self.assertTrue(sender.can_send)
 
-    @override_settings(MESSAGING_PROVIDER="textbee", TEXTBEE_API_KEY="", TEXTBEE_DEVICE_ID="d")
-    def test_textbee_without_its_key_sends_nothing(self):
-        with self.assertLogs("messaging.senders", level="WARNING"):
-            sender = get_sender()
+    @override_settings(TEXTBEE_API_KEY="", TEXTBEE_DEVICE_ID="device-1")
+    def test_without_its_credentials_sends_nothing_and_says_why(self):  # TC-16
+        sender = registry.sender_for("textbee")
 
         self.assertIsInstance(sender, DisabledSender)
+        self.assertFalse(sender.can_send)
+        self.assertEqual(sender.provider, "textbee")
+        self.assertIn("TEXTBEE_API_KEY", sender.reason)
 
-    @override_settings(MESSAGING_PROVIDER="carrier-pigeon")
-    def test_an_unknown_provider_is_a_configuration_error(self):
-        with self.assertRaises(ImproperlyConfigured):
-            get_sender()
+    def test_an_unknown_provider_sends_nothing(self):
+        sender = registry.sender_for("carrier-pigeon")
+
+        self.assertFalse(sender.can_send)
+        self.assertIn("carrier-pigeon", sender.reason)
+
+    def test_lists_its_providers_for_admin(self):
+        self.assertIn(("textbee", "TextBee"), registry.choices())
+
+    def test_adding_a_provider(self):
+        providers = ProviderRegistry()
+        fake = FakeSender(provider="fake")
+        providers.register(Provider("fake", "Fake", lambda: fake, needs="nothing"))
+
+        self.assertIs(providers.sender_for("fake"), fake)
+        with self.assertRaises(ValueError):
+            providers.register(Provider("fake", "Again", lambda: fake, needs="nothing"))
 
 
 class DisabledSenderTests(SimpleTestCase):

@@ -22,7 +22,6 @@ from config.throttling import MessagingRunRateThrottle
 from .clock import SystemClock
 from .models import RunTrigger
 from .runner import MessageRunner
-from .senders import get_sender
 
 
 def _token_matches(request) -> bool:
@@ -42,7 +41,6 @@ def run_messaging(request):
     if not _token_matches(request):
         return Response({"detail": "Not allowed."}, status=403)
     result = MessageRunner(
-        get_sender(),
         SystemClock(),
         trigger=RunTrigger.SCHEDULE,
         time_budget=settings.MESSAGING_RUN_TIME_BUDGET,

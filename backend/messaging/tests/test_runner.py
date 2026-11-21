@@ -51,7 +51,8 @@ class RunnerTestCase(TestCase):
         self.sender = FakeSender()
 
     def run_on(self, day, sender=None, clock=None, **options):
-        return MessageRunner(sender or self.sender, clock or at(day), **options).run()
+        sender = sender or self.sender
+        return MessageRunner(clock or at(day), senders=lambda name: sender, **options).run()
 
     def bill(self, tenancy, month, *paid):
         entry = make_entry(tenancy, self.user, month=month)  # ₹15,750
@@ -433,13 +434,40 @@ class FailureTests(RunnerTestCase):
         self.assertNotIn("your rent", logged)
 
 
+class ProviderPerPropertyTests(RunnerTestCase):
+    def test_each_property_sends_with_its_own_provider(self):
+        other = make_property(name="Other Towers")
+        PropertyMessagingSettings.objects.create(
+            property=other, enabled=True, reminders_start=NOVEMBER, provider="other"
+        )
+        make_tenancy(other, flat_number="101", mobile_number=YUSUF, start_date=date(2026, 9, 1))
+        self.settings.provider = "textbee"
+        self.settings.save()
+        senders = {"textbee": FakeSender(provider="textbee"), "other": FakeSender(provider="other")}
+
+        MessageRunner(at(nov(11)), senders=senders.__getitem__).run()
+
+        self.assertEqual([to for to, _ in senders["textbee"].sent], [ZAHID])
+        self.assertEqual([to for to, _ in senders["other"].sent], [YUSUF])
+        self.assertEqual(
+            sorted(Message.objects.values_list("provider", flat=True)), ["other", "textbee"]
+        )
+
+    def test_by_default_the_registry_builds_it_and_without_credentials_sends_nothing(self):
+        result = MessageRunner(at(nov(11))).run()  # TEXTBEE_* are empty in tests
+
+        self.assertFalse(self.messages().exists())
+        self.assertIn("TextBee isn't set up", result.run.errors)
+
+
 class NoProviderTests(RunnerTestCase):
     def test_no_provider_sends_and_reserves_nothing(self):  # TC-16
-        result = self.run_on(nov(11), sender=DisabledSender())
+        result = self.run_on(nov(11), sender=DisabledSender("textbee", "TextBee isn't set up."))
 
-        self.assertTrue(result.run.dry_run)
+        self.assertFalse(result.run.dry_run)
         self.assertEqual(result.run.planned, 1)
-        self.assertEqual(len(result.planned), 1)
+        self.assertFalse(result.planned[0].sent)
+        self.assertIn(f"Property {self.prop.pk}: TextBee isn't set up.", result.run.errors)
         self.assertFalse(self.messages().exists())
         self.assertFalse(RentDueReminderItem.objects.exists())
 
@@ -501,7 +529,6 @@ class RunRecordTests(RunnerTestCase):
         run = MessagingRun.objects.get()
         self.assertEqual(run, result.run)
         self.assertEqual((run.properties_checked, run.planned), (1, 0))
-        self.assertEqual(run.provider, "fake")
 
     def test_messages_link_their_run(self):
         result = self.run_on(nov(11))

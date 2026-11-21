@@ -6,6 +6,7 @@ from django.db import models
 from django.db.models import Q
 
 from .clock import DEFAULT_TIME_ZONE, Clock, now_in_zone, validate_time_zone
+from .senders.providers import DEFAULT_PROVIDER, validate_provider
 
 DEFAULT_SEND_TIME = time(11, 30)
 # How long run records are kept; messages are kept for good.
@@ -44,6 +45,15 @@ class PropertyMessagingSettings(models.Model):
         default=DEFAULT_SEND_TIME,
         db_default=DEFAULT_SEND_TIME,
         help_text="Messages go out at the first run at or after this time, in the property's time zone.",
+    )
+    # A registered provider's name (messaging/senders/providers.py), checked in Python like the
+    # time zone, so adding a provider needs no migration. Its credentials are in the environment.
+    provider = models.CharField(
+        max_length=30,
+        default=DEFAULT_PROVIDER,
+        db_default=DEFAULT_PROVIDER,
+        validators=[validate_provider],
+        help_text="Who sends this property's messages. Its key is set on the server, not here.",
     )
     reminders_start = models.DateField(
         null=True,
@@ -132,10 +142,10 @@ class MessagingRun(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     trigger = models.CharField(max_length=10, choices=RunTrigger.choices)
-    # A dry run, or a run with no provider configured: it works out what's due, reserves and
-    # sends nothing, and counts what it would have sent as planned.
+    # Asked for a dry run: it works out what's due, reserves and sends nothing, and counts what
+    # it would have sent as planned. (A property whose provider isn't set up is planned the same
+    # way, on any run, with the reason in errors.)
     dry_run = models.BooleanField(default=False)
-    provider = models.CharField(max_length=30, blank=True)
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     properties_checked = models.PositiveIntegerField(default=0)
