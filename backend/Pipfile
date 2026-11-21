@@ -15,6 +15,7 @@ gunicorn = "*"
 whitenoise = "*"
 openpyxl = "*"
 defusedxml = "*"
+tzdata = "*"
 
 [dev-packages]
 

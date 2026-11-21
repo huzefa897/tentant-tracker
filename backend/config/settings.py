@@ -113,6 +113,7 @@ INSTALLED_APPS = [
     "accounts",
     "properties",
     "billing",
+    "messaging",
 ]
 
 MIDDLEWARE = [
