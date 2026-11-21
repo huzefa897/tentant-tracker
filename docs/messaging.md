@@ -1,6 +1,6 @@
 # Messaging
 
-Messaging is the app texting tenants by itself: a **Rent Due Reminder** when a month's rent falls due and again a week later if it's still owed, and later a **Payment Message** when a payment is recorded. There's no screen for sending messages by hand. It's built in steps; this doc says what exists today and what's decided for the rest.
+Messaging is the app texting tenants by itself: a **Rent Due Reminder** when a month's rent falls due and again a week later if it's still owed, and later a **Payment Message** when a payment is recorded. There's no screen for sending messages by hand. It's built in steps: this doc says what exists today, and [messaging-roadmap.md](messaging-roadmap.md) what's still to come.
 
 ## Terms
 
@@ -55,11 +55,6 @@ Messaging works with any SMS provider: TextBee is the first, and changing to ano
 - **The same tests for every sender**: one shared set of tests (accepted, refused, timeout, unreadable answer, nothing logged but ids) runs against each sender with its HTTP calls faked, and the rest of messaging is tested with `FakeSender`.
 - **Message text is the app's**, written by the composer, never a provider's template, so a switch doesn't change what tenants read.
 
-## Planned
+## What's next
 
-Decided, not built yet, in this order:
-
-1. **Rent Due Reminders.** Every hour, for each property past its send time, for each **current** tenancy (ended and future ones are left out, with nothing recorded): each month still owed (the dashboard's definition: a month without a bill is owed, since payments need a bill; months marked not owed and void bills don't count; reversed payments don't count; part paid is still owed), due on or after **reminders start**, gets the **Due** stage from its due date until 6 days after it, and the **Follow-up** stage from 7 days after its due date on, whether or not the Due message went out. A tenancy gets **one message listing all its months** (e.g. October overdue, November due today), never one per month. Each month and stage gets one reminder item, ever: the database refuses a second, so a repeated or overlapping run can't send twice.
-2. **Sending safely.** Reserve first: the reminder items and a `queued` message are committed before the sender is called, the months are checked again, then the message becomes `sent`, `failed` or `unknown` (a timeout or lost response). `queued` and `unknown` are never sent again by themselves. A tenancy whose number can't be texted is `skipped` with the reason, once a day, and nothing is reserved, so it's sent once the number is fixed. One tenancy's failure never stops the others, and messaging never writes to bills or payments. Admin lists messages read-only. `send_messages` (with `--dry-run`) runs it.
-3. **Scheduling.** Render's free plan has no cron jobs, so a GitHub Actions schedule calls a secret, rate-limited endpoint every hour; the single server uses crontab. The sender's credentials (TextBee) stay in the backend's environment, and logs never carry a full phone number.
-4. **Payment Messages.** `billing` sends a signal inside `record_payment`'s transaction; messaging saves a `queued` Payment Message (one per payment) in it, sent once the payment is committed. A retry of the same payment adds none, a reversal sends none, and a failed send never affects the payment.
+The rest is planned step by step in [messaging-roadmap.md](messaging-roadmap.md), a temporary file deleted once messaging is built end to end.
