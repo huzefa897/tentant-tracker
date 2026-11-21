@@ -1,0 +1,163 @@
+# Tests the Supabase backups end to end against throwaway databases, before the files in
+# deploy/backups-repo/ are copied to the private backups repository (docs/deployment.md,
+# Backups on Supabase). It never touches Supabase and holds no secrets: the "live" database
+# is a seeded PostgreSQL started here, the age key is made for the run, and the backup is
+# pushed to a local git repository.
+#
+# 1. Seeds the stand-in for Supabase, with btree_gist in an "extensions" schema, as there.
+# 2. Runs deploy/backups-repo/backup.sh against it (dump, restore check, encrypt, push).
+# 3. Restores what it pushed with scripts/restore-test.sh and scripts/restore-supabase.sh.
+name: Backups
+
+on:
+  pull_request:
+    paths: &paths
+      - deploy/backups-repo/**
+      - scripts/restore-test.sh
+      - scripts/restore-supabase.sh
+      - scripts/lib/restore.sh
+      - .github/workflows/backups.yml
+      # A migration can change what a backup needs (a new extension, say), and the restore
+      # scripts compare ledger_summary.
+      - backend/**/migrations/**
+      - backend/billing/summary.py
+      - backend/billing/management/commands/ledger_summary.py
+      - backend/Dockerfile
+  push:
+    branches: [main, dev]
+    paths: *paths
+  workflow_dispatch:
+
+concurrency:
+  group: backups-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backups:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      # Stands in for Supabase.
+      live:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-live-only
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+      # backup.sh's restore check, as in the backups repository's workflow.
+      restore:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: restore-test-only
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+      # An empty project for restore-supabase.sh to restore into.
+      target:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-target-only
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # The services' host ports, for every later step (the job context isn't available in
+      # the job's own env).
+      - name: Note the database ports
+        run: |
+          {
+            echo "LIVE_PORT=${{ job.services.live.ports['5432'] }}"
+            echo "RESTORE_PORT=${{ job.services.restore.ports['5432'] }}"
+            echo "TARGET_PORT=${{ job.services.target.ports['5432'] }}"
+          } >>"$GITHUB_ENV"
+
+      # As in deploy/backups-repo/.github/workflows/backup.yml.
+      - name: Install the PostgreSQL 17 client and age
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common age
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: Build the backend image
+        run: docker build -q -t rent-tracker-backend backend
+
+      - name: Seed the stand-in for Supabase
+        run: |
+          django() {
+            docker run --rm --network host -e DJANGO_SECRET_KEY=ci-only -e DJANGO_DEBUG=True \
+              -e FIREBASE_PROJECT_ID=ci-only -e DJANGO_ALLOWED_HOSTS=localhost \
+              -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_PORT="$LIVE_PORT" -e POSTGRES_DB=postgres \
+              -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=ci-live-only \
+              rent-tracker-backend python manage.py "$@"
+          }
+          django migrate -v0
+          django seed_dev_data --email owner@example.com
+          # Where Supabase keeps it, so the backup's extension handling is tested as it runs there.
+          PGPASSWORD=ci-live-only psql -h 127.0.0.1 -p "$LIVE_PORT" -U postgres -XAtq \
+            -v ON_ERROR_STOP=1 \
+            -c "create schema extensions" -c "alter extension btree_gist set schema extensions"
+
+      - name: Back up
+        run: |
+          key="$RUNNER_TEMP/key.txt"
+          age-keygen -o "$key" 2>/dev/null
+          git init -q --bare "$RUNNER_TEMP/backups.git"
+          git clone -q "$RUNNER_TEMP/backups.git" "$RUNNER_TEMP/backups"
+          cp deploy/backups-repo/backup.sh deploy/backups-repo/.gitignore "$RUNNER_TEMP/backups/"
+          cd "$RUNNER_TEMP/backups"
+          git add -A
+          git -c user.name=ci -c user.email=ci@example.com commit -q -m "The backup script"
+          git push -q -u origin HEAD
+          SUPABASE_HOST=127.0.0.1 SUPABASE_PORT="$LIVE_PORT" SUPABASE_SSLMODE=disable \
+            SUPABASE_USER=postgres SUPABASE_PASSWORD=ci-live-only \
+            AGE_RECIPIENT="$(age-keygen -y "$key")" ./backup.sh
+
+      - name: Check it was pushed, encrypted
+        run: |
+          git clone -q "$RUNNER_TEMP/backups.git" "$RUNNER_TEMP/pushed"
+          mapfile -t files < <(find "$RUNNER_TEMP/pushed/rent-tracker" -name '*.dump.age')
+          ((${#files[@]} == 1)) || { echo "Expected one backup, found ${#files[@]}." >&2; exit 1; }
+          head -c 21 "${files[0]}" | grep -q '^age-encryption.org/v1' ||
+            { echo "The backup isn't an age file." >&2; exit 1; }
+          echo "BACKUP=${files[0]}" >>"$GITHUB_ENV"
+
+      # The restore scripts' containers reach the services through the Docker bridge's gateway.
+      - name: Restore test (scripts/restore-test.sh)
+        run: |
+          gateway=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')
+          echo "GATEWAY=$gateway" >>"$GITHUB_ENV"
+          printf '%s\n' "POSTGRES_HOST=$gateway" "POSTGRES_PORT=$LIVE_PORT" POSTGRES_DB=postgres \
+            POSTGRES_USER=postgres POSTGRES_PASSWORD=ci-live-only >"$RUNNER_TEMP/live.env"
+          scripts/restore-test.sh --supabase "$RUNNER_TEMP/live.env" \
+            --identity "$RUNNER_TEMP/key.txt" "$BACKUP"
+
+      - name: Restore (scripts/restore-supabase.sh)
+        run: |
+          printf '%s\n' "POSTGRES_HOST=$GATEWAY" "POSTGRES_PORT=$TARGET_PORT" POSTGRES_DB=postgres \
+            POSTGRES_USER=postgres POSTGRES_PASSWORD=ci-target-only POSTGRES_SSLMODE=disable \
+            >"$RUNNER_TEMP/target.env"
+          ALLOW_NO_SSL=1 scripts/restore-supabase.sh --target "$RUNNER_TEMP/target.env" \
+            --identity "$RUNNER_TEMP/key.txt" --confirm "$GATEWAY" "$BACKUP"
+          echo "Restoring again must refuse, since the target is no longer empty:"
+          if ALLOW_NO_SSL=1 scripts/restore-supabase.sh --target "$RUNNER_TEMP/target.env" \
+            --identity "$RUNNER_TEMP/key.txt" --confirm "$GATEWAY" "$BACKUP"; then
+            echo "It restored into a database that wasn't empty." >&2
+            exit 1
+          fi
+          where=$(PGPASSWORD=ci-target-only psql -h 127.0.0.1 -p "$TARGET_PORT" -U postgres -XAtq \
+            -c "select extnamespace::regnamespace from pg_extension where extname = 'btree_gist'")
+          [[ "$where" == extensions ]] ||
+            { echo "btree_gist was restored into '$where', not extensions." >&2; exit 1; }
