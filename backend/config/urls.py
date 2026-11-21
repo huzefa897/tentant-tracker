@@ -23,7 +23,7 @@ from billing.meter_views import (
     MeterReadingViewSet,
     MeterReadingVoidViewSet,
 )
-from messaging.views import run_messaging
+from messaging.views import BillReminderView, PropertyMessagingView, run_messaging
 from properties.views import PropertyViewSet, TenancyViewSet
 
 from .views import health_check, readiness_check
@@ -68,6 +68,16 @@ urlpatterns = [
         "api/v1/properties/<uuid:property_id>/rental-periods/<uuid:period_id>/not-owed/",
         PeriodNotOwedView.as_view(),
         name="rental-period-not-owed",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/messaging/",
+        PropertyMessagingView.as_view(),
+        name="property-messaging",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/entries/<uuid:entry_id>/reminder/",
+        BillReminderView.as_view(),
+        name="rent-entry-reminder",
     ),
     path(
         "api/v1/properties/<uuid:property_id>/tenancies/",

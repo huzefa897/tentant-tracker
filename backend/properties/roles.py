@@ -19,6 +19,7 @@ class Capability(StrEnum):
     REVERSE_PAYMENTS = "reverse_payments"  # correct a payment recorded by mistake
     CORRECT_BILLS = "correct_bills"  # void a bill, or void it and create its replacement
     RECORD_READINGS = "record_readings"  # record, void and correct electricity meter readings
+    SEND_MESSAGES = "send_messages"  # text a tenant from the app (a bill's reminder)
 
 
 Role = PropertyMembership.Role
@@ -34,6 +35,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[Capability]] = {
             Capability.ISSUE_RECEIPTS,
             Capability.REVERSE_PAYMENTS,
             Capability.RECORD_READINGS,
+            Capability.SEND_MESSAGES,
         }
     ),
 }

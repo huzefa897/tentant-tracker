@@ -5,6 +5,8 @@ Plain ASCII on purpose: one character outside the GSM 7-bit alphabet (a ₹, a c
 every part of an SMS 70 characters instead of 160.
 """
 
+from datetime import date
+from decimal import Decimal
 from typing import Sequence
 
 from .models import ReminderStage
@@ -46,4 +48,42 @@ def rent_due_reminder(name: str, reminders: Sequence[DueReminder]) -> str:
     return (
         f"{_greeting(name)}, your rent for {months} is unpaid. Please arrange payment or "
         "contact us if you've already paid. Thank you."
+    )
+
+
+def rupees(amount: Decimal) -> str:
+    """Rs. 12,34,567 (Indian grouping, whole rupees unless there are paise), in ASCII."""
+    whole, _, paise = f"{amount:.2f}".partition(".")
+    digits = whole.lstrip("-")
+    if len(digits) > 3:
+        head, tail = digits[:-3], digits[-3:]
+        groups = []
+        while len(head) > 2:
+            groups.insert(0, head[-2:])
+            head = head[:-2]
+        digits = ",".join(([head] if head else []) + groups + [tail])
+    sign = "-" if whole.startswith("-") else ""
+    return f"Rs. {sign}{digits}" + ("" if paise == "00" else f".{paise}")
+
+
+def bill_reminder(
+    name: str, month: date, due_date: date | None, outstanding: Decimal, today: date
+) -> str:
+    """A reminder about one bill, sent by hand from its page: what's outstanding, and whether
+    it's due yet, due today or overdue."""
+    owed = f"{month:%B %Y} rent ({rupees(outstanding)} outstanding)"
+    if due_date and today < due_date:
+        return (
+            f"{_greeting(name)}, a reminder that your {owed} is due on "
+            f"{due_date.day} {due_date:%B}. Thank you."
+        )
+    if due_date and today == due_date:
+        return (
+            f"{_greeting(name)}, your {owed} is due today. Please arrange payment at your "
+            "earliest convenience. Thank you."
+        )
+    state = "overdue" if due_date else "unpaid"
+    return (
+        f"{_greeting(name)}, your {owed} is {state}. Please arrange payment or contact us if "
+        "you've already paid. Thank you."
     )
