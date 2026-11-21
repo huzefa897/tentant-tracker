@@ -41,7 +41,7 @@ Each property is turned on and off on its own, in admin; there's no switch for t
 
 Messaging works out "today" and "is it time to send" in each property's own time zone (`PropertyMessagingSettings.local_date`, `send_time_reached`), never the server's or `settings.TIME_ZONE`. The current time comes from a `Clock` passed in (`messaging/clock.py`: `SystemClock`, and `FixedClock` for tests), so tests fix the moment instead of patching it.
 
-Each run handles every property whose send time has come in its own zone, judged at one moment for the whole run: 11:30 in India, and a property elsewhere needs only its setting. Runs are meant to be hourly (scheduling is step 3 of the [roadmap](messaging-roadmap.md)); a late run sends late, and a second run finds the work done.
+Each run handles every property whose send time has come in its own zone, judged at one moment for the whole run: 11:30 in India, and a property elsewhere needs only its setting. Runs are hourly ([Running it](#running-it)); a late run sends late, and a second run finds the work done.
 
 The rest of the app (the dashboard, bills, tenancy status) still uses `properties.models.business_date()`, which is India's date. Until that moves to each property's time zone, keep real properties' messaging on `Asia/Kolkata`, so a reminder and the dashboard agree on what's due. Zone names come from the `tzdata` package where the system has none (the slim production image), so they never depend on the server.
 
@@ -76,7 +76,14 @@ The name is the tenancy's, as written. The text is plain ASCII: one character ou
 
 ## Running it
 
-`python manage.py send_messages` runs it once (`--dry-run` to list what it would send, saving nothing but the run's record). It prints flats, tenancy ids and months, never names or numbers, since its output can end up in logs. Safe to run again at any time: nothing is sent twice. It runs hourly once scheduling is set up ([roadmap](messaging-roadmap.md) step 3).
+`python manage.py send_messages` runs it once (`--dry-run` to list what it would send, saving nothing but the run's record). It prints flats, tenancy ids and months, never names or numbers, since its output can end up in logs. Safe to run again at any time: nothing is sent twice.
+
+**Every hour**, [cron-job.org](https://cron-job.org) calls `POST /api/v1/messaging/run/` (`messaging/views.py`), which starts the same run (recorded with the trigger `schedule`). Hourly because each property sends at its own time in its own zone, and a run that's late or missed is caught up the next hour. Setting it up: [deployment.md](deployment.md#messaging).
+
+- **Its own token, not a person's:** it needs `Authorization: Bearer <MESSAGING_RUN_TOKEN>`, compared in constant time, and never reads a Firebase token. Without the setting it answers 404; with a wrong token, 403. The token must be at least 32 characters, or the app doesn't start.
+- **Limited** to 12 requests an hour per address (`DJANGO_THROTTLE_MESSAGING_RUN`), counted before the token is checked.
+- **Answers counts only** (`run`, `dryRun`, `propertiesChecked`, `planned`, `sent`, `failed`, `unknown`, `skipped`, `errors`, `stoppedEarly`), never names, numbers or text.
+- **A time budget:** a request must finish within Gunicorn's 30 seconds, and a send can take 10, so the run starts no new message after 15 seconds (`MESSAGING_RUN_TIME_BUDGET`). What's left was never reserved, so the next run sends it; the run is marked **stopped early**. The command has no budget.
 
 ## History in admin
 

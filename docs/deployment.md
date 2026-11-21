@@ -107,6 +107,21 @@ The release with migration `accounts.0005` replaces phone sign-in with Google. E
 - While the database is down, the app shows its "unavailable right now, try again shortly" messages (the API answers 5xx, `ApiError` `'unavailable'`), and recovers by itself once it's back.
 - Logs: `docker compose --env-file .env.production -f compose.prod.yaml logs -f backend` (or `web`, `db`). Django logs warnings and errors, Gunicorn one line per request (never headers or bodies), Caddy its own errors.
 
+## Messaging
+
+Texting tenants ([messaging.md](messaging.md)) needs a provider and something to start a run every hour. Both setups use [cron-job.org](https://cron-job.org) (free) to call the API, since Render's free plan has no cron. Until all of this is set, nothing is sent: leave the variables empty.
+
+1. **The provider:** set `MESSAGING_PROVIDER=textbee`, `TEXTBEE_API_KEY` and `TEXTBEE_DEVICE_ID` (TextBee's dashboard: the API key, and the id of the phone running its app). On the server in `.env.production`; on Render in the API's Environment. `compose.prod.yaml` and `render.yaml` pass only the variables they list, and these are listed.
+2. **The run token:** generate one (`python3 -c "import secrets; print(secrets.token_urlsafe(32))"`) and set it as `MESSAGING_RUN_TOKEN` in the same place. Keep a copy in the password manager. Redeploy, or restart the backend, to pick both up.
+3. **Check first, with no property turned on:** `curl -X POST -H "Authorization: Bearer <token>" https://<api>/api/v1/messaging/run/` answers 200 with the run's counts (`propertiesChecked: 0`), and admin's Messaging runs list shows it with the provider `textbee`. A 404 means the token isn't set; a 403 that it doesn't match.
+4. **cron-job.org:** a new cron job, URL `https://<api>/api/v1/messaging/run/` (the API's own URL: on Render `https://rent-tracker-api-bcwo.onrender.com/…`; on the server `https://<domain>/…`), every hour at minute 0, request method **POST**, and under Advanced a header `Authorization` with the value `Bearer <token>`. Turn on its failure emails. Every hour at :00 UTC is :30 in India, so 11:30 is hit on the dot.
+5. **Turn a property on** in admin (its Messaging section: send messages, reminders start). The next hourly run after its send time sends what's due.
+
+- **What a run answers:** counts only (`sent`, `failed`, `unknown`, `skipped`, `errors`, `stoppedEarly`); names, numbers and texts are in admin's history. A run stops starting new messages after 15 seconds (Gunicorn's timeout is 30, a send can take 10), and the rest go at the next run.
+- **Changing the token:** set a new one, redeploy, then update cron-job.org's header. Runs in between answer 403, and the next hour catches up.
+- **Turning it off:** clear `MESSAGING_PROVIDER` (nothing sent; runs record a dry run) or `MESSAGING_RUN_TOKEN` (the endpoint answers 404), or pause the job on cron-job.org. Turning off a property in admin stops only that property.
+- **On the server, cron instead:** a crontab line on the host, `0 * * * * cd /path/to/repo && docker compose --env-file .env.production -f compose.prod.yaml exec -T backend python manage.py send_messages`, does the same without the endpoint (leave `MESSAGING_RUN_TOKEN` empty).
+
 ## Backups
 
 `scripts/backup-db.sh` takes a custom-format `pg_dump` inside the database container, checks the dump can be read, copies it off the server (`BACKUP_COPY_COMMAND`), deletes local dumps older than `BACKUP_RETENTION_DAYS`, and pings `BACKUP_HEALTHCHECK_URL` (success, or `/fail`).
@@ -188,6 +203,7 @@ How it differs from the single server:
 
 6. **The uptime monitor** (above), then the [checks after a deploy](#checks-after-a-deploy), with the static site's URL for the app and the API's for `/api/…`.
 7. **Backups** ([below](#backups-on-supabase)).
+8. **Messaging**, once you're ready to text tenants ([above](#messaging)).
 
 Each service deploys `main` by itself once its GitHub checks pass (`branch: main`, `autoDeployTrigger: checksPass`), and only when its own files changed (`buildFilter`: the API for `backend/`, the static site for the rest). A change to these settings in the dashboard alone isn't enough: a Blueprint sync applies `render.yaml` again, so sync the Blueprint after changing them. **Manual Deploy** still works for a redeploy. Render keeps the two previous deploys for rollback on the free plan; it doesn't undo migrations ([Rolling back](#rolling-back) applies).
 

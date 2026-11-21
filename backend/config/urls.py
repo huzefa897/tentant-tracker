@@ -23,6 +23,7 @@ from billing.meter_views import (
     MeterReadingViewSet,
     MeterReadingVoidViewSet,
 )
+from messaging.views import run_messaging
 from properties.views import PropertyViewSet, TenancyViewSet
 
 from .views import health_check, readiness_check
@@ -51,6 +52,7 @@ urlpatterns = [
     path("api/v1/health/", health_check, name="health"),
     path("api/v1/ready/", readiness_check, name="ready"),
     path("api/v1/me/", me, name="me"),
+    path("api/v1/messaging/run/", run_messaging, name="messaging-run"),
     path("api/v1/overdue-bills/", OverdueBillsView.as_view(), name="overdue-bills"),
     path(
         "api/v1/properties/<uuid:property_id>/dashboard/summary/",

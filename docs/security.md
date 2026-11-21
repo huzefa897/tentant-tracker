@@ -34,7 +34,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 ## 2. Server-side access, always
 
-- DRF requires authentication by default (`IsAuthenticated` + `FirebaseAuthentication`). A public endpoint opts out explicitly with `AllowAny` and `authentication_classes([])`; only `/api/v1/health/` and `/api/v1/ready/` do today.
+- DRF requires authentication by default (`IsAuthenticated` + `FirebaseAuthentication`). A public endpoint opts out explicitly with `AllowAny` and `authentication_classes([])`; only `/api/v1/health/` and `/api/v1/ready/` do today, and `/api/v1/messaging/run/`, which checks a token of its own instead (`MESSAGING_RUN_TOKEN`, a bearer token compared with `hmac.compare_digest`, 32 characters or more; the endpoint is off without it). It's for the scheduler, not people: it starts a run, which sends only what's due and is safe to repeat, and answers counts only ([messaging.md](messaging.md#running-it)).
 - Every request is checked on the server: never trust a UID, email, phone number, role, property, tenancy, rate or total from the request. The server derives them from the verified token and the database.
 - Role permissions are checked with `properties/roles.py` `role_can` on every write.
 
@@ -60,7 +60,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 
 - Backend secrets (`DJANGO_SECRET_KEY`, the database password, the Firebase service-account key's path, or its fields as variables) come from the gitignored `backend/.env`. The service-account JSON lives outside the repository. The key as variables is named so Django's error pages mask it (`FIREBASE_SERVICE_ACCOUNT_KEY`); never log it. In production they come from the gitignored `.env.production` on the server, each container gets only the ones it needs, and the key is mounted read-only; neither image contains any (their `.dockerignore` files are allowlists). [deployment.md](deployment.md) says how to keep a copy for recovery.
 - `VITE_*` variables are bundled into the app and are **public**: never put a secret in one. The Firebase web config is public by design.
-- A messaging provider's credentials (`TEXTBEE_API_KEY`) are backend secrets like the rest, given only to production ([messaging.md](messaging.md#textbee)). The sender sends them over https only and never shows them in its `repr`.
+- A messaging provider's credentials (`TEXTBEE_API_KEY`) and `MESSAGING_RUN_TOKEN` are backend secrets like the rest, given only to production (the run token is also kept in cron-job.org's job) ([messaging.md](messaging.md#textbee)). The sender sends them over https only and never shows them in its `repr`.
 - **Database dumps** hold every record, so they're secrets too. The server's stay in a `700` folder on the server and off-site; Supabase's are encrypted with age before they leave the job that makes them, and are kept only in a private repository ([deployment.md](deployment.md#backups-on-supabase)). The age private key is kept in a password manager, with one copy apart from it, never in a repository. The restore scripts decrypt a backup only into a private temporary folder that they delete on exit. `.gitignore` refuses `*.dump` files, and no workflow in this repository uploads a dump.
 - Apps Script secrets live in Script Properties, never in the code. The repo is public: never commit tenant data, phone numbers, emails, sheet or script IDs.
 
@@ -129,6 +129,8 @@ Every API request is limited (`config/throttling.py`); over a limit is 429 with 
 - **Writes per person** (`WriteRateThrottle`, `DJANGO_THROTTLE_WRITES`, default 30/minute), e.g. creating bills.
 
 **The public health and readiness checks** (`/api/v1/health/`, `/api/v1/ready/`) have their own, stricter limit instead (`HealthCheckRateThrottle`, `DJANGO_THROTTLE_HEALTH`, default 10/minute per address, shared by the two), and no per-person limits. Their counts are always kept in the process's memory (the `health` cache, bounded to 1,000 addresses), never in PostgreSQL, so a flood of pings costs no database work: health makes no queries at all, readiness only its `SELECT 1`. Each worker counts separately, so the effective limit is up to `WEB_CONCURRENCY` times the rate. An uptime monitor every few minutes, and Docker's own check every 30 seconds, are far below it.
+
+**The messaging run endpoint** (`/api/v1/messaging/run/`) has its own limit as well, `MessagingRunRateThrottle` (`DJANGO_THROTTLE_MESSAGING_RUN`, default 12/hour per address), counted before its token is checked.
 
 Admin login is throttled separately (item 1). Sign-in attempts are limited by Google and Firebase; consider Firebase App Check.
 
