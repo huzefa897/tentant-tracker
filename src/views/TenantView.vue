@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
+import { PhCheckCircle } from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -13,11 +14,17 @@ import { useAutoRetry } from '@/composables/useAutoRetry'
 import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
+import {
+  DuesReminderSummary,
+  SendMessageDialog,
+  STATUS_ERROR_MESSAGE,
+  useSendMessage,
+} from '@/messaging'
 import { useAccessStore } from '@/stores/access'
 import { useRentEntryStore } from '@/stores/rentEntry'
 
-// One tenant: their terms, their latest bill, and the way to their bills, a new bill and their
-// meter. Opened from Tenants, the dashboard's search or a link.
+// One tenant: their terms, their latest bill, and the way to their bills, a new bill, their
+// meter and an SMS about what they owe. Opened from Tenants, the dashboard's search or a link.
 const props = defineProps<{ tenantId: string }>()
 
 const router = useRouter()
@@ -72,6 +79,27 @@ watch(() => latestBill.value?.id, resetReceiptDownload)
 function downloadReceipt(entryId: string) {
   void downloadLatestReceipt(props.tenantId, entryId)
 }
+
+// Send SMS: owners and managers text the tenant one reminder about every month they still
+// owe, where the property has messaging on and SMS is set up (the backend says so, and checks
+// it again). The dialog shows the months and the text first.
+const sms = useSendMessage()
+
+function openMessage() {
+  sms.start(props.tenantId, { kind: 'dues_reminder' })
+}
+
+function handleSendMessage() {
+  if (tenant.value) void sms.send(tenant.value.name)
+}
+
+// Another tenant on the same page: nothing about the last one's SMS carries over.
+watch(() => props.tenantId, sms.reset)
+
+// Stay while an SMS is being sent, so its answer (sent, refused, or it may have gone) is seen
+// and not texted again blind. Logging out still goes: the session is ending.
+onBeforeRouteLeave((to) => !sms.sending.value || Boolean(to.meta.guestOnly))
+onBeforeRouteUpdate((to) => !sms.sending.value || Boolean(to.meta.guestOnly))
 
 function openNewEntry() {
   router.push({ name: 'rent-entry-new', params: { tenantId: props.tenantId } })
@@ -143,38 +171,76 @@ function goToTenants() {
       <Button class="mt-6 h-11 px-6" @click="goToTenants">Go to tenants</Button>
     </div>
 
-    <TenantDetails
-      v-else
-      class="animate-rise-in"
-      :tenant="tenant"
-      :entry-count="entryCount"
-      @add-entry="openNewEntry"
-      @view-entries="openHistory"
-      @view-meter="openMeter"
-    >
-      <template v-if="summaryLoading" #latest-entry>
-        <LoadingRegion label="Loading the latest bill…" data-testid="latest-entry-loading">
-          <div class="rounded-xl border bg-card p-4 sm:p-5">
-            <SkeletonLines heading :lines="4" />
-          </div>
-        </LoadingRegion>
-      </template>
-      <template v-else-if="latestBill" #latest-entry>
-        <p
-          v-if="receiptError"
-          class="mb-3 text-sm text-destructive"
-          role="alert"
-          data-testid="receipt-error"
-        >
-          {{ receiptError }}
+    <template v-else>
+      <div
+        v-if="sms.statusFailed.value"
+        class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm"
+        data-testid="reminder-status-error"
+      >
+        <p class="text-destructive" role="alert">{{ STATUS_ERROR_MESSAGE }}</p>
+        <Button variant="outline" size="sm" @click="sms.retryStatus">Try again</Button>
+      </div>
+      <div
+        v-if="sms.notice.value"
+        :key="sms.notice.value"
+        class="mb-4 flex animate-rise-in items-center gap-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
+      >
+        <p class="flex items-center gap-2" role="status">
+          <PhCheckCircle class="size-5 shrink-0" aria-hidden="true" />
+          {{ sms.notice.value }}
         </p>
-        <LatestEntryCard
-          :entry="latestBill"
-          :downloading-receipt="downloadingReceiptId === latestBill.id"
-          @view="openEntry"
-          @download-receipt="downloadReceipt"
-        />
-      </template>
-    </TenantDetails>
+      </div>
+      <TenantDetails
+        class="animate-rise-in"
+        :tenant="tenant"
+        :entry-count="entryCount"
+        :can-send-message="sms.available.value"
+        :sending-message="sms.sending.value"
+        @add-entry="openNewEntry"
+        @view-entries="openHistory"
+        @view-meter="openMeter"
+        @send-message="openMessage"
+      >
+        <template v-if="summaryLoading" #latest-entry>
+          <LoadingRegion label="Loading the latest bill…" data-testid="latest-entry-loading">
+            <div class="rounded-xl border bg-card p-4 sm:p-5">
+              <SkeletonLines heading :lines="4" />
+            </div>
+          </LoadingRegion>
+        </template>
+        <template v-else-if="latestBill" #latest-entry>
+          <p
+            v-if="receiptError"
+            class="mb-3 text-sm text-destructive"
+            role="alert"
+            data-testid="receipt-error"
+          >
+            {{ receiptError }}
+          </p>
+          <LatestEntryCard
+            :entry="latestBill"
+            :downloading-receipt="downloadingReceiptId === latestBill.id"
+            @view="openEntry"
+            @download-receipt="downloadReceipt"
+          />
+        </template>
+      </TenantDetails>
+    </template>
+
+    <SendMessageDialog
+      v-model:open="sms.isOpen.value"
+      :kind="sms.kind.value"
+      :sending="sms.sending.value"
+      :can-send="sms.canConfirm.value"
+      :error="sms.error.value"
+      @send="handleSendMessage"
+    >
+      <DuesReminderSummary
+        v-if="tenant"
+        :tenant="tenant"
+        :preview="sms.preview.value"
+        @retry="sms.loadPreview"
+      />
+    </SendMessageDialog>
   </AppLayout>
 </template>

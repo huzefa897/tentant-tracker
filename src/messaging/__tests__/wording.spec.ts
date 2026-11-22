@@ -45,4 +45,12 @@ describe('kindWording', () => {
       description: 'Text the tenant about this bill now.',
     })
   })
+
+  it("words a dues reminder's dialog, which previews", () => {
+    expect(kindWording('dues_reminder')).toMatchObject({
+      description: 'Text the tenant about everything they owe now.',
+      previews: true,
+    })
+    expect(kindWording('bill_reminder').previews).toBe(false)
+  })
 })

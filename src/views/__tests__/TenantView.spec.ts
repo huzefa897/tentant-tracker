@@ -1,12 +1,19 @@
-import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
+import { accessService } from '@/services/access.service'
 import { ApiError } from '@/services/apiError'
+import { messagingService } from '@/messaging/messaging.service'
 import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
-import { resetAccessService } from '@/test/mocks/accessService'
+import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService } from '@/test/mocks/authService'
+import {
+  fakeMessaging,
+  makePreview,
+  resetMessagingService,
+} from '@/messaging/testing/fakeMessagingService'
 import { fakeReceipts } from '@/test/mocks/receiptService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { fakeTenancies, resetTenantService, testTenants } from '@/test/mocks/tenantService'
@@ -19,6 +26,7 @@ vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
 vi.mock('@/services/receipt.service', () => import('@/test/mocks/receiptService'))
+vi.mock('@/messaging/messaging.service', () => import('@/messaging/testing/fakeMessagingService'))
 vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 let view: VueWrapper | undefined
@@ -45,6 +53,9 @@ beforeEach(() => {
   resetAuthService()
   resetAccessService()
   resetRentEntryService()
+  resetMessagingService()
+  // Off unless a test turns it on, so Send SMS shows only where a test expects it.
+  fakeMessaging.status = { enabled: false, ready: true, canSend: true }
 })
 
 afterEach(() => {
@@ -216,6 +227,207 @@ describe('TenantView', () => {
         'Configure the property address before issuing receipts.',
       )
       expect(downloadReceiptPdf).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('sending an SMS about what they owe', () => {
+    const body = new DOMWrapper(document.body)
+    const sendApi = vi.mocked(messagingService.sendMessage)
+    const DUES = { kind: 'dues_reminder' } as const
+
+    function dialog() {
+      return body.get('[role="dialog"]')
+    }
+
+    async function openDialog() {
+      await view!.get('[data-testid="send-message"]').trigger('click')
+      await flushPromises()
+    }
+
+    async function sendFromDialog() {
+      await openDialog()
+      await dialog().get('form').trigger('submit')
+      await flushPromises()
+    }
+
+    beforeEach(() => {
+      fakeMessaging.status = { enabled: true, ready: true, canSend: true }
+    })
+
+    it('offers Send SMS among the tenant’s actions where messaging is on', async () => {
+      await openTenant()
+
+      expect(view!.get('[data-testid="send-message"]').text()).toBe('Send SMS')
+      expect(
+        view!
+          .find('[aria-labelledby="latest-entry-heading"] [data-testid="send-message"]')
+          .exists(),
+      ).toBe(false)
+    })
+
+    it('offers it to a manager', async () => {
+      vi.mocked(accessService.getMe).mockResolvedValue(
+        identityWith([{ ...testProperty, role: 'manager' }]),
+      )
+      await openTenant()
+
+      expect(view!.find('[data-testid="send-message"]').exists()).toBe(true)
+    })
+
+    it.each([
+      ['messaging is off', { enabled: false, ready: true, canSend: true }],
+      ['SMS is not set up', { enabled: true, ready: false, canSend: true }],
+      ['the role may not send', { enabled: true, ready: true, canSend: false }],
+    ])('hides it when %s', async (_, status) => {
+      fakeMessaging.status = status
+      await openTenant()
+
+      expect(view!.find('[data-testid="send-message"]').exists()).toBe(false)
+    })
+
+    it('says so, with a retry, when it cannot tell whether SMS is offered', async () => {
+      vi.mocked(messagingService.getPropertyMessaging).mockRejectedValueOnce(
+        new ApiError('network', 'down'),
+      )
+      await openTenant()
+
+      const error = view!.get('[data-testid="reminder-status-error"]')
+      expect(error.get('[role="alert"]').text()).toContain(
+        "Couldn't check whether an SMS can be sent",
+      )
+      expect(view!.find('[data-testid="send-message"]').exists()).toBe(false)
+
+      await error.get('button').trigger('click')
+      await flushPromises()
+
+      expect(view!.find('[data-testid="reminder-status-error"]').exists()).toBe(false)
+      expect(view!.find('[data-testid="send-message"]').exists()).toBe(true)
+    })
+
+    it('previews every month owed and the text, sending nothing until confirmed', async () => {
+      await openTenant()
+      await openDialog()
+
+      expect(messagingService.previewMessage).toHaveBeenCalledWith(
+        testProperty.id,
+        'tenant-001',
+        DUES,
+      )
+      expect(dialog().text()).toContain('Send SMS reminder')
+      const months = dialog().get('[data-testid="dues-months"]').text()
+      expect(months).toContain('August 2026')
+      expect(months).toContain('No bill yet')
+      expect(months).toContain('September 2026')
+      expect(months).toContain('₹15,750')
+      expect(dialog().get('[data-testid="dues-body"]').text()).toBe(makePreview().body)
+      expect(sendApi).not.toHaveBeenCalled()
+    })
+
+    it('sends on Send, closes and says so', async () => {
+      await openTenant()
+      await sendFromDialog()
+
+      expect(sendApi).toHaveBeenCalledWith(testProperty.id, 'tenant-001', DUES)
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(view!.get('[role="status"]').text()).toMatch(/^SMS reminder sent to .+\.$/)
+    })
+
+    it('sends nothing on Cancel', async () => {
+      await openTenant()
+      await openDialog()
+
+      const cancel = dialog()
+        .findAll('button')
+        .find((b) => b.text() === 'Cancel')!
+      await cancel.trigger('click')
+      await flushPromises()
+
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(sendApi).not.toHaveBeenCalled()
+    })
+
+    it('holds Send back while the preview loads', async () => {
+      vi.mocked(messagingService.previewMessage).mockReturnValueOnce(new Promise(() => {}))
+      await openTenant()
+      await openDialog()
+
+      expect(dialog().find('[data-testid="dues-loading"]').exists()).toBe(true)
+      const send = dialog()
+        .findAll('button')
+        .find((b) => b.text() === 'Send SMS')!
+      expect(send.attributes('disabled')).toBeDefined()
+      await dialog().get('form').trigger('submit')
+      expect(sendApi).not.toHaveBeenCalled()
+    })
+
+    it('says when nothing is owed, and offers no Send', async () => {
+      fakeMessaging.preview = null
+      await openTenant()
+      await openDialog()
+
+      expect(dialog().get('[data-testid="dues-error"] [role="alert"]').text()).toBe(
+        "Nothing is owed: there's no month to remind about.",
+      )
+      const send = dialog()
+        .findAll('button')
+        .find((b) => b.text() === 'Send SMS')!
+      expect(send.attributes('disabled')).toBeDefined()
+    })
+
+    it('says a second one today was refused, and keeps the dialog open', async () => {
+      fakeMessaging.sent = ['dues']
+      await openTenant()
+      await sendFromDialog()
+
+      expect(dialog().get('form > [role="alert"]').text()).toBe(
+        'A reminder for these months was already sent today.',
+      )
+    })
+
+    it('shows why the provider refused it, to try again', async () => {
+      fakeMessaging.outcome = { outcome: 'failed', reason: 'The provider refused the message.' }
+      await openTenant()
+      await sendFromDialog()
+
+      expect(dialog().get('form > [role="alert"]').text()).toBe(
+        "The SMS wasn't sent: The provider refused the message. Try again.",
+      )
+    })
+
+    it('stays on the page while it sends, then shows the answer', async () => {
+      let answer!: () => void
+      sendApi.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => (answer = resolve))
+        return { outcome: 'sent', reason: '' }
+      })
+      await openTenant()
+      await sendFromDialog()
+
+      await router.push('/tenants/tenant-002')
+      await router.push('/tenants')
+      await flushPromises()
+      expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001' })
+      expect(body.find('[role="dialog"]').exists()).toBe(true)
+
+      answer()
+      await flushPromises()
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(view!.get('[role="status"]').text()).toMatch(/^SMS reminder sent to .+\.$/)
+
+      await router.push('/tenants')
+      await flushPromises()
+      expect(router.currentRoute.value.name).toBe('tenants')
+    })
+
+    it('says an unconfirmed one may have gone', async () => {
+      fakeMessaging.outcome = { outcome: 'unknown', reason: 'No answer.' }
+      await openTenant()
+      await sendFromDialog()
+
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(view!.get('[role="status"]').text()).toBe(
+        "The SMS may not have gone out: it wasn't confirmed. It won't be sent again today.",
+      )
     })
   })
 })

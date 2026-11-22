@@ -5,7 +5,9 @@ import SendMessageForm from '@/messaging/components/SendMessageForm.vue'
 
 const note = 'They get an SMS now.'
 
-function mountForm(props: { sending?: boolean; sendError?: string | null } = {}) {
+function mountForm(
+  props: { sending?: boolean; disabled?: boolean; sendError?: string | null } = {},
+) {
   return mount(SendMessageForm, {
     props: { note, ...props },
     slots: { default: '<p data-testid="summary">About September</p>' },
@@ -42,5 +44,14 @@ describe('SendMessageForm', () => {
     expect(form.get('[role="alert"]').text()).toBe(
       'A reminder for this bill was already sent today.',
     )
+  })
+
+  it('holds the send back when disabled', async () => {
+    const form = mountForm({ disabled: true })
+    const send = form.findAll('button').find((b) => b.text() === 'Send SMS')!
+
+    expect(send.attributes('disabled')).toBeDefined()
+    await form.get('form').trigger('submit')
+    expect(form.emitted('send')).toBeUndefined()
   })
 })

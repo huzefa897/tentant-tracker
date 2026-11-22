@@ -1,8 +1,14 @@
 import { computed, ref, watch } from 'vue'
 
 import { useMessagingStore } from '@/messaging/messaging.store'
-import type { MessageRequest } from '@/messaging/types'
-import { SEND_ERROR_MESSAGE, failedSendMessage, outcomeNotice } from '@/messaging/utils/wording'
+import type { MessagePreview, MessageRequest } from '@/messaging/types'
+import {
+  PREVIEW_ERROR_MESSAGE,
+  SEND_ERROR_MESSAGE,
+  failedSendMessage,
+  kindWording,
+  outcomeNotice,
+} from '@/messaging/utils/wording'
 import { useAccessStore } from '@/stores/access'
 
 // Send SMS for any page and any kind of message: whether it's offered on the selected property
@@ -10,8 +16,14 @@ import { useAccessStore } from '@/stores/access'
 // with SendMessageDialog. The backend decides who may send what, and checks it all again.
 //
 //   const sms = useSendMessage()
-//   sms.start({ kind: 'bill_reminder', entryId })   // opens the dialog
-//   const notice = await sms.send(tenantId, tenant.name)
+//   sms.start(tenantId, { kind: 'dues_reminder' })   // opens the dialog (and its preview)
+//   const notice = await sms.send(tenant.name)
+export type PreviewState =
+  | { status: 'none' } // this kind has none
+  | { status: 'loading' }
+  | { status: 'ready'; value: MessagePreview }
+  | { status: 'error'; message: string } // nothing to send, or it couldn't be loaded
+
 export function useSendMessage() {
   const store = useMessagingStore()
   const accessStore = useAccessStore()
@@ -35,6 +47,12 @@ export function useSendMessage() {
   }
 
   const request = ref<MessageRequest | null>(null)
+  const tenantId = ref<string | null>(null)
+  // What it would say, for kinds that preview (kindWording(kind).previews).
+  const preview = ref<PreviewState>({ status: 'none' })
+  let previewToken = 0
+  // Bumped by reset(): a send's late answer is then about a tenant no longer shown.
+  let sendToken = 0
   const dialogOpen = ref(false)
   const sending = ref(false)
   const error = ref<string | null>(null)
@@ -52,22 +70,56 @@ export function useSendMessage() {
 
   const kind = computed(() => request.value?.kind ?? null)
 
-  function start(next: MessageRequest) {
+  // Sending waits for the preview, where there is one, so nothing goes unseen.
+  const canConfirm = computed(() => {
+    if (!request.value) return false
+    if (!kindWording(request.value.kind).previews) return true
+    return preview.value.status === 'ready'
+  })
+
+  function start(forTenant: string, next: MessageRequest) {
+    tenantId.value = forTenant
     request.value = next
     error.value = null
     notice.value = null
     dialogOpen.value = true
+    loadPreview()
+  }
+
+  // Asked each time the dialog opens: what's owed may have changed since.
+  async function loadPreview() {
+    const current = request.value
+    const forTenant = tenantId.value
+    const token = ++previewToken
+    if (!current || !forTenant || !kindWording(current.kind).previews) {
+      preview.value = { status: 'none' }
+      return
+    }
+    preview.value = { status: 'loading' }
+    let next: PreviewState
+    try {
+      next = { status: 'ready', value: await store.preview(forTenant, current) }
+    } catch (caught) {
+      next = {
+        status: 'error',
+        message: caught instanceof Error ? caught.message : PREVIEW_ERROR_MESSAGE,
+      }
+    }
+    if (token === previewToken) preview.value = next
   }
 
   // Sends what start() was given. Sent, or it may have gone (unknown): closes the dialog and
   // returns what to say. Failed or refused: keeps it open with the reason and returns null.
-  async function send(tenantId: string, recipientName: string): Promise<string | null> {
+  async function send(recipientName: string): Promise<string | null> {
     const current = request.value
-    if (!current || sending.value) return null
+    const forTenant = tenantId.value
+    if (!current || !forTenant || !canConfirm.value || sending.value) return null
+    const token = sendToken
     sending.value = true
     error.value = null
     try {
-      const result = await store.send(tenantId, current)
+      const result = await store.send(forTenant, current)
+      if (token !== sendToken) return null
       const said = outcomeNotice(current.kind, result, recipientName)
       if (said === null) {
         error.value = failedSendMessage(result.reason)
@@ -77,17 +129,25 @@ export function useSendMessage() {
       notice.value = said
       return said
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : SEND_ERROR_MESSAGE
+      if (token === sendToken) {
+        error.value = caught instanceof Error ? caught.message : SEND_ERROR_MESSAGE
+      }
       return null
     } finally {
-      sending.value = false
+      if (token === sendToken) sending.value = false
     }
   }
 
-  // Another tenant or bill on the same page: nothing about the last one carries over.
+  // Another tenant or bill on the same page: nothing about the last one carries over, not
+  // even a send still waiting for its answer (pages hold navigation while one is in flight).
   function reset() {
+    sendToken++
+    sending.value = false
     dialogOpen.value = false
     request.value = null
+    tenantId.value = null
+    preview.value = { status: 'none' }
+    previewToken++
     error.value = null
     notice.value = null
   }
@@ -99,6 +159,9 @@ export function useSendMessage() {
     request,
     kind,
     isOpen,
+    preview,
+    loadPreview,
+    canConfirm,
     sending,
     error,
     notice,

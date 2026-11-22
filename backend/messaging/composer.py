@@ -104,3 +104,23 @@ def bill_reminder(
         f"{_greeting(name)}, your {owed} is {state}. Please arrange payment or contact us if "
         "you've already paid. Thank you."
     )
+
+
+def dues_reminder(name: str, months: Sequence[tuple[date, Decimal | None]]) -> str:
+    """One message for every month a tenancy still owes, sent by hand from the tenant page,
+    oldest first: each month with what's outstanding on its bill, or "no bill yet", and the
+    total of what's billed."""
+    if not months:
+        raise ValueError("A dues reminder needs at least one month.")
+    parts = [
+        f"{month:%B %Y} ({rupees(amount) if amount is not None else 'no bill yet'})"
+        for month, amount in months
+    ]
+    billed = [amount for _, amount in months if amount is not None]
+    total = f" Total outstanding: {rupees(sum(billed, Decimal(0)))}." if len(billed) > 1 else ""
+    owed = f"rent for {_join(parts)} is" if len(parts) > 1 else f"{parts[0]} rent is"
+    return (
+        f"{_greeting(name)}, your {owed} unpaid.{total} Please arrange payment or contact us if "
+        "you've already paid. Thank you."
+    )
+

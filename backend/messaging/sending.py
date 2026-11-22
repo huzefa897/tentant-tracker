@@ -71,13 +71,30 @@ class MessageKind(Protocol):
 
     def prepare(self, tenancy, subject: Any, today) -> Draft:
         """Inside the transaction: takes the kind's locks, checks again what it depends on
-        (raising CannotSend) and writes the text. `today` is the property's local date."""
+        (raising CannotSend) and writes the text. `today` is the property's local date.
+
+    A kind may also have `preview(tenancy, subject, today) -> Preview`: what it would say now,
+    without locks or writes (GET .../messages/preview/). It may raise CannotSend too."""
+
+
+@dataclass(frozen=True)
+class Preview:
+    """What a message would say now, for the app to show before it's sent: the text, and the
+    kind's own details (camelCase, as the API answers)."""
+
+    body: str
+    details: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class Sent:
     message: Message
     result: SendResult
+
+
+def local_today(tenancy, clock: Clock):
+    """The day at the tenancy's property, which every kind's rules are counted in."""
+    return PropertyMessagingSettings.for_property(tenancy.property).local_date(clock)
 
 
 def send_now(

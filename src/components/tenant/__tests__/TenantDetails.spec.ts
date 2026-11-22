@@ -128,4 +128,25 @@ describe('TenantDetails', () => {
     expect(html.indexOf('tenant-name')).toBeLessThan(html.indexOf('data-testid="latest"'))
     expect(html.indexOf('data-testid="latest"')).toBeLessThan(html.indexOf('<dl'))
   })
+
+  it('offers Send SMS only when the page says so, emitting sendMessage', async () => {
+    expect(
+      mount(TenantDetails, { props: { tenant } }).find('[data-testid="send-message"]').exists(),
+    ).toBe(false)
+
+    const wrapper = mount(TenantDetails, { props: { tenant, canSendMessage: true } })
+    const button = wrapper.get('[data-testid="send-message"]')
+    expect(button.text()).toBe('Send SMS')
+    await button.trigger('click')
+
+    expect(wrapper.emitted('sendMessage')).toHaveLength(1)
+  })
+
+  it('waits to send while a message is being sent', () => {
+    const wrapper = mount(TenantDetails, {
+      props: { tenant, canSendMessage: true, sendingMessage: true },
+    })
+
+    expect(wrapper.get('[data-testid="send-message"]').attributes('disabled')).toBeDefined()
+  })
 })

@@ -4,8 +4,17 @@ import { ref } from 'vue'
 import { ApiError, RATE_LIMITED_MESSAGE, isUncertainFailure } from '@/services/apiError'
 import { messagingService } from '@/messaging/messaging.service'
 import { useAccessStore } from '@/stores/access'
-import type { MessageRequest, PropertyMessaging, SendMessageResult } from '@/messaging/types'
-import { SEND_ERROR_MESSAGE, SEND_UNCONFIRMED_MESSAGE } from '@/messaging/utils/wording'
+import type {
+  MessagePreview,
+  MessageRequest,
+  PropertyMessaging,
+  SendMessageResult,
+} from '@/messaging/types'
+import {
+  PREVIEW_ERROR_MESSAGE,
+  SEND_ERROR_MESSAGE,
+  SEND_UNCONFIRMED_MESSAGE,
+} from '@/messaging/utils/wording'
 
 export class MessageSendError extends Error {
   constructor(message: string) {
@@ -78,12 +87,24 @@ export const useMessagingStore = defineStore('messaging', () => {
     }
   }
 
+  // What it would say now. Throws MessageSendError with why there's nothing to send, or why
+  // it couldn't be loaded.
+  async function preview(tenantId: string, request: MessageRequest): Promise<MessagePreview> {
+    const propertyId = accessStore.selectedPropertyId
+    if (!propertyId) throw new MessageSendError('Choose a property first.')
+    try {
+      return await messagingService.previewMessage(propertyId, tenantId, request)
+    } catch (error) {
+      throw new MessageSendError(previewErrorMessage(error))
+    }
+  }
+
   function reset() {
     inFlight.clear() // an answer for the person signed out is dropped
     byProperty.value = {}
   }
 
-  return { byProperty, load, loadFailed, canSendFor, send, reset }
+  return { byProperty, load, loadFailed, canSendFor, send, preview, reset }
 })
 
 function errorMessage(error: unknown): string {
@@ -98,4 +119,15 @@ function errorMessage(error: unknown): string {
     if (error.kind === 'rate-limited') return RATE_LIMITED_MESSAGE
   }
   return isUncertainFailure(error) ? SEND_UNCONFIRMED_MESSAGE : SEND_ERROR_MESSAGE
+}
+
+function previewErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.kind === 'conflict' && error.code) {
+    const detail = error.details.detail
+    if (typeof detail === 'string' && detail.trim()) return detail
+  }
+  if (error instanceof ApiError && error.kind === 'forbidden') {
+    return 'Only owners and managers can text tenants.'
+  }
+  return PREVIEW_ERROR_MESSAGE
 }
