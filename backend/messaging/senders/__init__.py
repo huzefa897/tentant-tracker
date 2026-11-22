@@ -8,6 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 from .base import MessageSender, SendOutcome, SendResult
 from .disabled import DisabledSender
 from .fake import FakeSender
+from .textbee import DEFAULT_BASE_URL as DEFAULT_TEXTBEE_URL
 from .textbee import TextBeeSender
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,8 @@ __all__ = [
 
 def get_sender() -> MessageSender:
     """The configured provider's sender, or DisabledSender when none is set or its
-    credentials are missing. An unknown name
-    is a configuration error, never a silent DisabledSender."""
+    credentials are missing. An unknown name is a configuration error, never a silent
+    DisabledSender."""
     provider = settings.MESSAGING_PROVIDER
     if not provider:
         return DisabledSender()
@@ -38,6 +39,6 @@ def get_sender() -> MessageSender:
         return TextBeeSender(
             settings.TEXTBEE_API_KEY,
             settings.TEXTBEE_DEVICE_ID,
-            base_url=settings.TEXTBEE_BASE_URL,
+            base_url=settings.TEXTBEE_BASE_URL or DEFAULT_TEXTBEE_URL,
         )
     raise ImproperlyConfigured(f"Unknown MESSAGING_PROVIDER: {provider!r}.")
