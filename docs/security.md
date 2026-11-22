@@ -131,7 +131,7 @@ Every API request is limited (`config/throttling.py`); over a limit is 429 with 
 
 **The public health and readiness checks** (`/api/v1/health/`, `/api/v1/ready/`) have their own, stricter limit instead (`HealthCheckRateThrottle`, `DJANGO_THROTTLE_HEALTH`, default 10/minute per address, shared by the two), and no per-person limits. Their counts are always kept in the process's memory (the `health` cache, bounded to 1,000 addresses), never in PostgreSQL, so a flood of pings costs no database work: health makes no queries at all, readiness only its `SELECT 1`. Each worker counts separately, so the effective limit is up to `WEB_CONCURRENCY` times the rate. An uptime monitor every few minutes, and Docker's own check every 30 seconds, are far below it.
 
-**The messaging run endpoint** (`/api/v1/messaging/run/`) has its own limit as well, `MessagingRunRateThrottle` (`DJANGO_THROTTLE_MESSAGING_RUN`, default 12/hour per address), counted before its token is checked.
+**The messaging run endpoint** (`/api/v1/messaging/run/`) has its own limit as well, `MessagingRunRateThrottle` (`messaging/views.py`, `DJANGO_THROTTLE_MESSAGING_RUN`, default 12/hour per address). It counts only refused requests (no token or a wrong one), so guessing stays slow while a stranger can't lock the scheduler out; a run is safe to repeat, so the token's own runs need no limit.
 
 Admin login is throttled separately (item 1). Sign-in attempts are limited by Google and Firebase; consider Firebase App Check.
 

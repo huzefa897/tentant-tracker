@@ -66,6 +66,11 @@ class RunEndpointTests(RunnerTestCase):
         self.assertEqual(response.json()["sent"], 0)
         self.assertEqual(len(self.sender.sent), 1)
 
+    def test_the_scheme_is_case_insensitive(self):  # RFC 9110
+        response = self.post(f"bearer {TOKEN}")
+
+        self.assertEqual(response.status_code, 200)
+
     def test_a_wrong_or_missing_token_runs_nothing(self):
         for authorization in (
             None,
@@ -132,3 +137,14 @@ class RunEndpointRateLimitTests(RunnerTestCase):
             statuses = [client.post(URL).status_code for _ in range(3)]
 
         self.assertEqual(statuses, [403, 403, 429])
+
+    def test_the_tokens_own_runs_never_use_up_the_limit(self):  # nor lock the scheduler out
+        scheduler, stranger = APIClient(), APIClient()
+        scheduler.credentials(HTTP_AUTHORIZATION=f"Bearer {TOKEN}")
+        stranger.credentials(HTTP_AUTHORIZATION="Bearer wrong")
+        with mock.patch("messaging.views.get_sender", return_value=FakeSender()):
+            runs = [scheduler.post(URL).status_code for _ in range(3)]
+            guesses = [stranger.post(URL).status_code for _ in range(3)]
+            after = scheduler.post(URL).status_code
+
+        self.assertEqual((runs, guesses, after), ([200, 200, 200], [403, 403, 429], 200))
