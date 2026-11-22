@@ -87,7 +87,7 @@ def masked(number: str) -> str:
 
 class RentDueReminderItemInline(admin.TabularInline):
     model = RentDueReminderItem
-    fields = ("month", "due_date", "stage")
+    fields = ("month", "due_date", "stage", "released_at")
     readonly_fields = fields
     extra = 0
     can_delete = False

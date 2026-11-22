@@ -282,6 +282,41 @@ class SendingTests(RunnerTestCase):
         self.assertEqual(Payment.objects.filter(entry=entry).count(), 1)
         self.assertEqual(RentEntry.objects.get(pk=entry.pk).status, "active")
 
+    def test_a_refusal_is_tried_again_the_next_day(self):  # nothing went, so it's still due
+        failing = FakeSender(outcomes={ZAHID: SendResult(SendOutcome.FAILED, reason="Offline")})
+        self.run_on(nov(11), sender=failing)
+
+        self.run_on(nov(12))
+
+        failed, sent = self.messages().order_by("created_at")
+        self.assertEqual((failed.status, sent.status), (MessageStatus.FAILED, MessageStatus.SENT))
+        self.assertIn("is now due", sent.body)
+        self.assertEqual(self.items(), [(OCTOBER, "due"), (OCTOBER, "due")])
+        self.assertEqual(
+            [(item.message_id, item.released_at is not None) for item in
+             RentDueReminderItem.objects.order_by("created_at")],
+            [(failed.pk, True), (sent.pk, False)],
+        )
+
+    def test_a_refusal_is_tried_once_a_day(self):  # not hourly, and only at the send time
+        failing = FakeSender(outcomes={ZAHID: SendResult(SendOutcome.FAILED, reason="Bad key")})
+        self.run_on(nov(11), sender=failing)
+
+        result = self.run_on(nov(11), clock=at(nov(11), hour=8))
+
+        self.assertEqual(self.sender.sent, [])
+        self.assertEqual(result.run.planned, 0)
+        self.assertEqual(self.messages().get().status, MessageStatus.FAILED)
+
+    def test_a_refusal_after_the_due_week_leaves_only_the_follow_up(self):
+        failing = FakeSender(outcomes={ZAHID: SendResult(SendOutcome.FAILED, reason="Offline")})
+        self.run_on(nov(17), sender=failing)  # day 6, the Due one's last day
+
+        self.run_on(nov(18))
+
+        self.assertIn("remains unpaid", self.messages().latest("created_at").body)
+        self.assertEqual(self.items(), [(OCTOBER, "due"), (OCTOBER, "follow_up")])
+
     def test_a_timeout_is_unknown_and_never_resent(self):  # TC-12
         sender = FakeSender(outcomes={ZAHID: SendResult(SendOutcome.UNKNOWN, reason="Timed out")})
 

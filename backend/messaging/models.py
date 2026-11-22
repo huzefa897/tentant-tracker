@@ -199,8 +199,10 @@ class Message(models.Model):
 
 
 class RentDueReminderItem(models.Model):
-    """One month at one stage, covered by a Rent Due Reminder. At most one per month and stage,
-    ever: the database refuses a second, so a repeated or overlapping run can't send twice."""
+    """One month at one stage, covered by a Rent Due Reminder. At most one held per month and
+    stage: the database refuses a second, so a repeated or overlapping run can't send twice.
+    A message the provider refused (`failed`, so nothing went) releases its items, which keep
+    the history and let a later run remind about the month again."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     message = models.ForeignKey(Message, on_delete=models.PROTECT, related_name="reminder_items")
@@ -209,12 +211,16 @@ class RentDueReminderItem(models.Model):
     )
     stage = models.CharField(max_length=10, choices=ReminderStage.choices)
     created_at = models.DateTimeField(auto_now_add=True)
+    # When its message failed: the month and stage are free to be reminded about again.
+    released_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ("rental_period__period_month",)
         constraints = [
             models.UniqueConstraint(
-                fields=["rental_period", "stage"], name="one_reminder_per_period_and_stage"
+                fields=["rental_period", "stage"],
+                condition=Q(released_at__isnull=True),
+                name="one_reminder_per_period_and_stage",
             ),
         ]
 
