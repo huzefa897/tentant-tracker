@@ -324,8 +324,11 @@ class MessageRunner:
 
 def deliver(message: Message, sender: MessageSender) -> SendResult:
     """Sends a reserved (`queued`) message, outside any transaction, and records what came of
-    it. Used by runs and by a message sent by hand (messaging/manual.py)."""
-    return _deliver(message, sender)[0]
+    it, then reads the message back for the caller. Used by a message sent by hand
+    (messaging/manual.py); a run counts outcomes and never reads it back."""
+    outcome = _deliver(message, sender)[0]
+    message.refresh_from_db()
+    return outcome
 
 
 def _deliver(message: Message, sender: MessageSender) -> tuple[SendResult, bool]:
@@ -349,5 +352,4 @@ def _deliver(message: Message, sender: MessageSender) -> tuple[SendResult, bool]
         if recorded and outcome.outcome == SendOutcome.FAILED:
             # Nothing went, so its months are free to be reminded about again.
             RentDueReminderItem.objects.filter(message=message).update(released_at=now)
-    message.refresh_from_db()
     return outcome, bool(recorded)

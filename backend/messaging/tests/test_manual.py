@@ -4,7 +4,9 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from unittest import mock
 
+from django.db import connection
 from django.test import SimpleTestCase, TestCase
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from billing.models import RentalPeriod, RentEntry
@@ -12,6 +14,7 @@ from billing.tests.factories import make_property, make_tenancy, make_user
 from billing.tests.test_payments_api import make_entry, make_payment
 from messaging import composer
 from messaging.clock import FixedClock
+from messaging.manual import CannotSend, send_bill_reminder
 from messaging.models import (
     Message,
     MessageStatus,
@@ -20,6 +23,7 @@ from messaging.models import (
     ReminderStage,
 )
 from messaging.senders import DisabledSender, FakeSender, SendOutcome, SendResult, registry
+from messaging.senders.providers import MESSAGING_OFF
 from messaging.tests.test_runner import ZAHID
 from properties.models import PropertyMembership, Tenancy
 
@@ -136,6 +140,32 @@ class RefusedTests(BillReminderTestCase):
         self.sender = DisabledSender("textbee", "TextBee isn't set up.")
 
         self.assertRefused(self.send(), "provider_not_set_up")
+
+    def test_off_on_the_server_says_so(self):  # not "isn't set up": its credentials may be set
+        self.sender = DisabledSender("textbee", MESSAGING_OFF)
+
+        self.assertRefused(self.send(), "server_off")
+
+    def test_a_refusal_is_a_new_exception_each_time(self):  # a raise writes its traceback
+        self.settings.enabled = False
+        self.settings.save()
+        errors = []
+        for _ in range(2):
+            try:
+                send_bill_reminder(self.entry, self.user, morning(self.today))
+            except CannotSend as error:
+                errors.append(error)
+
+        self.assertIsNot(*errors)
+        self.assertEqual([e.code for e in errors], ["messaging_off", "messaging_off"])
+
+    def test_waits_for_a_payment_being_recorded_on_the_bill(self):  # billing's lock order
+        with CaptureQueriesContext(connection) as queries:
+            self.send()
+
+        locks = [q["sql"] for q in queries if q["sql"].rstrip().endswith("UPDATE")]
+        self.assertIn("billing_rententry", locks[0])
+        self.assertIn("billing_rentalperiod", locks[1])
 
     def test_paid(self):
         make_payment(self.entry, self.user, Decimal("15750.00"))

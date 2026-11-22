@@ -1,9 +1,9 @@
 """A Rent Due Reminder sent by hand, from a bill's page in the app (docs/messaging.md).
 
-The same safety as a run's: checked and reserved in a transaction (the bill's rental period
-locked), then sent outside it and recorded. It never counts as the month's Due or Follow-up,
-which still go out by themselves; at most one a day per bill, so a double tap or a retry
-after a lost answer can't text twice. A failed one can be sent again.
+The same safety as a run's: checked and reserved in a transaction (the bill, then its rental
+period, locked in billing's order), then sent outside it and recorded. It never counts as the
+month's Due or Follow-up, which still go out by themselves; at most one a day per bill, so a
+double tap or a retry after a lost answer can't text twice. A failed one can be sent again.
 """
 
 from dataclasses import dataclass
@@ -23,26 +23,29 @@ from .models import (
 )
 from .runner import can_text, deliver
 from .senders import MessageSender, SendResult, registry
+from .senders.providers import MESSAGING_OFF as SERVER_SWITCH_OFF
+
+# Why nothing was sent, by code: a sentence for people.
+REFUSALS = {
+    "messaging_off": "Messaging is off for this property.",
+    "server_off": "Messaging is off on the server.",
+    "provider_not_set_up": "SMS isn't set up on the server yet.",
+    "entry_void": "This bill is void: it owes nothing.",
+    "entry_paid": "This bill is paid: nothing is outstanding.",
+    "no_rental_period": "This bill has no due date to remind about.",
+    "number_untextable": "The tenant's mobile number can't be texted.",
+    "already_sent_today": "A reminder for this bill was already sent today.",
+}
 
 
 class CannotSend(Exception):
-    """Why nothing was sent: a code for the app and a sentence for people."""
+    """Why nothing was sent: a code for the app and a sentence for people. Raised fresh each
+    time, never a shared instance: a raise writes its traceback onto the exception."""
 
-    def __init__(self, code: str, detail: str):
-        super().__init__(detail)
+    def __init__(self, code: str):
         self.code = code
-        self.detail = detail
-
-
-MESSAGING_OFF = CannotSend("messaging_off", "Messaging is off for this property.")
-NOT_SET_UP = CannotSend("provider_not_set_up", "SMS isn't set up on the server yet.")
-BILL_VOID = CannotSend("entry_void", "This bill is void: it owes nothing.")
-BILL_PAID = CannotSend("entry_paid", "This bill is paid: nothing is outstanding.")
-NO_PERIOD = CannotSend("no_rental_period", "This bill has no due date to remind about.")
-UNTEXTABLE = CannotSend("number_untextable", "The tenant's mobile number can't be texted.")
-ALREADY_TODAY = CannotSend(
-    "already_sent_today", "A reminder for this bill was already sent today."
-)
+        self.detail = REFUSALS[code]
+        super().__init__(self.detail)
 
 
 @dataclass(frozen=True)
@@ -55,28 +58,32 @@ def send_bill_reminder(entry: RentEntry, user, clock: Clock, senders=None) -> Se
     tenancy = entry.tenancy
     settings = PropertyMessagingSettings.for_property(tenancy.property)
     if not settings.enabled:
-        raise MESSAGING_OFF
+        raise CannotSend("messaging_off")
     sender: MessageSender = (senders or registry.sender_for)(settings.provider)
     if not sender.can_send:
-        raise NOT_SET_UP
+        off = sender.reason == SERVER_SWITCH_OFF
+        raise CannotSend("server_off" if off else "provider_not_set_up")
     today = settings.local_date(clock)
 
     with transaction.atomic():
+        # The bill first, then its period, as billing locks them: a payment or void being
+        # recorded holds the bill, so this waits for it to commit and reads what it left.
+        list(RentEntry.objects.select_for_update(no_key=True).filter(pk=entry.pk).values("pk"))
         period = (
             RentalPeriod.objects.select_for_update()
             .filter(tenancy=tenancy, period_month=entry.billing_month)
             .first()
         )
         if period is None:
-            raise NO_PERIOD
-        # Read again under the lock: a payment or void just now changes the answer.
+            raise CannotSend("no_rental_period")
+        # Read again under the locks: a payment or void just now changes the answer.
         bill = RentEntry.objects.with_amounts().get(pk=entry.pk)
         if bill.status != RentEntry.Status.ACTIVE:
-            raise BILL_VOID
+            raise CannotSend("entry_void")
         if bill.outstanding_total <= 0:
-            raise BILL_PAID
+            raise CannotSend("entry_paid")
         if not can_text(tenancy.mobile_number):
-            raise UNTEXTABLE
+            raise CannotSend("number_untextable")
         already = (
             RentDueReminderItem.objects.filter(
                 rental_period=period, stage=ReminderStage.MANUAL, message__local_date=today
@@ -85,7 +92,7 @@ def send_bill_reminder(entry: RentEntry, user, clock: Clock, senders=None) -> Se
             .exists()
         )
         if already:
-            raise ALREADY_TODAY
+            raise CannotSend("already_sent_today")
         message = Message.objects.create(
             tenancy=tenancy,
             sent_by=user,
