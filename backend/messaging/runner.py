@@ -165,7 +165,7 @@ class MessageRunner:
                 result.run.stopped_early = True
                 break
             try:
-                if not settings.send_time_reached(clock):
+                if not settings.in_send_window(clock):
                     continue
                 today = settings.local_date(clock)
                 result.run.properties_checked += 1
@@ -328,23 +328,39 @@ class MessageRunner:
         return message, reminders
 
     def _send(self, run, message, sender):
-        try:
-            outcome = sender.send(message.recipient, message.body)
-        except Exception as exc:
-            # A sender shouldn't raise, but one that does may have sent it: never retry blindly.
-            log_failure("sending message", message.pk, exc)
-            outcome = SendResult(SendOutcome.UNKNOWN, reason="The sender stopped unexpectedly.")
-        now = timezone.now()
-        with transaction.atomic():
-            recorded = Message.objects.filter(pk=message.pk, status=MessageStatus.QUEUED).update(
-                status=MessageStatus(outcome.outcome.value),
-                provider_message_id=outcome.provider_message_id[:100],
-                reason=outcome.reason[:300],
-                attempted_at=now,
-                updated_at=now,
-            )
-            if recorded and outcome.outcome == SendOutcome.FAILED:
-                # Nothing went, so its months are free to be reminded about again.
-                RentDueReminderItem.objects.filter(message=message).update(released_at=now)
-        if recorded:
+        outcome, recorded = _deliver(message, sender)
+        if recorded:  # counted only when this run recorded its status
             setattr(run, outcome.outcome.value, getattr(run, outcome.outcome.value) + 1)
+
+
+def deliver(message: Message, sender: MessageSender) -> SendResult:
+    """Sends a reserved (`queued`) message, outside any transaction, and records what came of
+    it, then reads the message back for the caller. Used by a message sent by hand
+    (messaging/manual.py); a run counts outcomes and never reads it back."""
+    outcome = _deliver(message, sender)[0]
+    message.refresh_from_db()
+    return outcome
+
+
+def _deliver(message: Message, sender: MessageSender) -> tuple[SendResult, bool]:
+    """deliver(), and whether this call recorded the status: False when the message had already
+    left `queued` some other way."""
+    try:
+        outcome = sender.send(message.recipient, message.body)
+    except Exception as exc:
+        # A sender shouldn't raise, but one that does may have sent it: never retry blindly.
+        log_failure("sending message", message.pk, exc)
+        outcome = SendResult(SendOutcome.UNKNOWN, reason="The sender stopped unexpectedly.")
+    now = timezone.now()
+    with transaction.atomic():
+        recorded = Message.objects.filter(pk=message.pk, status=MessageStatus.QUEUED).update(
+            status=MessageStatus(outcome.outcome.value),
+            provider_message_id=outcome.provider_message_id[:100],
+            reason=outcome.reason[:300],
+            attempted_at=now,
+            updated_at=now,
+        )
+        if recorded and outcome.outcome == SendOutcome.FAILED:
+            # Nothing went, so its months are free to be reminded about again.
+            RentDueReminderItem.objects.filter(message=message).update(released_at=now)
+    return outcome, bool(recorded)

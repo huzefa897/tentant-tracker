@@ -1,6 +1,7 @@
 import uuid
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
@@ -9,6 +10,10 @@ from .clock import DEFAULT_TIME_ZONE, Clock, now_in_zone, validate_time_zone
 from .senders.providers import DEFAULT_PROVIDER, validate_provider
 
 DEFAULT_SEND_TIME = time(11, 30)
+# Runs send between the send time and this, never later in the evening, even after an outage.
+DEFAULT_SEND_UNTIL = time(20, 0)
+# Runs are hourly, so a shorter window could fall between two runs and never be reached.
+MIN_SEND_WINDOW = timedelta(hours=1)
 # How long run records are kept; messages are kept for good.
 RUN_RETENTION_DAYS = 90
 
@@ -45,6 +50,14 @@ class PropertyMessagingSettings(models.Model):
         default=DEFAULT_SEND_TIME,
         db_default=DEFAULT_SEND_TIME,
         help_text="Messages go out at the first run at or after this time, in the property's time zone.",
+    )
+    send_until = models.TimeField(
+        default=DEFAULT_SEND_UNTIL,
+        db_default=DEFAULT_SEND_UNTIL,
+        help_text=(
+            "No message goes out at or after this time: what's left waits for tomorrow's send "
+            "time. At least an hour after the send time, since runs are hourly."
+        ),
     )
     # A registered provider's name (messaging/senders/providers.py), checked in Python like the
     # time zone, so adding a provider needs no migration. Its credentials are in the environment.
@@ -94,6 +107,16 @@ class PropertyMessagingSettings(models.Model):
             raise ValidationError(
                 {"reminders_start": "Set when reminders start before turning messaging on."}
             )
+        if self.send_time is not None and self.send_until is not None:
+            day = date.min
+            window = datetime.combine(day, self.send_until) - datetime.combine(day, self.send_time)
+            if window < MIN_SEND_WINDOW:
+                raise ValidationError(
+                    {
+                        "send_until": "Leave at least an hour after the send time: runs are "
+                        "hourly, so a shorter window might never be reached."
+                    }
+                )
 
     def local_now(self, clock: Clock) -> datetime:
         return now_in_zone(clock, self.time_zone)
@@ -102,9 +125,11 @@ class PropertyMessagingSettings(models.Model):
         """Today at the property, in its own time zone."""
         return self.local_now(clock).date()
 
-    def send_time_reached(self, clock: Clock) -> bool:
-        """Whether today's send time has come at the property, so a run may send."""
-        return self.local_now(clock).time() >= self.send_time
+    def in_send_window(self, clock: Clock) -> bool:
+        """Whether a run may send at the property now: from today's send time until its send
+        until time, in its own zone. Outside it, what's due waits for the next window."""
+        now = self.local_now(clock).time()
+        return self.send_time <= now < self.send_until
 
 
 class MessageType(models.TextChoices):
@@ -115,6 +140,13 @@ class MessageType(models.TextChoices):
 class ReminderStage(models.TextChoices):
     DUE = "due", "Due"
     FOLLOW_UP = "follow_up", "Follow-up"
+    # Sent from the bill's page by an owner or manager (messaging/manual.py). Never counts as
+    # the Due or Follow-up, which still go out by themselves.
+    MANUAL = "manual", "Sent by hand"
+
+
+# The stages runs send, each once per month ever.
+AUTOMATIC_STAGES = (ReminderStage.DUE, ReminderStage.FOLLOW_UP)
 
 
 class MessageStatus(models.TextChoices):
@@ -180,6 +212,14 @@ class Message(models.Model):
     run = models.ForeignKey(
         MessagingRun, on_delete=models.SET_NULL, null=True, blank=True, related_name="messages"
     )
+    # Who sent it by hand, from the app; empty for a run's.
+    sent_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
     type = models.CharField(max_length=20, choices=MessageType.choices)
     channel = models.CharField(max_length=10, choices=Channel.choices, default=Channel.SMS)
     status = models.CharField(max_length=10, choices=MessageStatus.choices)
@@ -212,8 +252,9 @@ class Message(models.Model):
 
 
 class RentDueReminderItem(models.Model):
-    """One month at one stage, covered by a Rent Due Reminder. At most one held per month and
-    stage: the database refuses a second, so a repeated or overlapping run can't send twice.
+    """One month at one stage, covered by a Rent Due Reminder. At most one held per month for
+    each automatic stage: the database refuses a second, so a repeated or overlapping run can't
+    send twice. Sent by hand ones are limited to one a day instead (messaging/manual.py).
     A message the provider refused (`failed`, so nothing went) releases its items, which keep
     the history and let a later run remind about the month again."""
 
@@ -232,7 +273,7 @@ class RentDueReminderItem(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["rental_period", "stage"],
-                condition=Q(released_at__isnull=True),
+                condition=Q(stage__in=["due", "follow_up"], released_at__isnull=True),
                 name="one_reminder_per_period_and_stage",
             ),
         ]

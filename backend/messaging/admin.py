@@ -7,7 +7,14 @@ from .clock import DEFAULT_TIME_ZONE, time_zone_choices
 from .senders.providers import DEFAULT_PROVIDER, provider_choices, registry
 from .models import Message, MessagingRun, PropertyMessagingSettings, RentDueReminderItem
 
-SETTINGS_FIELDS = ("enabled", "provider", "time_zone", "send_time", "reminders_start")
+SETTINGS_FIELDS = (
+    "enabled",
+    "provider",
+    "time_zone",
+    "send_time",
+    "send_until",
+    "reminders_start",
+)
 
 
 class MessagingSettingsForm(forms.ModelForm):
@@ -44,6 +51,7 @@ class PropertyMessagingSettingsAdmin(admin.ModelAdmin):
         "provider_ready",
         "time_zone",
         "send_time",
+        "send_until",
         "reminders_start",
     )
     list_filter = ("enabled", "provider")
@@ -51,7 +59,7 @@ class PropertyMessagingSettingsAdmin(admin.ModelAdmin):
     autocomplete_fields = ("property",)
     fieldsets = (
         (None, {"fields": ("property", "enabled", "provider", "provider_ready")}),
-        ("When", {"fields": ("time_zone", "send_time", "reminders_start")}),
+        ("When", {"fields": ("time_zone", "send_time", "send_until", "reminders_start")}),
         ("Technical", {"classes": ("collapse",), "fields": ("created_at", "updated_at")}),
     )
 

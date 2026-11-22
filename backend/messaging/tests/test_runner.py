@@ -444,6 +444,15 @@ class WhenAndWhereTests(RunnerTestCase):
         self.assertFalse(self.messages().exists())
         self.assertEqual(result.run.properties_checked, 0)
 
+    def test_nothing_after_the_send_until_time(self):  # e.g. the first run after an outage
+        result = self.run_on(nov(11), clock=at(nov(11), hour=18))  # 23:30 IST
+
+        self.assertFalse(self.messages().exists())
+        self.assertEqual(result.run.properties_checked, 0)
+
+        self.run_on(nov(12))  # the next day's send time
+        self.assertEqual(self.messages().count(), 1)
+
     def test_send_time_is_in_the_propertys_own_zone(self):
         self.settings.time_zone = "Asia/Dubai"
         self.settings.save()
