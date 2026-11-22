@@ -211,6 +211,16 @@ class PropertyMessagingSettingsAdminTests(TestCase):
 
                 self.assertContains(response, "must be https")
 
+    @override_settings(
+        MESSAGING_ENABLED=False, TEXTBEE_API_KEY="test-key-not-real", TEXTBEE_DEVICE_ID="d"
+    )
+    def test_credentials_are_checked_while_messaging_is_off_on_the_server(self):
+        PropertyMessagingSettings.objects.create(property=self.property)
+
+        response = self.client.get(reverse("admin:messaging_propertymessagingsettings_changelist"))
+
+        self.assertContains(response, "Ready, but messaging is off on this server")
+
 
 class PropertyPageMessagingTests(TestCase):
     """The property's own admin page carries its messaging settings."""
