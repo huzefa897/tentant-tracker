@@ -7,8 +7,10 @@ at 06:00 UTC, 11:30 in India, the default send time, unless a test says otherwis
 from datetime import UTC, date, datetime, timedelta
 from unittest import mock
 
+from django.db import connection
 from django.db.models import F
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from billing.models import Payment, PaymentReversal, RentalPeriod, RentEntry
@@ -317,6 +319,24 @@ class SendingTests(RunnerTestCase):
         self.assertIn("remains unpaid", self.messages().latest("created_at").body)
         self.assertEqual(self.items(), [(OCTOBER, "due"), (OCTOBER, "follow_up")])
 
+    def test_a_refusal_by_a_run_at_the_same_time_is_not_retried(self):
+        failing = FakeSender(outcomes={ZAHID: SendResult(SendOutcome.FAILED, reason="Offline")})
+        self.run_on(nov(11), sender=failing)
+        real = MessageRunner._failed_today
+        checks = []
+
+        def planned_before_the_refusal(tenancy, today):
+            checks.append(tenancy)
+            return False if len(checks) == 1 else real(tenancy, today)
+
+        with mock.patch.object(
+            MessageRunner, "_failed_today", staticmethod(planned_before_the_refusal)
+        ):
+            self.run_on(nov(11), clock=at(nov(11), hour=7))
+
+        self.assertEqual(self.sender.sent, [])
+        self.assertEqual(self.messages().get().status, MessageStatus.FAILED)
+
     def test_a_timeout_is_unknown_and_never_resent(self):  # TC-12
         sender = FakeSender(outcomes={ZAHID: SendResult(SendOutcome.UNKNOWN, reason="Timed out")})
 
@@ -344,6 +364,25 @@ class SendingTests(RunnerTestCase):
         self.assertFalse(self.messages().exists())
         self.assertEqual(self.sender.sent, [])
 
+    def test_the_months_bills_are_locked_before_checking_they_are_owed(self):
+        # A payment being recorded holds its bill's lock, so the check waits and sees it.
+        self.bill(self.zahid, OCTOBER)
+        with CaptureQueriesContext(connection) as queries:
+            self.run_on(nov(11))
+
+        sql = [query["sql"] for query in queries.captured_queries]
+        bill_lock = next(
+            i
+            for i, q in enumerate(sql)
+            if q.startswith(f'SELECT "{RentEntry._meta.db_table}"') and "FOR NO KEY UPDATE" in q
+        )
+        period_lock = next(
+            i
+            for i, q in enumerate(sql)
+            if q.startswith(f'SELECT "{RentalPeriod._meta.db_table}"') and "FOR UPDATE" in q
+        )
+        self.assertLess(bill_lock, period_lock)
+
     def test_a_reservation_beaten_by_another_run_sends_nothing(self):
         self.run_on(nov(11))
         # As if a second run planned before the first reserved: the constraint refuses it.
@@ -367,6 +406,14 @@ class UntextableTests(RunnerTestCase):
         self.assertEqual((message.status, message.reason), (MessageStatus.SKIPPED, UNTEXTABLE_REASON))
         self.assertEqual(first.run.skipped, 1)
         self.assertFalse(RentDueReminderItem.objects.exists())
+        self.assertEqual(self.sender.sent, [])
+
+    def test_an_empty_number_is_skipped(self):
+        Tenancy.objects.filter(pk=self.zahid.pk).update(mobile_number="")
+
+        self.run_on(nov(11))
+
+        self.assertEqual(self.messages().get().status, MessageStatus.SKIPPED)
         self.assertEqual(self.sender.sent, [])
 
     def test_sent_once_the_number_is_fixed(self):
