@@ -148,6 +148,25 @@ class TextBeeSenderTests(SenderContract, SimpleTestCase):
 
         self.assertEqual(result, SendResult(SendOutcome.SENT))
 
+    def test_dispatched_at_once_keeps_its_batch_id(self):
+        answer = textbee_answer(successCount=1, failureCount=0, smsBatchId="batch-2")
+
+        result = self.send(FakePost(200, answer))
+
+        self.assertEqual(result, SendResult(SendOutcome.SENT, provider_message_id="batch-2"))
+
+    def test_a_nested_batch_id_is_not_kept(self):
+        result = self.send(FakePost(200, textbee_answer(success=True, smsBatchId={"id": 1})))
+
+        self.assertEqual(result, SendResult(SendOutcome.SENT))
+
+    def test_data_that_isnt_an_object_is_unknown(self):
+        for data in ("successCount", ["success"], None):
+            with self.subTest(data=data):
+                result = self.send(FakePost(200, json.dumps({"data": data}).encode()))
+
+                self.assertEqual(result.outcome, SendOutcome.UNKNOWN)
+
     def test_failed_to_dispatch_is_failed(self):  # so it can be tried again
         result = self.send(FakePost(200, textbee_answer(successCount=0, failureCount=1)))
 
@@ -194,6 +213,16 @@ class RegistryTests(SimpleTestCase):
         self.assertIsInstance(sender, TextBeeSender)
         self.assertEqual(sender.provider, "textbee")
         self.assertTrue(sender.can_send)
+
+    @override_settings(TEXTBEE_API_KEY=KEY, TEXTBEE_DEVICE_ID="device-1", TEXTBEE_BASE_URL="")
+    def test_an_empty_base_url_is_textbees_own(self):  # e.g. passed through Compose unset
+        post = FakePost(200, textbee_answer(success=True, smsBatchId="b"))
+        sender = registry.sender_for("textbee")
+        sender._post = post
+
+        sender.send(TO, BODY)
+
+        self.assertEqual(post.requests[0][0], "https://api.textbee.dev/api/v1/gateway/send-sms")
 
     @override_settings(TEXTBEE_API_KEY="", TEXTBEE_DEVICE_ID="device-1")
     def test_without_its_credentials_sends_nothing_and_says_why(self):  # TC-16

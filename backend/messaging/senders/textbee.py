@@ -37,6 +37,12 @@ _UNREADABLE = "TextBee's answer couldn't be read: it may have been sent."
 _NO_ANSWER = "TextBee didn't answer in time: it may have been sent."
 
 
+def _batch_id(data: dict) -> str:
+    """The batch's id when TextBee gave a plain one, else empty: never a nested value."""
+    batch_id = data.get("smsBatchId")
+    return str(batch_id) if isinstance(batch_id, (str, int)) and batch_id != "" else ""
+
+
 class TextBeeSender:
     provider = "textbee"
     can_send = True
@@ -83,13 +89,18 @@ class TextBeeSender:
         if 200 <= status < 300:
             try:
                 data = json.loads(body)["data"]
-                if "successCount" in data or "failureCount" in data:
-                    return self._dispatched(data["successCount"], data["failureCount"])
-                accepted = data["success"] is True
-                batch_id = str(data.get("smsBatchId") or "")
+                if not isinstance(data, dict):
+                    raise TypeError("data must be an object")
             except (ValueError, KeyError, TypeError):
                 logger.warning("TextBee: unreadable answer to a %s", status)
                 return SendResult(SendOutcome.UNKNOWN, reason=_UNREADABLE)
+            if "successCount" in data or "failureCount" in data:
+                return self._dispatched(data)
+            if "success" not in data:
+                logger.warning("TextBee: unreadable answer to a %s", status)
+                return SendResult(SendOutcome.UNKNOWN, reason=_UNREADABLE)
+            accepted = data["success"] is True
+            batch_id = _batch_id(data)
             if accepted and batch_id:
                 return SendResult(SendOutcome.SENT, provider_message_id=batch_id)
             if accepted:  # accepted, but nothing to match a delivery report to
@@ -105,14 +116,15 @@ class TextBeeSender:
         return SendResult(SendOutcome.UNKNOWN, reason=_UNREADABLE)
 
     @staticmethod
-    def _dispatched(succeeded, failed) -> SendResult:
+    def _dispatched(data: dict) -> SendResult:
         """The immediate-dispatch answer: counts of recipients pushed to the phone, not a
         queued batch. There is one recipient, so exactly one of the two must be 1."""
-        counts = (succeeded, failed)
+        counts = (data.get("successCount"), data.get("failureCount"))
         if not all(isinstance(n, int) and not isinstance(n, bool) for n in counts):
-            raise TypeError("counts must be whole numbers")
+            logger.warning("TextBee: unreadable dispatch counts")
+            return SendResult(SendOutcome.UNKNOWN, reason=_UNREADABLE)
         if counts == (1, 0):
-            return SendResult(SendOutcome.SENT)
+            return SendResult(SendOutcome.SENT, provider_message_id=_batch_id(data))
         if counts == (0, 1):
             logger.warning("TextBee: dispatch failed")
             return SendResult(SendOutcome.FAILED, reason=_NOT_DISPATCHED)
@@ -125,5 +137,7 @@ def textbee_from_settings() -> TextBeeSender | None:
     if not (settings.TEXTBEE_API_KEY and settings.TEXTBEE_DEVICE_ID):
         return None
     return TextBeeSender(
-        settings.TEXTBEE_API_KEY, settings.TEXTBEE_DEVICE_ID, base_url=settings.TEXTBEE_BASE_URL
+        settings.TEXTBEE_API_KEY,
+        settings.TEXTBEE_DEVICE_ID,
+        base_url=settings.TEXTBEE_BASE_URL or DEFAULT_BASE_URL,  # empty: TextBee's own API
     )
