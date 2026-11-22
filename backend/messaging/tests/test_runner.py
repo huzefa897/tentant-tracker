@@ -7,7 +7,7 @@ at 06:00 UTC, 11:30 in India, the default send time, unless a test says otherwis
 from datetime import UTC, date, datetime, timedelta
 from unittest import mock
 
-from django.db import connection
+from django.db import IntegrityError, connection
 from django.db.models import F
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
@@ -391,6 +391,17 @@ class SendingTests(RunnerTestCase):
 
         self.assertEqual(self.messages().count(), 1)
         self.assertEqual(len(self.sender.sent), 1)
+
+
+    def test_another_integrity_error_is_recorded_not_dropped(self):
+        with mock.patch.object(
+            RentDueReminderItem.objects, "bulk_create", side_effect=IntegrityError("other")
+        ):
+            result = self.run_on(nov(11))
+
+        self.assertIn(f"Tenancy {self.zahid.pk}: IntegrityError", result.run.errors)
+        self.assertFalse(self.messages().exists())
+        self.assertEqual(self.sender.sent, [])
 
 
 class UntextableTests(RunnerTestCase):

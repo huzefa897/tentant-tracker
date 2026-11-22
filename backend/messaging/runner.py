@@ -80,6 +80,13 @@ class RunResult:
     planned: list[PlannedMessage] = field(default_factory=list)
 
 
+def violated(exc: IntegrityError) -> str | None:
+    """The name of the constraint a write broke, as PostgreSQL reports it (psycopg's
+    diagnostics), or None when it says none."""
+    diag = getattr(exc.__cause__, "diag", None)
+    return getattr(diag, "constraint_name", None)
+
+
 def can_text(number: str) -> bool:
     if not number:  # validate_phone_number lets an empty value through
         return False
@@ -226,7 +233,9 @@ class MessageRunner:
                     body="",
                     provider=self.sender.provider,
                 )
-        except IntegrityError:
+        except IntegrityError as exc:
+            if violated(exc) != "message_skipped_once_a_day":
+                raise  # recorded on the run as this tenancy's error
             return  # already recorded today
         run.skipped += 1
 
@@ -275,7 +284,9 @@ class MessageRunner:
                         for r in reminders
                     ]
                 )
-        except IntegrityError:
+        except IntegrityError as exc:
+            if violated(exc) != "one_reminder_per_period_and_stage":
+                raise  # anything else is recorded on the run as this tenancy's error
             return None  # another run reserved one of them first
         return message, reminders
 
