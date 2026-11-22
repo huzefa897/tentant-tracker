@@ -1047,6 +1047,25 @@ describe('RentEntryDetailsView for sending an SMS reminder', () => {
     expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
   })
 
+  it('says so, with a retry, when it cannot tell whether SMS is offered', async () => {
+    vi.mocked(messagingService.getPropertyMessaging).mockRejectedValueOnce(
+      new ApiError('network', 'down'),
+    )
+    await openDetails('tenant-001', 'sep')
+
+    const error = view!.get('[data-testid="reminder-status-error"]')
+    expect(error.get('[role="alert"]').text()).toContain(
+      "Couldn't check whether an SMS can be sent",
+    )
+    expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
+
+    await error.get('button').trigger('click')
+    await flushPromises()
+
+    expect(view!.find('[data-testid="reminder-status-error"]').exists()).toBe(false)
+    expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(true)
+  })
+
   it('hides it on a paid bill', async () => {
     addFakePayment(makePayment({ id: 'p-all', entryId: 'sep', amount: 14712.5 }))
     await openDetails('tenant-001', 'sep')

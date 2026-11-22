@@ -34,7 +34,16 @@ export function resetMessagingService() {
     .mockReset()
     .mockImplementation(async (_propertyId: string, _tenancyId: string, entryId: string) => {
       if (fakeMessaging.sent.includes(entryId)) {
-        throw new ApiError('conflict', 'Conflict', 'already_sent_today')
+        throw new ApiError(
+          'conflict',
+          'Conflict',
+          'already_sent_today',
+          {},
+          {
+            code: 'already_sent_today',
+            detail: 'A reminder for this bill was already sent today.',
+          },
+        )
       }
       if (fakeMessaging.outcome.outcome !== 'failed') fakeMessaging.sent.push(entryId)
       return { ...fakeMessaging.outcome }

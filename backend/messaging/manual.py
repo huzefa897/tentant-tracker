@@ -33,7 +33,7 @@ REFUSALS = {
     "entry_void": "This bill is void: it owes nothing.",
     "entry_paid": "This bill is paid: nothing is outstanding.",
     "no_rental_period": "This bill has no due date to remind about.",
-    "number_untextable": "The tenant's mobile number can't be texted.",
+    "number_untextable": "The tenant's mobile number can't be texted. Check it on their page.",
     "already_sent_today": "A reminder for this bill was already sent today.",
 }
 

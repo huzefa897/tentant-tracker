@@ -10,18 +10,6 @@ export const REMINDER_ERROR_MESSAGE = "The SMS couldn't be sent. Try again."
 export const REMINDER_UNCONFIRMED_MESSAGE =
   "We couldn't confirm the SMS was sent. Trying again won't text the tenant twice today."
 
-// What nothing-was-sent means, in the app's words, by the backend's code.
-const REFUSALS: Record<string, string> = {
-  messaging_off: 'Messaging is off for this property.',
-  server_off: 'Messaging is off on the server.',
-  provider_not_set_up: "SMS isn't set up on the server yet.",
-  entry_void: 'This bill is void: it owes nothing.',
-  entry_paid: 'This bill is paid: nothing is outstanding.',
-  number_untextable: "The tenant's mobile number can't be texted. Check it on their page.",
-  no_rental_period: 'This bill has no due date to remind about.',
-  already_sent_today: 'A reminder for this bill was already sent today.',
-}
-
 export class ReminderSendError extends Error {
   constructor(message: string) {
     super(message)
@@ -67,6 +55,12 @@ export const useMessagingStore = defineStore('messaging', () => {
     return request
   }
 
+  // The property's answer couldn't be loaded, so whether Send SMS is offered isn't known: the
+  // page says so rather than quietly leaving the button out.
+  function loadFailed(propertyId: string | null): boolean {
+    return Boolean(propertyId) && byProperty.value[propertyId as string]?.status === 'error'
+  }
+
   // Offered only once the backend has said so: on, set up, and the role may send.
   function canSendFor(propertyId: string | null): boolean {
     const entry = propertyId ? byProperty.value[propertyId] : undefined
@@ -92,13 +86,16 @@ export const useMessagingStore = defineStore('messaging', () => {
     byProperty.value = {}
   }
 
-  return { byProperty, load, canSendFor, sendBillReminder, reset }
+  return { byProperty, load, loadFailed, canSendFor, sendBillReminder, reset }
 })
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    const refusal = error.kind === 'conflict' && error.code ? REFUSALS[error.code] : undefined
-    if (refusal) return refusal
+    // Nothing was sent: the backend says why, in words for people (messaging/manual.py).
+    if (error.kind === 'conflict' && error.code) {
+      const detail = error.details.detail
+      return typeof detail === 'string' && detail.trim() ? detail : REMINDER_ERROR_MESSAGE
+    }
     if (error.kind === 'forbidden') return 'Only owners and managers can text tenants.'
     if (error.kind === 'rate-limited') return RATE_LIMITED_MESSAGE
   }

@@ -68,9 +68,11 @@ describe('useMessagingStore', () => {
 
       await store.load(testProperty.id)
       expect(store.canSendFor(testProperty.id)).toBe(false)
+      expect(store.loadFailed(testProperty.id)).toBe(true)
 
       await store.load(testProperty.id)
       expect(store.canSendFor(testProperty.id)).toBe(true)
+      expect(store.loadFailed(testProperty.id)).toBe(false)
     })
 
     it('asks again on each visit, so a change in admin shows, keeping the answer meanwhile', async () => {
@@ -125,12 +127,20 @@ describe('useMessagingStore', () => {
 
     it.each([
       [
-        new ApiError('conflict', 'x', 'already_sent_today'),
+        new ApiError(
+          'conflict',
+          'x',
+          'already_sent_today',
+          {},
+          {
+            detail: 'A reminder for this bill was already sent today.',
+          },
+        ),
         'A reminder for this bill was already sent today.',
       ],
       [
-        new ApiError('conflict', 'x', 'number_untextable'),
-        "The tenant's mobile number can't be texted. Check it on their page.",
+        new ApiError('conflict', 'x', 'something_new', {}, { detail: 'A reason added later.' }),
+        'A reason added later.',
       ],
       [new ApiError('conflict', 'x', 'something_new'), REMINDER_ERROR_MESSAGE],
       [new ApiError('forbidden', 'x'), 'Only owners and managers can text tenants.'],

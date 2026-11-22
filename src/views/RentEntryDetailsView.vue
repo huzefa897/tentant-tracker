@@ -277,6 +277,17 @@ const canSendReminder = computed(
     entry.value?.billStatus === 'active' &&
     entry.value.status !== 'paid',
 )
+// Whether Send SMS is offered couldn't be loaded: said, with a retry, on a bill it could be for.
+const reminderStatusFailed = computed(
+  () =>
+    messagingStore.loadFailed(accessStore.selectedPropertyId) &&
+    entry.value?.billStatus === 'active' &&
+    entry.value.status !== 'paid',
+)
+function retryReminderStatus() {
+  const propertyId = accessStore.selectedPropertyId
+  if (propertyId) void messagingStore.load(propertyId)
+}
 const reminderDialogOpen = ref(false)
 const sendingReminder = ref(false)
 const reminderError = ref<string | null>(null)
@@ -579,6 +590,17 @@ function goToHistory() {
             <PhChatText aria-hidden="true" />
             Send SMS
           </Button>
+        </div>
+
+        <div
+          v-if="reminderStatusFailed"
+          class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm"
+          data-testid="reminder-status-error"
+        >
+          <p class="text-destructive" role="alert">
+            Couldn't check whether an SMS can be sent for this bill.
+          </p>
+          <Button variant="outline" size="sm" @click="retryReminderStatus">Try again</Button>
         </div>
 
         <div
