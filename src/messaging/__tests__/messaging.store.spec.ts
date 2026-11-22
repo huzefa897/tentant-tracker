@@ -3,25 +3,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { accessService } from '@/services/access.service'
 import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
-import { messagingService } from '@/services/messaging.service'
+import { messagingService } from '@/messaging/messaging.service'
+import { MessageSendError, useMessagingStore } from '@/messaging/messaging.store'
+import { SEND_ERROR_MESSAGE, SEND_UNCONFIRMED_MESSAGE } from '@/messaging/utils/wording'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
-import {
-  REMINDER_ERROR_MESSAGE,
-  REMINDER_UNCONFIRMED_MESSAGE,
-  ReminderSendError,
-  useMessagingStore,
-} from '@/stores/messaging'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService, signInAs } from '@/test/mocks/authService'
-import { fakeMessaging, resetMessagingService } from '@/test/mocks/messagingService'
+import { fakeMessaging, resetMessagingService } from '@/messaging/testing/fakeMessagingService'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 vi.mock('@/services/access.service', () => import('@/test/mocks/accessService'))
-vi.mock('@/services/messaging.service', () => import('@/test/mocks/messagingService'))
+vi.mock('@/messaging/messaging.service', () => import('@/messaging/testing/fakeMessagingService'))
 
 const getPropertyMessaging = vi.mocked(messagingService.getPropertyMessaging)
-const sendBillReminder = vi.mocked(messagingService.sendBillReminder)
+const sendMessage = vi.mocked(messagingService.sendMessage)
+const BILL_REMINDER = { kind: 'bill_reminder', entryId: 'sep' } as const
 
 async function withProperty() {
   vi.mocked(accessService.getMe).mockResolvedValue(identityWith([testProperty]))
@@ -106,23 +103,23 @@ describe('useMessagingStore', () => {
     })
   })
 
-  describe('sendBillReminder', () => {
+  describe('send', () => {
     it('sends for the selected property and returns the outcome', async () => {
       const store = await withProperty()
 
-      await expect(store.sendBillReminder('tenant-001', 'sep')).resolves.toEqual({
+      await expect(store.send('tenant-001', BILL_REMINDER)).resolves.toEqual({
         outcome: 'sent',
         reason: '',
       })
-      expect(sendBillReminder).toHaveBeenCalledWith(testProperty.id, 'tenant-001', 'sep')
+      expect(sendMessage).toHaveBeenCalledWith(testProperty.id, 'tenant-001', BILL_REMINDER)
     })
 
     it('needs a property', async () => {
       const store = useMessagingStore()
-      await expect(store.sendBillReminder('tenant-001', 'sep')).rejects.toThrow(
+      await expect(store.send('tenant-001', BILL_REMINDER)).rejects.toThrow(
         'Choose a property first.',
       )
-      expect(sendBillReminder).not.toHaveBeenCalled()
+      expect(sendMessage).not.toHaveBeenCalled()
     })
 
     it.each([
@@ -142,17 +139,17 @@ describe('useMessagingStore', () => {
         new ApiError('conflict', 'x', 'something_new', {}, { detail: 'A reason added later.' }),
         'A reason added later.',
       ],
-      [new ApiError('conflict', 'x', 'something_new'), REMINDER_ERROR_MESSAGE],
+      [new ApiError('conflict', 'x', 'something_new'), SEND_ERROR_MESSAGE],
       [new ApiError('forbidden', 'x'), 'Only owners and managers can text tenants.'],
       [new ApiError('rate-limited', 'x'), RATE_LIMITED_MESSAGE],
-      [new ApiError('network', 'x'), REMINDER_UNCONFIRMED_MESSAGE],
+      [new ApiError('network', 'x'), SEND_UNCONFIRMED_MESSAGE],
     ])('explains %s', async (error, message) => {
       const store = await withProperty()
-      sendBillReminder.mockRejectedValueOnce(error)
+      sendMessage.mockRejectedValueOnce(error)
 
-      const thrown = await store.sendBillReminder('tenant-001', 'sep').catch((e) => e)
+      const thrown = await store.send('tenant-001', BILL_REMINDER).catch((e) => e)
 
-      expect(thrown).toBeInstanceOf(ReminderSendError)
+      expect(thrown).toBeInstanceOf(MessageSendError)
       expect(thrown.message).toBe(message)
     })
   })

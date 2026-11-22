@@ -140,7 +140,7 @@ class MessageType(models.TextChoices):
 class ReminderStage(models.TextChoices):
     DUE = "due", "Due"
     FOLLOW_UP = "follow_up", "Follow-up"
-    # Sent from the bill's page by an owner or manager (messaging/manual.py). Never counts as
+    # Sent by hand by an owner or manager (messaging/kinds/bill_reminder.py). Never counts as
     # the Due or Follow-up, which still go out by themselves.
     MANUAL = "manual", "Sent by hand"
 
@@ -254,8 +254,8 @@ class Message(models.Model):
 class RentDueReminderItem(models.Model):
     """One month at one stage, covered by a Rent Due Reminder. At most one held per month for
     each automatic stage: the database refuses a second, so a repeated or overlapping run can't
-    send twice. Sent by hand ones are limited to one a day instead (messaging/manual.py).
-    A message the provider refused (`failed`, so nothing went) releases its items, which keep
+    send twice. Sent by hand ones are limited to one a day instead
+    (messaging/kinds/bill_reminder.py). A message the provider refused (`failed`, so nothing went) releases its items, which keep
     the history and let a later run remind about the month again."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

@@ -2,7 +2,7 @@ import { useRouter } from 'vue-router'
 
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
-import { useMessagingStore } from '@/stores/messaging'
+import { useMessagingStore } from '@/messaging'
 import { useRentEntryStore } from '@/stores/rentEntry'
 import { useTenantStore } from '@/stores/tenant'
 

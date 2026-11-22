@@ -1,6 +1,11 @@
 import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
-import type { BillReminderResult, MessageOutcome, PropertyMessaging } from '@/types/messaging'
+import type {
+  MessageOutcome,
+  MessageRequest,
+  PropertyMessaging,
+  SendMessageResult,
+} from '@/messaging/types'
 
 const OUTCOMES: readonly MessageOutcome[] = ['sent', 'failed', 'unknown']
 
@@ -34,19 +39,23 @@ export const messagingService = {
     return { enabled, ready, canSend }
   },
 
-  // Texts the tenant a reminder about this bill now. Errors: 'forbidden'; 'conflict' with code
-  // 'messaging_off', 'server_off', 'provider_not_set_up', 'entry_void', 'entry_paid', 'number_untextable',
-  // 'no_rental_period' or 'already_sent_today' (nothing was sent). At most one a day per bill,
-  // so retrying after no answer can't text twice.
-  async sendBillReminder(
+  // POST .../tenancies/{id}/messages/: texts the tenant one message of this kind now (a bill's
+  // reminder: { kind: 'bill_reminder', entryId }). Errors: 'forbidden'; 'invalid-request' (an
+  // unknown kind or a missing field); 'not-found' (another tenancy's bill); 'conflict' with a
+  // code when nothing was sent: 'messaging_off', 'server_off', 'provider_not_set_up',
+  // 'number_untextable', or the kind's own ('entry_void', 'entry_paid', 'no_rental_period',
+  // 'already_sent_today'). Each kind guards against sending twice (a bill's reminder: one a
+  // day), so retrying after no answer can't text twice.
+  async sendMessage(
     propertyId: string,
     tenancyId: string,
-    entryId: string,
-  ): Promise<BillReminderResult> {
+    request: MessageRequest,
+  ): Promise<SendMessageResult> {
     let response
     try {
       response = await api.post(
-        `${propertyUrl(propertyId)}/tenancies/${encodeURIComponent(tenancyId)}/entries/${encodeURIComponent(entryId)}/reminder/`,
+        `${propertyUrl(propertyId)}/tenancies/${encodeURIComponent(tenancyId)}/messages/`,
+        request,
       )
     } catch (error) {
       throw toApiError(error)
