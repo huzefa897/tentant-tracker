@@ -11,10 +11,33 @@ from messaging.senders.http import urllib_post
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         received = self.rfile.read(int(self.headers["Content-Length"]))
+        if self.path.startswith("/redirect/"):  # /redirect/<status>?to=<url>
+            status, target = self.path.removeprefix("/redirect/").split("?to=", 1)
+            self.send_response(int(status))
+            self.send_header("Location", target)
+            self.end_headers()
+            return
         status = 429 if self.path == "/limit" else 200
         self.send_response(status)
         self.end_headers()
         self.wfile.write(received.upper())
+
+    def log_message(self, *args):
+        pass
+
+
+class Recorder(BaseHTTPRequestHandler):
+    """Another origin: records every request that reaches it, whatever the method."""
+
+    requests: list = []
+
+    def _record(self):
+        type(self).requests.append(self.command)
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'{"data": {"success": true, "smsBatchId": "elsewhere"}}')
+
+    do_GET = do_POST = _record
 
     def log_message(self, *args):
         pass
@@ -43,6 +66,27 @@ class UrllibPostTests(SimpleTestCase):
         response = urllib_post(f"{self.base}/limit", {}, b"hello", 5)
 
         self.assertEqual((response.status, response.body), (429, b"HELLO"))
+
+    def test_never_follows_a_redirect(self):  # it would resend the API key to the new place
+        elsewhere = HTTPServer(("127.0.0.1", 0), Recorder)
+        threading.Thread(target=elsewhere.serve_forever, daemon=True).start()
+        target = f"http://127.0.0.1:{elsewhere.server_port}/steal"
+        Recorder.requests = []
+        try:
+            for status in (301, 302, 303, 307, 308):
+                with self.subTest(status=status):
+                    response = urllib_post(
+                        f"{self.base}/redirect/{status}?to={target}",
+                        {"x-api-key": "test-key-not-real"},
+                        b"hello",
+                        5,
+                    )
+
+                    self.assertEqual(response.status, status)
+            self.assertEqual(Recorder.requests, [])
+        finally:
+            elsewhere.shutdown()
+            elsewhere.server_close()
 
     def test_no_server_raises(self):
         port = self.server.server_port
