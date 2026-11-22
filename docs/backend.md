@@ -7,7 +7,7 @@ Feature rules live in their own docs: sign-in and property access in [auth-and-a
 ## Setup and conventions
 
 - Settings come from the gitignored `backend/.env`; every variable is listed in `backend/.env.example`. Add new ones to both.
-- Apps: `accounts`, `properties` (properties, memberships, tenancies), `billing` (rent entries, payments). Tests in `tests.py` or a `tests/` package per app; mock `verify_firebase_token`, never call live Firebase.
+- Apps: `accounts`, `properties` (properties, memberships, tenancies), `billing` (rent entries, payments), `messaging` (texting tenants: [messaging.md](messaging.md)). A new app must also be added to `backend/.dockerignore`, an allowlist: the image leaves out anything not on it, and fails to build without it. Tests in `tests.py` or a `tests/` package per app; mock `verify_firebase_token`, never call live Firebase.
 - Add packages with `pipenv install <name>` and commit `Pipfile.lock`.
 - API JSON is camelCase with explicit serializer fields; never expose whole models.
 - DRF requires authentication by default; a public endpoint opts out with `AllowAny` and `authentication_classes([])` (only `/api/v1/health/` and `/api/v1/ready/` today). CORS is not authentication.
@@ -15,7 +15,7 @@ Feature rules live in their own docs: sign-in and property access in [auth-and-a
 - Role permissions live in `properties/roles.py` (`role_can`), never in Django Groups (hidden: they're global, not per property). Owners can do everything; managers manage tenants, record, issue receipts for and reverse payments, record and correct meter readings, but can't void or correct bills, or manage the property or its members.
 - Every API request is rate limited (per address before authentication, then per person, writes more strictly; `config/throttling.py`), and admin login failures are throttled (`config/middleware.py`). Production settings (HTTPS, HSTS, secure cookies, admin path, logging) come from the environment. Details and the rules for changes: [security.md](security.md).
 - **Health:** `/api/v1/health/` says the app responds; `/api/v1/ready/` also checks the database (503 `{"status": "unavailable"}`, nothing more, when it can't). Both are public and safe to ping from an uptime monitor: they have their own per-address limit, counted in memory so pings never load the database ([security.md](security.md) item 12). Every `/api/` response carries `Cache-Control: no-store, private`.
-- **Production** runs the `backend/Dockerfile` image (Gunicorn, WhiteNoise for admin's static files) behind Caddy: [deployment.md](deployment.md). Management commands: `ledger_summary` (counts, totals and checksums, compared by the restore test), `sheet_to_ledger` and `import_legacy_ledger` ([data-import.md](data-import.md)).
+- **Production** runs the `backend/Dockerfile` image (Gunicorn, WhiteNoise for admin's static files) behind Caddy: [deployment.md](deployment.md). Management commands: `ledger_summary` (counts, totals and checksums, compared by the restore test), `sheet_to_ledger` and `import_legacy_ledger` ([data-import.md](data-import.md)), `send_messages` ([messaging.md](messaging.md#running-it)).
 
 ## Talking to it from the app
 

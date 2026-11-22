@@ -1,0 +1,5 @@
+# Only encrypted dumps (*.dump.age) belong here. Never commit a decrypted one, or the key.
+*.dump
+*.dump.partial
+key.txt
+*.key

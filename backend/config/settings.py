@@ -96,6 +96,30 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 
+# Messaging (docs/messaging.md): each property picks its provider in admin; the providers'
+# credentials are here. Set them in production only: development, CI and restored backups hold
+# real tenants' numbers, and a provider without its credentials sends nothing.
+# The server's own switch, off by default: nothing is texted from here until it's "true", whatever
+# the properties and credentials say. Turning it off stops all texting at once.
+MESSAGING_ENABLED = env_bool("MESSAGING_ENABLED")
+# TextBee: the API key and the phone's device id, from its dashboard. Secrets: never commit
+# or log them.
+TEXTBEE_API_KEY = os.getenv("TEXTBEE_API_KEY", "").strip()
+TEXTBEE_DEVICE_ID = os.getenv("TEXTBEE_DEVICE_ID", "").strip()
+# Empty (the default) uses TextBee's own API (messaging/senders/textbee.py DEFAULT_BASE_URL).
+TEXTBEE_BASE_URL = os.getenv("TEXTBEE_BASE_URL", "").strip()
+# The secret a scheduler (cron-job.org) sends to POST /api/v1/messaging/run/, as
+# `Authorization: Bearer <token>`. Empty (the default) turns the endpoint off (404). At least
+# 32 characters: `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+MESSAGING_RUN_TOKEN = os.getenv("MESSAGING_RUN_TOKEN", "").strip()
+if MESSAGING_RUN_TOKEN and len(MESSAGING_RUN_TOKEN) < 32:
+    raise ImproperlyConfigured("MESSAGING_RUN_TOKEN must be at least 32 characters.")
+# A run from the endpoint starts no new message after this many seconds: with the last send
+# (up to 10) and the run's own reads and writes it still ends well inside Gunicorn's 30-second
+# timeout, which would otherwise kill it mid-send and leave that message `queued` for good.
+# The rest go at the next run.
+MESSAGING_RUN_TIME_BUDGET = 10.0
+
 # Where Django admin is served. Set another path in production so it isn't at the default
 # address bots try; its logins are throttled either way (config/middleware.py).
 ADMIN_PATH = os.getenv("DJANGO_ADMIN_PATH", "admin/").strip("/") + "/"
@@ -113,6 +137,7 @@ INSTALLED_APPS = [
     "accounts",
     "properties",
     "billing",
+    "messaging",
 ]
 
 MIDDLEWARE = [
@@ -286,6 +311,8 @@ REST_FRAMEWORK = {
         # /health/ and /ready/, per address and process: room for monitors (and Docker's own
         # check every 30 seconds), not for floods.
         "health": os.getenv("DJANGO_THROTTLE_HEALTH", "10/minute"),
+        # POST /api/v1/messaging/run/, per address: an hourly scheduler and a few manual runs.
+        "messaging_run": os.getenv("DJANGO_THROTTLE_MESSAGING_RUN", "12/hour"),
     },
     # How many proxies sit in front of Django, so a client's address is read from
     # X-Forwarded-For rather than the proxy's. 0 (the default) ignores X-Forwarded-For, which
