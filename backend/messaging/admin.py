@@ -179,8 +179,9 @@ class MessagingRunAdmin(ReadOnlyAdmin):
         "unknown",
         "skipped",
         "has_errors",
+        "stopped_early",
     )
-    list_filter = ("trigger", "dry_run", "started_at")
+    list_filter = ("trigger", "dry_run", "stopped_early", "started_at")
     date_hierarchy = "started_at"
 
     @admin.display(description="Errors", boolean=True)

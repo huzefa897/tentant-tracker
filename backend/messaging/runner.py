@@ -18,9 +18,11 @@ the dashboard's reads do.
 """
 
 import logging
+import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from typing import Callable
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -103,10 +105,17 @@ class MessageRunner:
         *,
         trigger: RunTrigger = RunTrigger.COMMAND,
         dry_run: bool = False,
+        time_budget: float | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ):
         self.sender = sender
         self.clock = clock
         self.trigger = trigger
+        # Seconds after which no new tenancy is started (None: no limit). A request has to
+        # finish before Gunicorn's timeout; what's left was never reserved, so the next run
+        # sends it.
+        self.time_budget = time_budget
+        self.monotonic = monotonic
         # Without a provider nothing can be sent, so nothing is reserved either: the months
         # stay due for when one is set.
         self.dry_run = dry_run or not sender.can_send
@@ -114,6 +123,7 @@ class MessageRunner:
     def run(self) -> RunResult:
         # One moment for the whole run, so every property is judged at the same time.
         clock = FixedClock(self.clock.now())
+        started = self.monotonic()
         result = RunResult(
             MessagingRun.objects.create(
                 trigger=self.trigger, dry_run=self.dry_run, provider=self.sender.provider
@@ -124,6 +134,9 @@ class MessageRunner:
             enabled=True, property__is_active=True
         ).select_related("property")
         for settings in enabled:
+            if self._out_of_time(started):  # before the property's own reads and writes
+                result.run.stopped_early = True
+                break
             try:
                 if not settings.send_time_reached(clock):
                     continue
@@ -135,6 +148,9 @@ class MessageRunner:
                 errors.append(f"Property {settings.pk}: {type(exc).__name__}")
                 continue
             for tenancy, months in owed.items():
+                if self._out_of_time(started):
+                    result.run.stopped_early = True
+                    break
                 try:
                     self._tenancy(result, tenancy, months, settings.reminders_start, today)
                 except Exception as exc:  # nor one tenancy
@@ -150,7 +166,7 @@ class MessageRunner:
         ).delete()
         logger.info(
             "Messaging run %s: %s properties, %s planned, %s sent, %s failed, %s unknown, "
-            "%s skipped, %s errors",
+            "%s skipped, %s errors%s",
             run.pk,
             run.properties_checked,
             run.planned,
@@ -159,8 +175,12 @@ class MessageRunner:
             run.unknown,
             run.skipped,
             len(errors),
+            ", stopped early" if run.stopped_early else "",
         )
         return result
+
+    def _out_of_time(self, started: float) -> bool:
+        return self.time_budget is not None and self.monotonic() - started >= self.time_budget
 
     def _tenancy(self, result, tenancy, months, reminders_start, today):
         due = reminders_due(months, today, reminders_start, reminded([m.period_id for m in months]))

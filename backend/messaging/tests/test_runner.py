@@ -558,6 +558,45 @@ class NoProviderTests(RunnerTestCase):
         self.assertIn("now due", result.planned[0].body)
 
 
+class TimeBudgetTests(RunnerTestCase):
+    def setUp(self):
+        super().setUp()
+        self.yusuf = make_tenancy(
+            self.prop, name="Yusuf", flat_number="203", mobile_number=YUSUF,
+            start_date=date(2026, 9, 1),
+        )
+
+    def test_no_budget_sends_everything(self):
+        result = self.run_on(nov(11))
+
+        self.assertEqual(result.run.sent, 2)
+        self.assertFalse(result.run.stopped_early)
+
+    def test_out_of_time_starts_no_new_message_and_the_next_run_sends_it(self):
+        ticks = iter([0, 0, 0, 20])  # started, the property and first tenancy in time, then out
+
+        first = self.run_on(nov(11), time_budget=15, monotonic=lambda: next(ticks))
+
+        self.assertEqual(first.run.sent, 1)
+        self.assertTrue(first.run.stopped_early)
+        self.assertEqual(self.messages().count(), 1)  # the other was never reserved
+
+        second = self.run_on(nov(11), time_budget=15)
+
+        self.assertEqual(second.run.sent, 1)
+        self.assertEqual(len(self.sender.sent), 2)
+
+    def test_out_of_time_starts_no_new_property(self):  # not even its reads and writes
+        ticks = iter([0, 20])  # started, then out of time before the property
+
+        with mock.patch("messaging.runner.owed_months") as owed:
+            result = self.run_on(nov(11), time_budget=15, monotonic=lambda: next(ticks))
+
+        owed.assert_not_called()
+        self.assertTrue(result.run.stopped_early)
+        self.assertEqual(result.run.properties_checked, 0)
+
+
 class RunRecordTests(RunnerTestCase):
     def test_a_quiet_day_still_records_the_run(self):
         result = self.run_on(nov(5))
