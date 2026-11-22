@@ -37,11 +37,12 @@ def owed_months(prop: Property, today: date, reminders_start: date) -> dict[Tena
 
 
 def reminded(period_ids) -> set[tuple[UUID, str]]:
-    """The (period id, stage) pairs that already have a reminder item, sent or not."""
+    """The (period id, stage) pairs that already have a reminder item held: sent, queued or
+    unknown. A failed message's items are released, so its months can be reminded again."""
     return set(
-        RentDueReminderItem.objects.filter(rental_period_id__in=period_ids).values_list(
-            "rental_period_id", "stage"
-        )
+        RentDueReminderItem.objects.filter(
+            rental_period_id__in=period_ids, released_at__isnull=True
+        ).values_list("rental_period_id", "stage")
     )
 
 
