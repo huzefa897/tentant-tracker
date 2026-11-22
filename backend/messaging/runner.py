@@ -127,7 +127,8 @@ class MessageRunner:
             enabled=True, property__is_active=True
         ).select_related("property")
         for settings in enabled:
-            if result.run.stopped_early:
+            if self._out_of_time(started):  # before the property's own reads and writes
+                result.run.stopped_early = True
                 break
             try:
                 if not settings.send_time_reached(clock):

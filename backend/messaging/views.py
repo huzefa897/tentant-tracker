@@ -17,7 +17,7 @@ from rest_framework.decorators import (
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
-from config.throttling import MessagingRunRateThrottle
+from config.throttling import AddressRateThrottle
 
 from .clock import SystemClock
 from .models import RunTrigger
@@ -25,10 +25,25 @@ from .runner import MessageRunner
 
 
 def _token_matches(request) -> bool:
+    if not settings.MESSAGING_RUN_TOKEN:
+        return False
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-    return scheme == "Bearer" and hmac.compare_digest(
+    # Auth schemes are case-insensitive (RFC 9110), so "bearer" is as good as "Bearer".
+    return scheme.lower() == "bearer" and hmac.compare_digest(
         token.strip().encode(), settings.MESSAGING_RUN_TOKEN.encode()
     )
+
+
+class MessagingRunRateThrottle(AddressRateThrottle):
+    """Per address (DJANGO_THROTTLE_MESSAGING_RUN). Only refused requests count: guessing the
+    token stays slow, but someone who knows the URL (on cron-job.org's shared addresses, say)
+    can't use up the limit and lock the real scheduler out. A run is safe to repeat, so the
+    token's own runs need no limit."""
+
+    scope = "messaging_run"
+
+    def allow_request(self, request, view):
+        return _token_matches(request) or super().allow_request(request, view)
 
 
 @api_view(["POST"])

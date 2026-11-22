@@ -543,7 +543,7 @@ class TimeBudgetTests(RunnerTestCase):
         self.assertFalse(result.run.stopped_early)
 
     def test_out_of_time_starts_no_new_message_and_the_next_run_sends_it(self):
-        ticks = iter([0, 0, 20, 20])  # started, first tenancy in time, then out of time
+        ticks = iter([0, 0, 0, 20])  # started, the property and first tenancy in time, then out
 
         first = self.run_on(nov(11), time_budget=15, monotonic=lambda: next(ticks))
 
@@ -555,6 +555,16 @@ class TimeBudgetTests(RunnerTestCase):
 
         self.assertEqual(second.run.sent, 1)
         self.assertEqual(len(self.sender.sent), 2)
+
+    def test_out_of_time_starts_no_new_property(self):  # not even its reads and writes
+        ticks = iter([0, 20])  # started, then out of time before the property
+
+        with mock.patch("messaging.runner.owed_months") as owed:
+            result = self.run_on(nov(11), time_budget=15, monotonic=lambda: next(ticks))
+
+        owed.assert_not_called()
+        self.assertTrue(result.run.stopped_early)
+        self.assertEqual(result.run.properties_checked, 0)
 
 
 class RunRecordTests(RunnerTestCase):

@@ -48,17 +48,6 @@ class AddressRateThrottle(FailOpenMixin, throttling.SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
 
 
-class MessagingRunRateThrottle(FailOpenMixin, throttling.SimpleRateThrottle):
-    """The scheduler's endpoint (POST /api/v1/messaging/run/), per address and counted before
-    its token is checked, so guessing is slow too. A run is safe to repeat, so the limit only
-    keeps a flood from turning into a flood of runs."""
-
-    scope = "messaging_run"
-
-    def get_cache_key(self, request, view):
-        return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
-
-
 class HealthCheckRateThrottle(throttling.SimpleRateThrottle):
     """The public health and readiness checks, per address: a stricter limit of their own,
     counted in this process's memory (the "health" cache), never in the shared PostgreSQL
