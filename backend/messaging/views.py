@@ -25,9 +25,10 @@ from config.throttling import AddressRateThrottle
 from properties.roles import Capability, role_can
 
 from .clock import SystemClock
-from .manual import CannotSend, send_bill_reminder
+from .kinds import BILL_REMINDER, KINDS, kind_named
 from .models import PropertyMessagingSettings, RunTrigger
 from .runner import MessageRunner
+from .sending import CannotSend, InvalidRequest, send_now
 from .senders import registry
 
 
@@ -115,28 +116,60 @@ class PropertyMessagingView(ScopedLookupMixin, views.APIView):
         )
 
 
+def sent_response(sent) -> Response:
+    message = sent.message
+    return Response(
+        {
+            "status": message.status,
+            "reason": message.reason,
+            "sentAt": message.attempted_at.isoformat() if message.attempted_at else None,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+class SendMessageView(ScopedLookupMixin, views.APIView):
+    """POST .../tenancies/{id}/messages/ {"kind", ...}: texts the tenant one message now
+    (owners and managers). The kind says what it's about: `bill_reminder` with `entryId`, a
+    bill of this tenancy (messaging/kinds/). 201 {"status", "reason", "sentAt"}, the message's
+    outcome: `sent`, `failed` (send it again) or `unknown` (it may have gone: check before
+    sending again; the history is in admin). 400 for an unknown kind or a missing field, 404
+    for another tenancy's bill, 409 with a code when nothing was sent (messaging off, SMS not
+    set up, a number that can't be texted, or the kind's own reason). No Idempotency-Key: each
+    kind guards against sending twice (a bill's reminder: one a day)."""
+
+    def post(self, request, property_id, tenancy_id):
+        tenancy = self.get_tenancy()
+        if not role_can(self.get_property().role, Capability.SEND_MESSAGES):
+            raise exceptions.PermissionDenied(SEND_FORBIDDEN)
+        data = request.data if isinstance(request.data, dict) else {}
+        kind = kind_named(data.get("kind"))
+        if kind is None:
+            raise exceptions.ValidationError({"kind": [f"Choose one of: {', '.join(KINDS)}."]})
+        try:
+            subject = kind.parse(tenancy, data)
+            sent = send_now(tenancy, kind, subject, request.user, SystemClock())
+        except InvalidRequest as error:
+            raise exceptions.ValidationError({error.field: [error.detail]}) from None
+        except CannotSend as error:
+            raise CannotSendError(error) from None
+        return sent_response(sent)
+
+
 class BillReminderView(ScopedLookupMixin, views.APIView):
-    """POST .../tenancies/{id}/entries/{id}/reminder/: texts the tenant a reminder about this
-    bill now (owners and managers). 201 {"status", "reason", "sentAt"}, the message's outcome:
-    `sent`, `failed` (send it again) or `unknown` (it may have gone: check before sending
-    again; the history is in admin). 409 with a code when nothing was sent: messaging off, SMS
-    not set up, a void or paid bill, a number that can't be texted, already sent today.
-    No Idempotency-Key: one a day per bill is the guard."""
+    """POST .../tenancies/{id}/entries/{id}/reminder/: the old way to send a bill's reminder,
+    kept for app builds still loaded in people's tabs while a release rolls out (the API and
+    the static site deploy separately, and an open tab keeps its build until reloaded). The
+    same as POST .../messages/ {"kind": "bill_reminder", "entryId"}: same access, checks,
+    answer and codes. Remove it once no build in use calls it (docs/messaging.md)."""
 
     def post(self, request, property_id, tenancy_id, entry_id):
         entry = self.get_entry()
         if not role_can(self.get_property().role, Capability.SEND_MESSAGES):
             raise exceptions.PermissionDenied(SEND_FORBIDDEN)
         try:
-            sent = send_bill_reminder(entry, request.user, SystemClock())
+            sent = send_now(entry.tenancy, BILL_REMINDER, entry, request.user, SystemClock())
         except CannotSend as error:
             raise CannotSendError(error) from None
-        message = sent.message
-        return Response(
-            {
-                "status": message.status,
-                "reason": message.reason,
-                "sentAt": message.attempted_at.isoformat() if message.attempted_at else None,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        return sent_response(sent)
+

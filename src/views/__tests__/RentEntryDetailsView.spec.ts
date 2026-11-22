@@ -14,11 +14,11 @@ import {
 } from '@/stores/rentEntry'
 import { makeEntry, makePayment, openPage } from '@/test/rentEntries'
 import { accessService } from '@/services/access.service'
-import { messagingService } from '@/services/messaging.service'
+import { messagingService } from '@/messaging/messaging.service'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService } from '@/test/mocks/authService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
-import { fakeMessaging, resetMessagingService } from '@/test/mocks/messagingService'
+import { fakeMessaging, resetMessagingService } from '@/messaging/testing/fakeMessagingService'
 import { fakeReceipts } from '@/test/mocks/receiptService'
 import { resetTenantService, testTenants } from '@/test/mocks/tenantService'
 import { downloadReceiptPdf } from '@/utils/receiptDownload'
@@ -29,7 +29,7 @@ vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
 vi.mock('@/services/receipt.service', () => import('@/test/mocks/receiptService'))
-vi.mock('@/services/messaging.service', () => import('@/test/mocks/messagingService'))
+vi.mock('@/messaging/messaging.service', () => import('@/messaging/testing/fakeMessagingService'))
 vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 const getEntry = vi.mocked(rentEntryService.getEntry)
@@ -997,7 +997,7 @@ describe('RentEntryDetailsView for voiding and correcting bills', () => {
 
 describe('RentEntryDetailsView for sending an SMS reminder', () => {
   const body = new DOMWrapper(document.body)
-  const sendApi = vi.mocked(messagingService.sendBillReminder)
+  const sendApi = vi.mocked(messagingService.sendMessage)
 
   function dialog() {
     return body.get('[role="dialog"]')
@@ -1092,7 +1092,10 @@ describe('RentEntryDetailsView for sending an SMS reminder', () => {
     await dialog().get('form').trigger('submit')
     await flushPromises()
 
-    expect(sendApi).toHaveBeenCalledWith(testProperty.id, 'tenant-001', 'sep')
+    expect(sendApi).toHaveBeenCalledWith(testProperty.id, 'tenant-001', {
+      kind: 'bill_reminder',
+      entryId: 'sep',
+    })
     expect(body.find('[role="dialog"]').exists()).toBe(false)
     expect(view!.get('[role="status"]').text()).toMatch(/^SMS reminder sent to .+\.$/)
   })

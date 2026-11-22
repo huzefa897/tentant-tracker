@@ -1,22 +1,22 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 
-import SendReminderForm from '@/components/messaging/SendReminderForm.vue'
+import SendMessageForm from '@/messaging/components/SendMessageForm.vue'
 
-const tenant = { name: 'Test Tenant', flatNumber: '202' }
-const entry = { billingMonth: '2026-09', outstanding: 12500 }
+const note = 'They get an SMS now.'
 
 function mountForm(props: { sending?: boolean; sendError?: string | null } = {}) {
-  return mount(SendReminderForm, { props: { tenant, entry, ...props } })
+  return mount(SendMessageForm, {
+    props: { note, ...props },
+    slots: { default: '<p data-testid="summary">About September</p>' },
+  })
 }
 
-describe('SendReminderForm', () => {
-  it('shows who is texted about which bill', () => {
+describe('SendMessageForm', () => {
+  it('shows what it is about and what they will get', () => {
     const form = mountForm()
-    const summary = form.get('[data-testid="reminder-bill"]').text()
-    expect(summary).toContain('Test Tenant · Flat 202')
-    expect(summary).toContain('September 2026')
-    expect(summary).toContain('₹12,500')
+    expect(form.get('[data-testid="summary"]').text()).toBe('About September')
+    expect(form.text()).toContain(note)
     expect(form.find('[role="alert"]').exists()).toBe(false)
   })
 

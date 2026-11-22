@@ -3,14 +3,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/services/api'
 import { ApiError } from '@/services/apiError'
-import { messagingService } from '@/services/messaging.service'
+import { messagingService } from '@/messaging/messaging.service'
 
 vi.mock('@/services/auth.service', () => import('@/test/mocks/authService'))
 
 const PROPERTY_ID = '6f1c2a4e-0000-4000-8000-000000000001'
 const TENANCY_ID = '0b9d7a1e-0000-4000-8000-000000000101'
 const ENTRY_ID = '5d0c9b2a-0000-4000-8000-000000000201'
-const REMINDER_URL = `/properties/${PROPERTY_ID}/tenancies/${TENANCY_ID}/entries/${ENTRY_ID}/reminder/`
+const MESSAGES_URL = `/properties/${PROPERTY_ID}/tenancies/${TENANCY_ID}/messages/`
+const BILL_REMINDER = { kind: 'bill_reminder', entryId: ENTRY_ID } as const
 
 function httpError(status: number, data: unknown) {
   const config = { headers: new AxiosHeaders() } as InternalAxiosRequestConfig
@@ -59,17 +60,17 @@ describe('messagingService.getPropertyMessaging', () => {
   })
 })
 
-describe('messagingService.sendBillReminder', () => {
-  it("posts to the bill's reminder and returns the outcome", async () => {
+describe('messagingService.sendMessage', () => {
+  it("posts the message's kind and subject to the tenancy's messages, returning the outcome", async () => {
     const post = vi.spyOn(api, 'post').mockResolvedValue({
       status: 201,
       data: { status: 'failed', reason: 'The provider refused it.', sentAt: null },
     })
 
     await expect(
-      messagingService.sendBillReminder(PROPERTY_ID, TENANCY_ID, ENTRY_ID),
+      messagingService.sendMessage(PROPERTY_ID, TENANCY_ID, BILL_REMINDER),
     ).resolves.toEqual({ outcome: 'failed', reason: 'The provider refused it.' })
-    expect(post).toHaveBeenCalledWith(REMINDER_URL)
+    expect(post).toHaveBeenCalledWith(MESSAGES_URL, BILL_REMINDER)
   })
 
   it.each([{ status: 'queued', reason: '' }, { status: 'sent' }, 'sent'])(
@@ -77,7 +78,7 @@ describe('messagingService.sendBillReminder', () => {
     async (data) => {
       vi.spyOn(api, 'post').mockResolvedValue({ status: 201, data })
       await expect(
-        messagingService.sendBillReminder(PROPERTY_ID, TENANCY_ID, ENTRY_ID),
+        messagingService.sendMessage(PROPERTY_ID, TENANCY_ID, BILL_REMINDER),
       ).rejects.toMatchObject({ kind: 'invalid-response' })
     },
   )
@@ -87,7 +88,7 @@ describe('messagingService.sendBillReminder', () => {
       httpError(409, { code: 'already_sent_today', detail: 'Already sent today.' }),
     )
     await expect(
-      messagingService.sendBillReminder(PROPERTY_ID, TENANCY_ID, ENTRY_ID),
+      messagingService.sendMessage(PROPERTY_ID, TENANCY_ID, BILL_REMINDER),
     ).rejects.toMatchObject({ kind: 'conflict', code: 'already_sent_today' })
   })
 })

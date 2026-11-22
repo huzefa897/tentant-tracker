@@ -15,7 +15,6 @@ import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
 import SkeletonRows from '@/components/common/SkeletonRows.vue'
 import SlowLoadScreen from '@/components/common/SlowLoadScreen.vue'
-import SendReminderForm from '@/components/messaging/SendReminderForm.vue'
 import PaymentHistory from '@/components/rent/PaymentHistory.vue'
 import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
 import RecordPaymentForm from '@/components/rent/RecordPaymentForm.vue'
@@ -36,8 +35,13 @@ import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteEntry } from '@/composables/useRouteEntry'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
+import {
+  BillReminderSummary,
+  SendMessageDialog,
+  STATUS_ERROR_MESSAGE,
+  useSendMessage,
+} from '@/messaging'
 import { useAccessStore } from '@/stores/access'
-import { REMINDER_ERROR_MESSAGE, useMessagingStore } from '@/stores/messaging'
 import {
   PAYMENT_SAVE_ERROR_MESSAGE,
   REVERSAL_ERROR_MESSAGE,
@@ -64,7 +68,6 @@ const props = defineProps<{
 
 const rentEntryStore = useRentEntryStore()
 const accessStore = useAccessStore()
-const messagingStore = useMessagingStore()
 const router = useRouter()
 
 const {
@@ -143,7 +146,7 @@ function setPaymentDialogOpen(open: boolean) {
 // The same while a reversal is in flight, so its dialog and result stay on this entry.
 // And while a void is in flight.
 const busy = () =>
-  savingPayment.value || savingReversal.value || savingVoid.value || sendingReminder.value
+  savingPayment.value || savingReversal.value || savingVoid.value || sms.sending.value
 onBeforeRouteLeave((to) => !busy() || Boolean(to.meta.guestOnly))
 onBeforeRouteUpdate((to) => !busy() || Boolean(to.meta.guestOnly))
 
@@ -264,73 +267,25 @@ async function handleVoid(reason: string) {
 
 // Send SMS: owners and managers text the tenant a reminder about an unpaid bill, where the
 // property has messaging on and SMS is set up (the backend says so, and checks it again).
-watch(
-  () => accessStore.selectedPropertyId,
-  (propertyId) => {
-    if (propertyId) void messagingStore.load(propertyId)
-  },
-  { immediate: true },
+const sms = useSendMessage()
+const billOwes = computed(
+  () => entry.value?.billStatus === 'active' && entry.value.status !== 'paid',
 )
-const canSendReminder = computed(
-  () =>
-    messagingStore.canSendFor(accessStore.selectedPropertyId) &&
-    entry.value?.billStatus === 'active' &&
-    entry.value.status !== 'paid',
-)
+const canSendReminder = computed(() => billOwes.value && sms.available.value)
 // Whether Send SMS is offered couldn't be loaded: said, with a retry, on a bill it could be for.
-const reminderStatusFailed = computed(
-  () =>
-    messagingStore.loadFailed(accessStore.selectedPropertyId) &&
-    entry.value?.billStatus === 'active' &&
-    entry.value.status !== 'paid',
-)
-function retryReminderStatus() {
-  const propertyId = accessStore.selectedPropertyId
-  if (propertyId) void messagingStore.load(propertyId)
-}
-const reminderDialogOpen = ref(false)
-const sendingReminder = ref(false)
-const reminderError = ref<string | null>(null)
+const reminderStatusFailed = computed(() => billOwes.value && sms.statusFailed.value)
 
 function openReminder() {
-  reminderError.value = null
+  if (!entry.value) return
   confirmation.value = null
   offerReplacement.value = false
-  reminderDialogOpen.value = true
+  sms.start({ kind: 'bill_reminder', entryId: entry.value.id })
 }
 
-function setReminderDialogOpen(open: boolean) {
-  if (!open && sendingReminder.value) return
-  reminderDialogOpen.value = open
-}
-
-// Only the backend's answer closes the dialog: sent, or it may have gone (unknown). A failed
-// send, or one refused, keeps it open with the reason, to try again.
 async function handleSendReminder() {
-  const current = entry.value
-  const who = tenant.value
-  if (!current || !who || sendingReminder.value) return
-
-  sendingReminder.value = true
-  reminderError.value = null
-  try {
-    const result = await messagingStore.sendBillReminder(props.tenantId, current.id)
-    if (result.outcome === 'failed') {
-      reminderError.value = result.reason
-        ? `The SMS wasn't sent: ${result.reason} Try again.`
-        : REMINDER_ERROR_MESSAGE
-      return
-    }
-    reminderDialogOpen.value = false
-    confirmation.value =
-      result.outcome === 'sent'
-        ? `SMS reminder sent to ${who.name}.`
-        : "The SMS may not have gone out: it wasn't confirmed. It won't be sent again today."
-  } catch (error) {
-    reminderError.value = error instanceof Error ? error.message : REMINDER_ERROR_MESSAGE
-  } finally {
-    sendingReminder.value = false
-  }
+  if (!tenant.value) return
+  const notice = await sms.send(props.tenantId, tenant.value.name)
+  if (notice) confirmation.value = notice
 }
 
 function goToCorrection() {
@@ -370,8 +325,7 @@ watch(
     offerReplacement.value = false
     reversingPayment.value = null
     voidDialogOpen.value = false
-    reminderDialogOpen.value = false
-    reminderError.value = null
+    sms.reset()
     resetReceiptDownload()
     loadPayments()
   },
@@ -598,9 +552,9 @@ function goToHistory() {
           data-testid="reminder-status-error"
         >
           <p class="text-destructive" role="alert">
-            Couldn't check whether an SMS can be sent for this bill.
+            {{ STATUS_ERROR_MESSAGE }}
           </p>
-          <Button variant="outline" size="sm" @click="retryReminderStatus">Try again</Button>
+          <Button variant="outline" size="sm" @click="sms.retryStatus">Try again</Button>
         </div>
 
         <div
@@ -769,23 +723,15 @@ function goToHistory() {
         </DialogContent>
       </Dialog>
 
-      <Dialog :open="reminderDialogOpen" @update:open="setReminderDialogOpen">
-        <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Send SMS reminder</DialogTitle>
-            <DialogDescription>Text the tenant about this bill now.</DialogDescription>
-          </DialogHeader>
-          <SendReminderForm
-            v-if="reminderDialogOpen"
-            :tenant="tenant"
-            :entry="entry"
-            :sending="sendingReminder"
-            :send-error="reminderError"
-            @send="handleSendReminder"
-            @cancel="setReminderDialogOpen(false)"
-          />
-        </DialogContent>
-      </Dialog>
+      <SendMessageDialog
+        v-model:open="sms.isOpen.value"
+        :kind="sms.kind.value"
+        :sending="sms.sending.value"
+        :error="sms.error.value"
+        @send="handleSendReminder"
+      >
+        <BillReminderSummary v-if="tenant && entry" :tenant="tenant" :entry="entry" />
+      </SendMessageDialog>
 
       <Dialog :open="!!reversingPayment" @update:open="setReversalDialogOpen">
         <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">

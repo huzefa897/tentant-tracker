@@ -2,26 +2,23 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 import { ApiError, RATE_LIMITED_MESSAGE, isUncertainFailure } from '@/services/apiError'
-import { messagingService } from '@/services/messaging.service'
+import { messagingService } from '@/messaging/messaging.service'
 import { useAccessStore } from '@/stores/access'
-import type { BillReminderResult, PropertyMessaging } from '@/types/messaging'
+import type { MessageRequest, PropertyMessaging, SendMessageResult } from '@/messaging/types'
+import { SEND_ERROR_MESSAGE, SEND_UNCONFIRMED_MESSAGE } from '@/messaging/utils/wording'
 
-export const REMINDER_ERROR_MESSAGE = "The SMS couldn't be sent. Try again."
-export const REMINDER_UNCONFIRMED_MESSAGE =
-  "We couldn't confirm the SMS was sent. Trying again won't text the tenant twice today."
-
-export class ReminderSendError extends Error {
+export class MessageSendError extends Error {
   constructor(message: string) {
     super(message)
-    this.name = 'ReminderSendError'
+    this.name = 'MessageSendError'
   }
 }
 
 type MessagingStatus =
   { status: 'loading' } | { status: 'error' } | { status: 'ready'; value: PropertyMessaging }
 
-// Messaging for the selected property: whether the app offers Send SMS, and sending a bill's
-// reminder. The backend decides both; nothing here is a rule of its own.
+// Messaging for the selected property: whether the app offers Send SMS, and sending a message
+// of any kind. The backend decides both; nothing here is a rule of its own.
 export const useMessagingStore = defineStore('messaging', () => {
   const accessStore = useAccessStore()
   const byProperty = ref<Record<string, MessagingStatus>>({})
@@ -69,15 +66,15 @@ export const useMessagingStore = defineStore('messaging', () => {
     return enabled && ready && canSend
   }
 
-  // Throws ReminderSendError when nothing was sent (or it's unconfirmed); otherwise returns the
+  // Throws MessageSendError when nothing was sent (or it's unconfirmed); otherwise returns the
   // message's outcome, which may be 'failed' or 'unknown'.
-  async function sendBillReminder(tenantId: string, entryId: string): Promise<BillReminderResult> {
+  async function send(tenantId: string, request: MessageRequest): Promise<SendMessageResult> {
     const propertyId = accessStore.selectedPropertyId
-    if (!propertyId) throw new ReminderSendError('Choose a property first.')
+    if (!propertyId) throw new MessageSendError('Choose a property first.')
     try {
-      return await messagingService.sendBillReminder(propertyId, tenantId, entryId)
+      return await messagingService.sendMessage(propertyId, tenantId, request)
     } catch (error) {
-      throw new ReminderSendError(errorMessage(error))
+      throw new MessageSendError(errorMessage(error))
     }
   }
 
@@ -86,18 +83,19 @@ export const useMessagingStore = defineStore('messaging', () => {
     byProperty.value = {}
   }
 
-  return { byProperty, load, loadFailed, canSendFor, sendBillReminder, reset }
+  return { byProperty, load, loadFailed, canSendFor, send, reset }
 })
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    // Nothing was sent: the backend says why, in words for people (messaging/manual.py).
+    // Nothing was sent: the backend says why, in words for people (messaging/sending.py and
+    // the kind's own reasons).
     if (error.kind === 'conflict' && error.code) {
       const detail = error.details.detail
-      return typeof detail === 'string' && detail.trim() ? detail : REMINDER_ERROR_MESSAGE
+      return typeof detail === 'string' && detail.trim() ? detail : SEND_ERROR_MESSAGE
     }
     if (error.kind === 'forbidden') return 'Only owners and managers can text tenants.'
     if (error.kind === 'rate-limited') return RATE_LIMITED_MESSAGE
   }
-  return isUncertainFailure(error) ? REMINDER_UNCONFIRMED_MESSAGE : REMINDER_ERROR_MESSAGE
+  return isUncertainFailure(error) ? SEND_UNCONFIRMED_MESSAGE : SEND_ERROR_MESSAGE
 }

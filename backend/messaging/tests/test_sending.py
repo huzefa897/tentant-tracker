@@ -1,4 +1,5 @@
-"""A reminder sent by hand from a bill's page, and whether the app offers it."""
+"""Sending by hand (messaging/sending.py, POST .../tenancies/{id}/messages/), through its first
+kind, a bill's reminder; and whether the app offers it."""
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -14,10 +15,12 @@ from billing.tests.factories import make_property, make_tenancy, make_user
 from billing.tests.test_payments_api import make_entry, make_payment
 from messaging import composer
 from messaging.clock import FixedClock
-from messaging.manual import CannotSend, send_bill_reminder
+from messaging.kinds import BILL_REMINDER
+from messaging.sending import CannotSend, Draft, send_now
 from messaging.models import (
     Message,
     MessageStatus,
+    MessageType,
     PropertyMessagingSettings,
     RentDueReminderItem,
     ReminderStage,
@@ -55,15 +58,12 @@ class BillReminderTestCase(TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def url(self, entry=None):
-        entry = entry or self.entry
-        return (
-            f"/api/v1/properties/{self.property.pk}/tenancies/{self.tenancy.pk}"
-            f"/entries/{entry.pk}/reminder/"
-        )
+    def url(self):
+        return f"/api/v1/properties/{self.property.pk}/tenancies/{self.tenancy.pk}/messages/"
 
-    def send(self, entry=None):
-        return self.client.post(self.url(entry))
+    def send(self, entry=None, **body):
+        payload = {"kind": "bill_reminder", "entryId": str((entry or self.entry).pk), **body}
+        return self.client.post(self.url(), payload, format="json")
 
 
 class SendTests(BillReminderTestCase):
@@ -152,7 +152,7 @@ class RefusedTests(BillReminderTestCase):
         errors = []
         for _ in range(2):
             try:
-                send_bill_reminder(self.entry, self.user, morning(self.today))
+                send_now(self.tenancy, BILL_REMINDER, self.entry, self.user, morning(self.today))
             except CannotSend as error:
                 errors.append(error)
 
@@ -185,6 +185,28 @@ class RefusedTests(BillReminderTestCase):
         self.assertRefused(self.send(), "number_untextable")
 
 
+class RequestTests(BillReminderTestCase):
+    def test_an_unknown_kind_is_refused(self):
+        for kind in ("payment_receipt", "", None, 3):
+            response = self.send(kind=kind)
+            self.assertEqual(response.status_code, 400, kind)
+            self.assertIn("kind", response.json())
+        self.assertEqual(self.sender.sent, [])
+
+    def test_a_bill_reminder_needs_a_bill(self):
+        for entry_id in (None, "", "not-a-uuid"):
+            response = self.client.post(
+                self.url(), {"kind": "bill_reminder", "entryId": entry_id}, format="json"
+            )
+            self.assertEqual(response.status_code, 400, entry_id)
+            self.assertIn("entryId", response.json())
+
+    def test_a_body_that_is_not_an_object_is_refused(self):
+        response = self.client.post(self.url(), ["bill_reminder"], format="json")
+
+        self.assertEqual(response.status_code, 400)
+
+
 class AccessTests(BillReminderTestCase):
     def test_owners_and_managers_only(self):
         PropertyMembership.objects.filter(user=self.user).update(role="viewer")
@@ -200,11 +222,21 @@ class AccessTests(BillReminderTestCase):
         other_entry = make_entry(other_tenancy, self.user, month=SEPTEMBER)
 
         response = self.client.post(
-            f"/api/v1/properties/{other.pk}/tenancies/{other_tenancy.pk}"
-            f"/entries/{other_entry.pk}/reminder/"
+            f"/api/v1/properties/{other.pk}/tenancies/{other_tenancy.pk}/messages/",
+            {"kind": "bill_reminder", "entryId": str(other_entry.pk)},
+            format="json",
         )
 
         self.assertEqual(response.status_code, 404)
+
+    def test_another_tenancys_bill_is_not_found(self):  # the entry is looked up in the URL's
+        other_tenancy = make_tenancy(
+            self.property, name="Other", flat_number="305", start_date=date(2026, 8, 1)
+        )
+        other_entry = make_entry(other_tenancy, self.user, month=SEPTEMBER)
+
+        self.assertEqual(self.send(other_entry).status_code, 404)
+        self.assertEqual(self.sender.sent, [])
 
     def test_signed_out(self):
         self.client.force_authenticate(None)
@@ -234,6 +266,43 @@ class StatusTests(BillReminderTestCase):
         self.assertEqual(set(self.status()), {"enabled", "ready", "canSend"})
 
 
+class AnyKindTests(BillReminderTestCase):
+    """send_now knows nothing of bills: any kind's text goes the same way."""
+
+    class Hello:
+        name = "hello"
+
+        def __init__(self):
+            self.recorded = []
+
+        def parse(self, tenancy, data):
+            return None
+
+        def prepare(self, tenancy, subject, today):
+            return Draft(MessageType.PAYMENT_MESSAGE, f"Hi {tenancy.name}", self.recorded.append)
+
+    def test_sends_and_records_any_kinds_message(self):
+        kind = self.Hello()
+
+        sent = send_now(self.tenancy, kind, None, self.user, morning(self.today))
+
+        self.assertEqual(sent.result.outcome, SendOutcome.SENT)
+        self.assertEqual(self.sender.sent, [(self.tenancy.mobile_number, "Hi Meera Iyer")])
+        self.assertEqual(sent.message.type, MessageType.PAYMENT_MESSAGE)
+        self.assertEqual(sent.message.sent_by, self.user)
+        self.assertEqual(kind.recorded, [sent.message])
+
+    def test_the_shared_checks_hold_for_any_kind(self):
+        Tenancy.objects.filter(pk=self.tenancy.pk).update(mobile_number="+91123")
+        self.tenancy.refresh_from_db()
+
+        with self.assertRaises(CannotSend) as raised:
+            send_now(self.tenancy, self.Hello(), None, self.user, morning(self.today))
+
+        self.assertEqual(raised.exception.code, "number_untextable")
+        self.assertFalse(Message.objects.exists())
+
+
 class BillReminderTextTests(SimpleTestCase):
     def text(self, today, due=date(2026, 9, 3), outstanding=Decimal("10854.00")):
         return composer.bill_reminder("Meera  Iyer", SEPTEMBER, due, outstanding, today)
@@ -261,3 +330,42 @@ class BillReminderTextTests(SimpleTestCase):
         ]:
             with self.subTest(amount=amount):
                 self.assertEqual(composer.rupees(Decimal(amount)), text)
+
+
+class OldReminderRouteTests(BillReminderTestCase):
+    """POST .../entries/{id}/reminder/, kept for app builds still open in people's tabs."""
+
+    def old_url(self, entry=None):
+        return (
+            f"/api/v1/properties/{self.property.pk}/tenancies/{self.tenancy.pk}"
+            f"/entries/{(entry or self.entry).pk}/reminder/"
+        )
+
+    def test_sends_the_bills_reminder_as_the_new_route_does(self):
+        response = self.client.post(self.old_url())
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()["status"], "sent")
+        self.assertEqual(len(self.sender.sent), 1)
+        self.assertEqual(RentDueReminderItem.objects.get().stage, ReminderStage.MANUAL)
+
+    def test_shares_the_one_a_day_guard_with_the_new_route(self):
+        self.assertEqual(self.send().status_code, 201)
+
+        response = self.client.post(self.old_url())
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "already_sent_today")
+        self.assertEqual(len(self.sender.sent), 1)
+
+    def test_same_access(self):
+        other_tenancy = make_tenancy(
+            self.property, name="Other", flat_number="306", start_date=date(2026, 8, 1)
+        )
+        other_entry = make_entry(other_tenancy, self.user, month=SEPTEMBER)
+        self.assertEqual(self.client.post(self.old_url(other_entry)).status_code, 404)
+
+        PropertyMembership.objects.filter(user=self.user).update(role="viewer")
+        self.assertEqual(self.client.post(self.old_url()).status_code, 403)
+        self.assertEqual(self.sender.sent, [])
+

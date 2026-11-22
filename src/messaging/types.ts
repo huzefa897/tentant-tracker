@@ -8,10 +8,17 @@ export interface PropertyMessaging {
   canSend: boolean
 }
 
+// What to text a tenant about, by kind (the backend's messaging/kinds/). Adding a kind means
+// one more member here, its kind on the backend and, where it's offered, a summary for the
+// confirm dialog; sending, the store and useSendMessage don't change.
+export type MessageRequest = { kind: 'bill_reminder'; entryId: string }
+
+export type MessageKind = MessageRequest['kind']
+
 // What came of a text: sent; failed (nothing went, send it again); unknown (it may have gone).
 export type MessageOutcome = 'sent' | 'failed' | 'unknown'
 
-export interface BillReminderResult {
+export interface SendMessageResult {
   outcome: MessageOutcome
   reason: string
 }

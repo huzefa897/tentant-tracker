@@ -336,7 +336,7 @@ class MessageRunner:
 def deliver(message: Message, sender: MessageSender) -> SendResult:
     """Sends a reserved (`queued`) message, outside any transaction, and records what came of
     it, then reads the message back for the caller. Used by a message sent by hand
-    (messaging/manual.py); a run counts outcomes and never reads it back."""
+    (messaging/sending.py); a run counts outcomes and never reads it back."""
     outcome = _deliver(message, sender)[0]
     message.refresh_from_db()
     return outcome
