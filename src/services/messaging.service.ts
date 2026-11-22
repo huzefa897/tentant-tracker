@@ -35,7 +35,7 @@ export const messagingService = {
   },
 
   // Texts the tenant a reminder about this bill now. Errors: 'forbidden'; 'conflict' with code
-  // 'messaging_off', 'provider_not_set_up', 'entry_void', 'entry_paid', 'number_untextable',
+  // 'messaging_off', 'server_off', 'provider_not_set_up', 'entry_void', 'entry_paid', 'number_untextable',
   // 'no_rental_period' or 'already_sent_today' (nothing was sent). At most one a day per bill,
   // so retrying after no answer can't text twice.
   async sendBillReminder(

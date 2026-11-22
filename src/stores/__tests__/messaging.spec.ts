@@ -73,16 +73,34 @@ describe('useMessagingStore', () => {
       expect(store.canSendFor(testProperty.id)).toBe(true)
     })
 
-    it('loads a property once, and again after reset', async () => {
+    it('asks again on each visit, so a change in admin shows, keeping the answer meanwhile', async () => {
       const store = useMessagingStore()
       await store.load(testProperty.id)
-      await store.load(testProperty.id)
-      expect(getPropertyMessaging).toHaveBeenCalledTimes(1)
+      expect(store.canSendFor(testProperty.id)).toBe(true)
 
-      store.reset()
+      fakeMessaging.status = { enabled: false, ready: true, canSend: true }
+      const reload = store.load(testProperty.id)
+      expect(store.canSendFor(testProperty.id)).toBe(true)
+      await reload
+
       expect(store.canSendFor(testProperty.id)).toBe(false)
-      await store.load(testProperty.id)
       expect(getPropertyMessaging).toHaveBeenCalledTimes(2)
+    })
+
+    it('sends one request at a time per property', async () => {
+      const store = useMessagingStore()
+      await Promise.all([store.load(testProperty.id), store.load(testProperty.id)])
+
+      expect(getPropertyMessaging).toHaveBeenCalledTimes(1)
+    })
+
+    it('forgets everything on reset, an answer still on its way included', async () => {
+      const store = useMessagingStore()
+      const loading = store.load(testProperty.id)
+      store.reset()
+      await loading
+
+      expect(store.canSendFor(testProperty.id)).toBe(false)
     })
   })
 

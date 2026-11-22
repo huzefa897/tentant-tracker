@@ -13,6 +13,7 @@ export const REMINDER_UNCONFIRMED_MESSAGE =
 // What nothing-was-sent means, in the app's words, by the backend's code.
 const REFUSALS: Record<string, string> = {
   messaging_off: 'Messaging is off for this property.',
+  server_off: 'Messaging is off on the server.',
   provider_not_set_up: "SMS isn't set up on the server yet.",
   entry_void: 'This bill is void: it owes nothing.',
   entry_paid: 'This bill is paid: nothing is outstanding.',
@@ -36,16 +37,34 @@ type MessagingStatus =
 export const useMessagingStore = defineStore('messaging', () => {
   const accessStore = useAccessStore()
   const byProperty = ref<Record<string, MessagingStatus>>({})
+  // Each property's request on its way, with a token telling it apart from a later one.
+  const inFlight = new Map<string, { token: symbol; request: Promise<void> }>()
 
-  async function load(propertyId: string) {
-    if (byProperty.value[propertyId]?.status === 'ready') return
-    byProperty.value[propertyId] = { status: 'loading' }
-    try {
-      const value = await messagingService.getPropertyMessaging(propertyId)
-      byProperty.value[propertyId] = { status: 'ready', value }
-    } catch {
-      byProperty.value[propertyId] = { status: 'error' }
+  // Asked again on each visit, since admin can turn messaging on or off at any time; what was
+  // known stays shown meanwhile. One request per property at a time.
+  function load(propertyId: string): Promise<void> {
+    const pending = inFlight.get(propertyId)
+    if (pending) return pending.request
+    if (byProperty.value[propertyId]?.status !== 'ready') {
+      byProperty.value[propertyId] = { status: 'loading' }
     }
+    const token = Symbol(propertyId)
+    const current = () => inFlight.get(propertyId)?.token === token
+    const request = (async () => {
+      let next: MessagingStatus
+      try {
+        next = { status: 'ready', value: await messagingService.getPropertyMessaging(propertyId) }
+      } catch {
+        next = { status: 'error' }
+      }
+      // Dropped when reset (signed out) while it was on its way.
+      if (current()) {
+        byProperty.value[propertyId] = next
+        inFlight.delete(propertyId)
+      }
+    })()
+    inFlight.set(propertyId, { token, request })
+    return request
   }
 
   // Offered only once the backend has said so: on, set up, and the role may send.
@@ -69,6 +88,7 @@ export const useMessagingStore = defineStore('messaging', () => {
   }
 
   function reset() {
+    inFlight.clear() // an answer for the person signed out is dropped
     byProperty.value = {}
   }
 
