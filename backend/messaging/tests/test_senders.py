@@ -252,6 +252,35 @@ class RegistryTests(SimpleTestCase):
         self.assertEqual(sender.provider, "textbee")
         self.assertIn("TEXTBEE_API_KEY", sender.reason)
 
+    def test_a_sender_that_fails_to_build_sends_nothing_and_never_raises(self):
+        providers = ProviderRegistry()
+
+        def broken():
+            raise TypeError(f"bad key {KEY}")
+
+        providers.register(Provider("broken", "Broken", broken, needs="nothing"))
+
+        with self.assertLogs("messaging.senders.providers", logging.ERROR) as logs:
+            sender = providers.sender_for("broken")
+
+        self.assertFalse(sender.can_send)
+        self.assertIn("couldn't be read", sender.reason)
+        self.assertNotIn(KEY, sender.reason)
+        self.assertNotIn(KEY, "\n".join(logs.output))
+        self.assertIn("TypeError", "\n".join(logs.output))
+
+    @override_settings(TEXTBEE_API_KEY=KEY, TEXTBEE_DEVICE_ID="d")
+    def test_status_says_ready(self):
+        self.assertEqual(registry.status("textbee"), "Ready")
+
+    @override_settings(MESSAGING_ENABLED=False, TEXTBEE_API_KEY=KEY, TEXTBEE_DEVICE_ID="d")
+    def test_status_checks_the_credentials_while_the_server_is_off(self):
+        self.assertIn("Ready, but messaging is off", registry.status("textbee"))
+
+    @override_settings(MESSAGING_ENABLED=False, TEXTBEE_API_KEY="", TEXTBEE_DEVICE_ID="d")
+    def test_status_says_what_is_missing_while_the_server_is_off(self):
+        self.assertIn("TEXTBEE_API_KEY", registry.status("textbee"))
+
     def test_an_unknown_provider_sends_nothing(self):
         sender = registry.sender_for("carrier-pigeon")
 

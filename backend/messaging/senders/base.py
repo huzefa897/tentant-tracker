@@ -26,8 +26,9 @@ class SendResult:
 class MessageSender(Protocol):
     # The provider's name as recorded on each message, e.g. "textbee"; empty for none.
     provider: str
-    # False when nothing can be sent (no provider configured): the runner then sends nothing
-    # and reserves nothing, so the months are still due once a provider is set.
+    # False when nothing can be sent (MESSAGING_ENABLED off, or the provider's credentials not
+    # set or set wrong): the runner then holds its messages, sending and reserving nothing, so
+    # the months are still due once it can send.
     can_send: bool
     # Why it can't send, for the run's errors and admin; empty when it can.
     reason: str
