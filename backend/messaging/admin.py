@@ -4,7 +4,7 @@ from django.contrib import admin
 from properties.admin import PropertyAdmin
 
 from .clock import DEFAULT_TIME_ZONE, time_zone_choices
-from .models import PropertyMessagingSettings
+from .models import Message, MessagingRun, PropertyMessagingSettings, RentDueReminderItem
 
 SETTINGS_FIELDS = ("enabled", "time_zone", "send_time", "reminders_start")
 
@@ -65,3 +65,124 @@ class PropertyMessagingSettingsInline(admin.StackedInline):
 # PropertyAdmin's GrantedByMixin.save_formset saves every inline's objects, this one's too.
 if PropertyMessagingSettingsInline not in PropertyAdmin.inlines:
     PropertyAdmin.inlines = (*PropertyAdmin.inlines, PropertyMessagingSettingsInline)
+
+
+# The history: what was sent, and whether each run happened. Read-only: nothing is added,
+# edited or deleted here, so the record stays what the runner wrote.
+class ReadOnlyAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+def masked(number: str) -> str:
+    """The last four digits only, for lists: the full number is on the message's own page."""
+    return f"…{number[-4:]}" if number else ""
+
+
+class RentDueReminderItemInline(admin.TabularInline):
+    model = RentDueReminderItem
+    fields = ("month", "due_date", "stage", "released_at")
+    readonly_fields = fields
+    extra = 0
+    can_delete = False
+    verbose_name = "month"
+    verbose_name_plural = "months"
+
+    def get_queryset(self, request):
+        # Each row reads its rental period twice (month, due date).
+        return super().get_queryset(request).select_related("rental_period")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Month")
+    def month(self, item):
+        return f"{item.rental_period.period_month:%B %Y}"
+
+    @admin.display(description="Due date")
+    def due_date(self, item):
+        return item.rental_period.due_date
+
+
+@admin.register(Message)
+class MessageAdmin(ReadOnlyAdmin):
+    list_display = (
+        "created_at",
+        "property",
+        "tenant",
+        "type",
+        "months",
+        "status",
+        "reason",
+        "provider",
+        "to",
+    )
+    list_filter = ("status", "type", "tenancy__property", "created_at")
+    date_hierarchy = "created_at"
+    search_fields = ("tenancy__name", "tenancy__flat_number")
+    list_select_related = ("tenancy__property",)
+    inlines = (RentDueReminderItemInline,)
+    fieldsets = (
+        (None, {"fields": ("tenancy", "type", "status", "reason", "local_date")}),
+        ("Sent", {"fields": ("channel", "recipient", "body", "provider", "provider_message_id")}),
+        ("When", {"fields": ("created_at", "attempted_at", "updated_at", "run")}),
+    )
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .prefetch_related("reminder_items__rental_period")
+        )
+
+    @admin.display(description="Property", ordering="tenancy__property__name")
+    def property(self, message):
+        return message.tenancy.property
+
+    @admin.display(description="Tenant", ordering="tenancy__name")
+    def tenant(self, message):
+        return f"{message.tenancy.name} ({message.tenancy.flat_number})"
+
+    @admin.display(description="Months")
+    def months(self, message):
+        return ", ".join(
+            f"{item.rental_period.period_month:%b %Y} ({item.get_stage_display()})"
+            for item in message.reminder_items.all()
+        )
+
+    @admin.display(description="To")
+    def to(self, message):
+        return masked(message.recipient)
+
+
+@admin.register(MessagingRun)
+class MessagingRunAdmin(ReadOnlyAdmin):
+    list_display = (
+        "started_at",
+        "finished_at",
+        "trigger",
+        "dry_run",
+        "provider",
+        "properties_checked",
+        "planned",
+        "sent",
+        "failed",
+        "unknown",
+        "skipped",
+        "has_errors",
+    )
+    list_filter = ("trigger", "dry_run", "started_at")
+    date_hierarchy = "started_at"
+
+    @admin.display(description="Errors", boolean=True)
+    def has_errors(self, run):
+        return bool(run.errors)

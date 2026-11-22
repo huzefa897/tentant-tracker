@@ -96,6 +96,11 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 
+# Messaging (docs/messaging.md): which provider sends messages. Empty (the default) sends
+# nothing. Set it in production only: development, CI and restored backups hold real tenants'
+# numbers.
+MESSAGING_PROVIDER = os.getenv("MESSAGING_PROVIDER", "").strip().lower()
+
 # Where Django admin is served. Set another path in production so it isn't at the default
 # address bots try; its logins are throttled either way (config/middleware.py).
 ADMIN_PATH = os.getenv("DJANGO_ADMIN_PATH", "admin/").strip("/") + "/"

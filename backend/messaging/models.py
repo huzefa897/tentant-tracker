@@ -1,3 +1,4 @@
+import uuid
 from datetime import date, datetime, time
 
 from django.core.exceptions import ValidationError
@@ -7,6 +8,8 @@ from django.db.models import Q
 from .clock import DEFAULT_TIME_ZONE, Clock, now_in_zone, validate_time_zone
 
 DEFAULT_SEND_TIME = time(11, 30)
+# How long run records are kept; messages are kept for good.
+RUN_RETENTION_DAYS = 90
 
 
 class PropertyMessagingSettings(models.Model):
@@ -92,3 +95,132 @@ class PropertyMessagingSettings(models.Model):
     def send_time_reached(self, clock: Clock) -> bool:
         """Whether today's send time has come at the property, so a run may send."""
         return self.local_now(clock).time() >= self.send_time
+
+
+class MessageType(models.TextChoices):
+    RENT_DUE_REMINDER = "rent_due_reminder", "Rent Due Reminder"
+    PAYMENT_MESSAGE = "payment_message", "Payment Message"
+
+
+class ReminderStage(models.TextChoices):
+    DUE = "due", "Due"
+    FOLLOW_UP = "follow_up", "Follow-up"
+
+
+class MessageStatus(models.TextChoices):
+    # Reserved and committed before the sender is called, so a run can never send it twice.
+    QUEUED = "queued", "Queued"
+    SENT = "sent", "Sent"
+    FAILED = "failed", "Failed"
+    # A timeout or lost answer: it may have gone, so it's never sent again by itself.
+    UNKNOWN = "unknown", "Unknown"
+    SKIPPED = "skipped", "Skipped"
+
+
+class Channel(models.TextChoices):
+    SMS = "sms", "SMS"
+
+
+class RunTrigger(models.TextChoices):
+    COMMAND = "command", "Command"
+    SCHEDULE = "schedule", "Schedule"
+
+
+class MessagingRun(models.Model):
+    """One run of the runner (messaging/runner.py): what it checked and what came of it, so a
+    quiet day still shows the job ran. Kept for RUN_RETENTION_DAYS."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    trigger = models.CharField(max_length=10, choices=RunTrigger.choices)
+    # A dry run, or a run with no provider configured: it works out what's due, reserves and
+    # sends nothing, and counts what it would have sent as planned.
+    dry_run = models.BooleanField(default=False)
+    provider = models.CharField(max_length=30, blank=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    properties_checked = models.PositiveIntegerField(default=0)
+    planned = models.PositiveIntegerField(default=0)
+    sent = models.PositiveIntegerField(default=0)
+    failed = models.PositiveIntegerField(default=0)
+    unknown = models.PositiveIntegerField(default=0)
+    skipped = models.PositiveIntegerField(default=0)
+    # What went wrong for a property or a tenancy, one line each, by id: never a phone number.
+    errors = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-started_at",)
+
+    def __str__(self):
+        return f"Run {self.started_at:%Y-%m-%d %H:%M}"
+
+
+class Message(models.Model):
+    """One message sent, or attempted, to one tenant. Never edited by hand: its status moves
+    from queued to sent, failed or unknown once, and skipped ones are recorded as skipped."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenancy = models.ForeignKey(
+        "properties.Tenancy", on_delete=models.PROTECT, related_name="messages"
+    )
+    run = models.ForeignKey(
+        MessagingRun, on_delete=models.SET_NULL, null=True, blank=True, related_name="messages"
+    )
+    type = models.CharField(max_length=20, choices=MessageType.choices)
+    channel = models.CharField(max_length=10, choices=Channel.choices, default=Channel.SMS)
+    status = models.CharField(max_length=10, choices=MessageStatus.choices)
+    reason = models.CharField(max_length=300, blank=True)
+    # The day at the property it was for, in its own time zone.
+    local_date = models.DateField()
+    # As sent: a later change to the tenancy's number or the wording never rewrites them.
+    recipient = models.CharField(max_length=20)
+    body = models.TextField()
+    provider = models.CharField(max_length=30, blank=True)
+    provider_message_id = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    attempted_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        constraints = [
+            # A tenancy that can't be texted is recorded once a day, not on every hourly run.
+            models.UniqueConstraint(
+                fields=["tenancy", "type", "local_date"],
+                condition=Q(status="skipped"),
+                name="message_skipped_once_a_day",
+            ),
+        ]
+        indexes = [models.Index(fields=["status", "created_at"])]
+
+    def __str__(self):
+        return f"{self.get_type_display()} to {self.tenancy} ({self.get_status_display()})"
+
+
+class RentDueReminderItem(models.Model):
+    """One month at one stage, covered by a Rent Due Reminder. At most one held per month and
+    stage: the database refuses a second, so a repeated or overlapping run can't send twice.
+    A message the provider refused (`failed`, so nothing went) releases its items, which keep
+    the history and let a later run remind about the month again."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(Message, on_delete=models.PROTECT, related_name="reminder_items")
+    rental_period = models.ForeignKey(
+        "billing.RentalPeriod", on_delete=models.PROTECT, related_name="reminder_items"
+    )
+    stage = models.CharField(max_length=10, choices=ReminderStage.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    # When its message failed: the month and stage are free to be reminded about again.
+    released_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("rental_period__period_month",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["rental_period", "stage"],
+                condition=Q(released_at__isnull=True),
+                name="one_reminder_per_period_and_stage",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.rental_period} — {self.get_stage_display()}"

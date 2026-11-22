@@ -70,6 +70,7 @@ All settings below come from the environment; `backend/.env.example` lists every
 - **What's logged today:**
   - `accounts/services.py` logs a user id.
   - `accounts/firebase.py` logs exceptions when Firebase is unavailable. Invalid tokens aren't logged.
+  - `messaging/runner.py` logs each run's counts and, on a failure, the property, tenancy or message id with the exception: never a number or a message's text. Runs record their errors the same way, and `send_messages` prints flats and ids only ([messaging.md](messaging.md)).
   - `django.request` logs the path of 4xx and 5xx responses, not their headers or bodies.
 - **When hosting:** make sure the proxy's access logs don't record the `Authorization` header.
 

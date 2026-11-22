@@ -22,7 +22,7 @@ Use these words, in code, admin, docs and PRs. Not "notification", "alert" or "p
 
 ## Where it lives
 
-The `messaging` app (`backend/messaging/`) owns everything here. It depends on `properties` (and, once reminders read rental periods, `billing`); neither of them ever imports it. Later, a payment reaches messaging through a signal `billing` sends, so `billing` never knows messaging exists.
+The `messaging` app (`backend/messaging/`) owns everything here. It depends on `properties` and `billing` (rental periods and what's owed); neither of them ever imports it. Later, a payment reaches messaging through a signal `billing` sends, so `billing` never knows messaging exists.
 
 ## Turning it on
 
@@ -41,13 +41,54 @@ Each property is turned on and off on its own, in admin; there's no switch for t
 
 Messaging works out "today" and "is it time to send" in each property's own time zone (`PropertyMessagingSettings.local_date`, `send_time_reached`), never the server's or `settings.TIME_ZONE`. The current time comes from a `Clock` passed in (`messaging/clock.py`: `SystemClock`, and `FixedClock` for tests), so tests fix the moment instead of patching it.
 
-The job will run every hour and send for each property whose send time has come in its own zone: 11:30 in India, and a property elsewhere needs only its setting. A late run sends late; a second run finds the work done.
+Each run handles every property whose send time has come in its own zone, judged at one moment for the whole run: 11:30 in India, and a property elsewhere needs only its setting. Runs are meant to be hourly (scheduling is step 3 of the [roadmap](messaging-roadmap.md)); a late run sends late, and a second run finds the work done.
 
 The rest of the app (the dashboard, bills, tenancy status) still uses `properties.models.business_date()`, which is India's date. Until that moves to each property's time zone, keep real properties' messaging on `Asia/Kolkata`, so a reminder and the dashboard agree on what's due. Zone names come from the `tzdata` package where the system has none (the slim production image), so they never depend on the server.
 
+## Rent Due Reminders
+
+Worked out by `messaging/policy.py` (`reminders_due`), a pure function: no database, no clock. For each **current** tenancy (ended and future ones are left out, with nothing recorded), each month that is:
+
+- **still owed**, by billing's own definition (`RentalPeriod.objects.owing()`, the dashboard's; read in `messaging/owed.py`): a month without a bill is owed, since payments need a bill; a month marked not owed and a void bill don't count; reversed payments don't count; a part-paid month is still owed;
+- **due** (its due date is today at the property or earlier), and fell due on or after the property's **reminders start**,
+
+is at the **Due** stage from its due date until 6 days after it, and at the **Follow-up** stage from 7 days after its due date on (`FOLLOW_UP_AFTER_DAYS`), counted from the due date and whether or not the Due message went out. Each month gets each stage once, ever (a refused one is tried again: see [Sending safely](#sending-safely)). A run that missed a whole week sends only the Follow-up, never both stages of one month. Rental periods are created by their reads, so the runner creates any that are due first (`ensure_property_periods`), as the dashboard does.
+
+**One message per tenancy** lists all its months (`messaging/composer.py`), oldest first:
+
+- one month, Due: _"Hi Ali, your rent for November 2026 is now due. Please arrange payment at your earliest convenience. Thank you."_
+- one month, Follow-up: _"Hi Ali, this is a reminder that your November 2026 rent remains unpaid. Please arrange payment or contact us if you've already paid. Thank you."_
+- several: _"Hi Ali, your rent for October 2026 (overdue) and November 2026 (due) is unpaid. Please arrange payment or contact us if you've already paid. Thank you."_
+
+The name is the tenancy's, in ASCII: curly quotes and dashes made plain, accents dropped (José becomes Jose), anything else left out, spacing tidied; a name with nothing left gives just "Hi". The text is plain ASCII: one character outside the GSM alphabet (a ₹, a curly quote) makes every part of an SMS 70 characters instead of 160.
+
+## Sending safely
+
+`messaging/runner.py` (`MessageRunner`), per tenancy:
+
+1. **Reserve.** Lock the months' bills and rental periods (in billing's order: bill, then tenancy, then period), check again that they're still owed and not reminded about yet, then create a `queued` **message** and one **reminder item** per month and stage (`RentDueReminderItem`, unique on rental period and stage among those not released), and commit. A payment or reversal being recorded holds its bill's lock, so the check waits for it and sees it: a month paid at that moment isn't reminded about. Two runs at once: the second waits on the lock, then finds them reminded; the unique constraint is the last guard, and only its refusal means "another run got there first": any other database error is recorded on the run as the tenancy's error.
+2. **Send**, outside any transaction, then record `sent`, `failed` or `unknown` with the provider's message id and a short reason. A timeout, a lost answer or a sender that raises is `unknown`, never `failed`: it may have gone. `queued` (the process stopped) and `unknown` are never sent again by themselves, since their months are reserved.
+3. **A refusal is tried again.** `failed` means the provider refused it and nothing went (the phone offline, a plan limit used up), so its reminder items are released (`released_at`, kept for the history) and the months are due again. The next day's run sends them, at the send time: a tenancy whose reminder failed today isn't tried again until tomorrow, so a refusal that lasts (a wrong key) costs one attempt a day, not one an hour. A Due one refused on its last day leaves only the Follow-up, as a missed week does.
+
+- A number that can't be texted (not a valid number for the countries `accounts/phone.py` allows) is **skipped**: recorded once a day per tenancy (`message_skipped_once_a_day`) with the reason, and nothing reserved, so the reminder goes out once the number is fixed.
+- A failure for one tenancy, or one property (a time zone no longer in the database, say), is recorded on the run and never stops the others. Messaging never writes to bills or payments.
+- **No provider configured** (`DisabledSender`): the run works out what's due and counts it as planned, and reserves and sends nothing, so the months are still due once a provider is set.
+- A message keeps the number and text **as sent**, so a later change to the tenancy never rewrites one.
+
+## Running it
+
+`python manage.py send_messages` runs it once (`--dry-run` to list what it would send, sending and reserving nothing: it records the run and, as every run does, creates the rental periods that are due). It prints flats, tenancy ids and months, never names or numbers, since its output can end up in logs. Safe to run again at any time: nothing is sent twice. It runs hourly once scheduling is set up ([roadmap](messaging-roadmap.md) step 3).
+
+## History in admin
+
+Both read-only: nothing is added, edited or deleted there, so the record stays what the runner wrote.
+
+- **Messaging > Messages**: every message, newest first: when, property, tenant and flat, type, months and stages, status and reason, provider, and the number's last four digits (the full number and the text are on the message's own page, with its months). Filters for status, type, property and date; search by tenant name or flat. Kept for good.
+- **Messaging > Messaging runs**: one row per run (`MessagingRun`): when it started and finished, what started it, whether it was a dry run (or had no provider), the provider, properties checked, and how many messages were planned, sent, failed, unknown and skipped, with any errors (by property or tenancy id, never a number). A quiet day still shows the job ran; a run with no finish time stopped part way. Kept for 90 days (`RUN_RETENTION_DAYS`), deleted by later runs; their messages are kept.
+
 ## Providers
 
-Senders arrive in step 2 of the [roadmap](messaging-roadmap.md); these rules are decided now, so each one follows them. Messaging works with any SMS provider: TextBee is the first, and changing to another means one new sender class and new settings, with no change to reminders, messages or their records. For every sender:
+`messaging/senders/` has the interface (`base.py`), `DisabledSender` and `FakeSender`; TextBee's sender is next on the [roadmap](messaging-roadmap.md). `MESSAGING_PROVIDER` (empty by default) picks one in `get_sender()`; an unknown name is a configuration error. Messaging works with any SMS provider: TextBee is the first, and changing to another means one new sender class and new settings, with no change to reminders, messages or their records. For every sender:
 
 - **One interface.** `MessageSender.send(to, body) -> SendResult`, where `to` is an E.164 number and the result is the app's own: an outcome (`sent`, `failed` or `unknown`), the provider's message id when it gave one, and a short reason. Nothing else in messaging imports a provider's code or knows its URLs, fields or error codes.
 - **The sender turns the provider's answers into outcomes.** An accepted request is `sent`, a refusal `failed`, and a timeout, a dropped connection or an answer it can't read `unknown`, never `failed`: the message may have gone. It never raises a provider's or HTTP library's error to its caller.
