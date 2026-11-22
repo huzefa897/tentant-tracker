@@ -69,6 +69,17 @@ class RentDueReminderTextTests(SimpleTestCase):
             )
         )
 
+    def test_a_name_is_made_plain_ascii(self):
+        for name, greeting in (
+            ("D\u2019Souza", "Hi D'Souza, "),
+            ("Jos\u00e9 Fern\u00e1ndez", "Hi Jose Fernandez, "),
+            ("\u0c38\u0c32\u0c40\u0c02", "Hi, "),  # nothing left in ASCII
+        ):
+            with self.subTest(name=name):
+                text = rent_due_reminder(name, [reminder(NOVEMBER, ReminderStage.DUE)])
+                self.assertTrue(text.startswith(greeting))
+                self.assertTrue(text.isascii())
+
     def test_plain_ascii_so_each_sms_part_holds_160_characters(self):
         text = rent_due_reminder(
             "Ali", [reminder(OCTOBER, ReminderStage.FOLLOW_UP), reminder(NOVEMBER, ReminderStage.DUE)]

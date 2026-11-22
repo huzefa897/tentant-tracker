@@ -5,6 +5,7 @@ Plain ASCII on purpose: one character outside the GSM 7-bit alphabet (a ₹, a c
 every part of an SMS 70 characters instead of 160.
 """
 
+import unicodedata
 from datetime import date
 from decimal import Decimal
 from typing import Sequence
@@ -25,9 +26,23 @@ def _join(parts: Sequence[str]) -> str:
     return f"{', '.join(parts[:-1])} and {parts[-1]}"
 
 
+# Typed on phones in place of their ASCII forms.
+_PUNCTUATION = str.maketrans(
+    {"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"', "\u2013": "-", "\u2014": "-"}
+)
+
+
+def _ascii_name(name: str) -> str:
+    """The name in ASCII, so it never turns the whole SMS into 70-character parts: curly quotes
+    and dashes made plain, accents dropped (D\u2019Souza -> D'Souza, Jos\u00e9 -> Jose), anything
+    else left out, and its spacing tidied."""
+    plain = unicodedata.normalize("NFKD", name.translate(_PUNCTUATION))
+    return " ".join(plain.encode("ascii", "ignore").decode().split())
+
+
 def _greeting(name: str) -> str:
-    """'Hi <name>' with its spacing tidied, or just 'Hi' for a blank name."""
-    tidied = " ".join(name.split())
+    """'Hi <name>', or just 'Hi' for a name with nothing left in ASCII."""
+    tidied = _ascii_name(name)
     return f"Hi {tidied}" if tidied else "Hi"
 
 

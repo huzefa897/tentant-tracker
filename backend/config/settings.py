@@ -114,9 +114,11 @@ TEXTBEE_BASE_URL = os.getenv("TEXTBEE_BASE_URL", "").strip()
 MESSAGING_RUN_TOKEN = os.getenv("MESSAGING_RUN_TOKEN", "").strip()
 if MESSAGING_RUN_TOKEN and len(MESSAGING_RUN_TOKEN) < 32:
     raise ImproperlyConfigured("MESSAGING_RUN_TOKEN must be at least 32 characters.")
-# A run from the endpoint starts no new message after this many seconds, well inside
-# Gunicorn's 30-second timeout (a send can take 10); the rest go at the next run.
-MESSAGING_RUN_TIME_BUDGET = 15.0
+# A run from the endpoint starts no new message after this many seconds: with the last send
+# (up to 10) and the run's own reads and writes it still ends well inside Gunicorn's 30-second
+# timeout, which would otherwise kill it mid-send and leave that message `queued` for good.
+# The rest go at the next run.
+MESSAGING_RUN_TIME_BUDGET = 10.0
 
 # Where Django admin is served. Set another path in production so it isn't at the default
 # address bots try; its logins are throttled either way (config/middleware.py).
