@@ -16,6 +16,11 @@ class Migration(migrations.Migration):
             name="provider",
         ),
         migrations.AddField(
+            model_name="messagingrun",
+            name="held",
+            field=models.PositiveIntegerField(default=0),
+        ),
+        migrations.AddField(
             model_name="propertymessagingsettings",
             name="provider",
             field=models.CharField(

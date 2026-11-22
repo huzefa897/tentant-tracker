@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from unittest import mock
 
 from django.db.models import F
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from billing.models import Payment, PaymentReversal, RentalPeriod, RentEntry
@@ -488,11 +488,19 @@ class ProviderPerPropertyTests(RunnerTestCase):
             sorted(Message.objects.values_list("provider", flat=True)), ["other", "textbee"]
         )
 
+    @override_settings(MESSAGING_ENABLED=True)
     def test_by_default_the_registry_builds_it_and_without_credentials_sends_nothing(self):
         result = MessageRunner(at(nov(11))).run()  # TEXTBEE_* are empty in tests
 
         self.assertFalse(self.messages().exists())
         self.assertIn("TextBee isn't set up", result.run.errors)
+
+    def test_off_on_the_server_sends_nothing(self):  # MESSAGING_ENABLED is off in tests
+        result = MessageRunner(at(nov(11))).run()
+
+        self.assertFalse(self.messages().exists())
+        self.assertEqual(result.run.held, 1)
+        self.assertIn("MESSAGING_ENABLED", result.run.errors)
 
 
 class NoProviderTests(RunnerTestCase):
@@ -502,9 +510,22 @@ class NoProviderTests(RunnerTestCase):
         self.assertFalse(result.run.dry_run)
         self.assertEqual(result.run.planned, 1)
         self.assertFalse(result.planned[0].sent)
+        self.assertEqual(result.run.held, 1)
         self.assertIn(f"Property {self.prop.pk}: TextBee isn't set up.", result.run.errors)
         self.assertFalse(self.messages().exists())
         self.assertFalse(RentDueReminderItem.objects.exists())
+
+    def test_nothing_due_records_no_error(self):  # not on every quiet hourly run
+        self.run_on(nov(11))  # October's Due one goes out
+
+        result = self.run_on(nov(12), sender=DisabledSender("textbee", "Not set up."))
+
+        self.assertEqual((result.run.errors, result.run.held), ("", 0))
+
+    def test_a_dry_run_holds_nothing(self):  # it was never going to send
+        result = self.run_on(nov(11), dry_run=True)
+
+        self.assertEqual((result.run.planned, result.run.held), (1, 0))
 
     def test_once_a_provider_is_set_the_months_are_still_due(self):
         self.run_on(nov(11), sender=DisabledSender())

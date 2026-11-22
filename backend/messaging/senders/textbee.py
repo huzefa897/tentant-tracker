@@ -46,6 +46,7 @@ def _batch_id(data: dict) -> str:
 class TextBeeSender:
     provider = "textbee"
     can_send = True
+    reason = ""
 
     def __init__(
         self,

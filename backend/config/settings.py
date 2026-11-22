@@ -99,6 +99,9 @@ SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 # Messaging (docs/messaging.md): each property picks its provider in admin; the providers'
 # credentials are here. Set them in production only: development, CI and restored backups hold
 # real tenants' numbers, and a provider without its credentials sends nothing.
+# The server's own switch, off by default: nothing is texted from here until it's "true", whatever
+# the properties and credentials say. Turning it off stops all texting at once.
+MESSAGING_ENABLED = env_bool("MESSAGING_ENABLED")
 # TextBee: the API key and the phone's device id, from its dashboard. Secrets: never commit
 # or log them.
 TEXTBEE_API_KEY = os.getenv("TEXTBEE_API_KEY", "").strip()

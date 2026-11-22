@@ -154,6 +154,9 @@ class MessagingRun(models.Model):
     failed = models.PositiveIntegerField(default=0)
     unknown = models.PositiveIntegerField(default=0)
     skipped = models.PositiveIntegerField(default=0)
+    # Planned but not sent: the property's provider can't send here (messaging off on the
+    # server, or its credentials not set). The months stay due; errors say why.
+    held = models.PositiveIntegerField(default=0)
     # What went wrong for a property or a tenancy, one line each, by id: never a phone number.
     errors = models.TextField(blank=True)
     # Out of time (a run from the endpoint has a time budget): what's left goes at the next run.

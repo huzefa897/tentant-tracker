@@ -8,8 +8,8 @@ class TestRunner(DiscoverRunner):
     """Runs tests with a dummy cache, so rate limits never carry over from one test to the
     next (tests of the limits themselves use a real cache, with override_settings), and with
     the console log handlers silenced, so errors that tests cause on purpose don't clutter the
-    output. assertLogs still sees every record. Messaging providers' credentials are cleared, so
-    a key in a developer's backend/.env can never text anyone from a test."""
+    output. assertLogs still sees every record. Messaging is off and its providers' credentials
+    are cleared, so a key in a developer's backend/.env can never text anyone from a test."""
 
     def setup_test_environment(self, **kwargs):
         super().setup_test_environment(**kwargs)
@@ -20,6 +20,7 @@ class TestRunner(DiscoverRunner):
             },
             TEXTBEE_API_KEY="",
             TEXTBEE_DEVICE_ID="",
+            MESSAGING_ENABLED=False,
         )
         self._dummy_cache.enable()
         for name in ("", "django"):

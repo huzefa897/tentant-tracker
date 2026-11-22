@@ -29,6 +29,8 @@ class MessageSender(Protocol):
     # False when nothing can be sent (no provider configured): the runner then sends nothing
     # and reserves nothing, so the months are still due once a provider is set.
     can_send: bool
+    # Why it can't send, for the run's errors and admin; empty when it can.
+    reason: str
 
     def send(self, to: str, body: str) -> SendResult:
         """Sends one SMS to an E.164 number."""

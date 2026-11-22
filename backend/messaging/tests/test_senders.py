@@ -205,7 +205,25 @@ class TextBeeSenderTests(SenderContract, SimpleTestCase):
         self.assertNotIn(KEY, repr(self.make(FakePost())))
 
 
+@override_settings(MESSAGING_ENABLED=True)
 class RegistryTests(SimpleTestCase):
+    @override_settings(MESSAGING_ENABLED=False, TEXTBEE_API_KEY=KEY, TEXTBEE_DEVICE_ID="d")
+    def test_off_on_the_server_sends_nothing_whatever_the_credentials(self):
+        sender = registry.sender_for("textbee")
+
+        self.assertFalse(sender.can_send)
+        self.assertIn("MESSAGING_ENABLED", sender.reason)
+
+    @override_settings(
+        TEXTBEE_API_KEY=KEY, TEXTBEE_DEVICE_ID="d", TEXTBEE_BASE_URL="http://api.textbee.dev"
+    )
+    def test_a_setting_set_wrong_sends_nothing_and_never_raises(self):  # admin asks too
+        sender = registry.sender_for("textbee")
+
+        self.assertFalse(sender.can_send)
+        self.assertIn("must be https", sender.reason)
+        self.assertNotIn(KEY, sender.reason)
+
     @override_settings(TEXTBEE_API_KEY=KEY, TEXTBEE_DEVICE_ID="device-1")
     def test_textbee_with_its_credentials(self):
         sender = registry.sender_for("textbee")
@@ -213,6 +231,7 @@ class RegistryTests(SimpleTestCase):
         self.assertIsInstance(sender, TextBeeSender)
         self.assertEqual(sender.provider, "textbee")
         self.assertTrue(sender.can_send)
+        self.assertEqual(sender.reason, "")
 
     @override_settings(TEXTBEE_API_KEY=KEY, TEXTBEE_DEVICE_ID="device-1", TEXTBEE_BASE_URL="")
     def test_an_empty_base_url_is_textbees_own(self):  # e.g. passed through Compose unset

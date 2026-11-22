@@ -192,6 +192,25 @@ class PropertyMessagingSettingsAdminTests(TestCase):
         self.assertContains(response, "Tower")
         self.assertContains(response, "Asia/Kolkata")
 
+    @override_settings(
+        MESSAGING_ENABLED=True,
+        TEXTBEE_API_KEY="test-key-not-real",
+        TEXTBEE_DEVICE_ID="d",
+        TEXTBEE_BASE_URL="http://api.textbee.dev",
+    )
+    def test_a_provider_set_up_wrong_says_so_instead_of_failing(self):
+        PropertyMessagingSettings.objects.create(property=self.property)
+
+        for url in (
+            reverse("admin:messaging_propertymessagingsettings_changelist"),
+            reverse("admin:messaging_propertymessagingsettings_change", args=[self.property.pk]),
+            reverse("admin:properties_property_change", args=[self.property.pk]),
+        ):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assertContains(response, "must be https")
+
 
 class PropertyPageMessagingTests(TestCase):
     """The property's own admin page carries its messaging settings."""
