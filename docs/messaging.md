@@ -60,13 +60,13 @@ is at the **Due** stage from its due date until 6 days after it, and at the **Fo
 - one month, Follow-up: _"Hi Ali, this is a reminder that your November 2026 rent remains unpaid. Please arrange payment or contact us if you've already paid. Thank you."_
 - several: _"Hi Ali, your rent for October 2026 (overdue) and November 2026 (due) is unpaid. Please arrange payment or contact us if you've already paid. Thank you."_
 
-The name is the tenancy's, as written. The text is plain ASCII: one character outside the GSM alphabet (a ₹, a curly quote) makes every part of an SMS 70 characters instead of 160.
+The name is the tenancy's, as written (spacing tidied; a blank one gives just "Hi"). The text is plain ASCII: one character outside the GSM alphabet (a ₹, a curly quote) makes every part of an SMS 70 characters instead of 160.
 
 ## Sending safely
 
 `messaging/runner.py` (`MessageRunner`), per tenancy:
 
-1. **Reserve.** Lock the months' rental periods, check again that they're still owed and not reminded about yet, then create a `queued` **message** and one **reminder item** per month and stage (`RentDueReminderItem`, unique on rental period and stage among those not released), and commit. Two runs at once: the second waits on the lock, then finds them reminded; the unique constraint is the last guard.
+1. **Reserve.** Lock the months' bills and rental periods (in billing's order: bill, then tenancy, then period), check again that they're still owed and not reminded about yet, then create a `queued` **message** and one **reminder item** per month and stage (`RentDueReminderItem`, unique on rental period and stage among those not released), and commit. A payment or reversal being recorded holds its bill's lock, so the check waits for it and sees it: a month paid at that moment isn't reminded about. Two runs at once: the second waits on the lock, then finds them reminded; the unique constraint is the last guard.
 2. **Send**, outside any transaction, then record `sent`, `failed` or `unknown` with the provider's message id and a short reason. A timeout, a lost answer or a sender that raises is `unknown`, never `failed`: it may have gone. `queued` (the process stopped) and `unknown` are never sent again by themselves, since their months are reserved.
 3. **A refusal is tried again.** `failed` means the provider refused it and nothing went (the phone offline, a plan limit used up), so its reminder items are released (`released_at`, kept for the history) and the months are due again. The next day's run sends them, at the send time: a tenancy whose reminder failed today isn't tried again until tomorrow, so a refusal that lasts (a wrong key) costs one attempt a day, not one an hour. A Due one refused on its last day leaves only the Follow-up, as a missed week does.
 
@@ -77,7 +77,7 @@ The name is the tenancy's, as written. The text is plain ASCII: one character ou
 
 ## Running it
 
-`python manage.py send_messages` runs it once (`--dry-run` to list what it would send, saving nothing but the run's record). It prints flats, tenancy ids and months, never names or numbers, since its output can end up in logs. Safe to run again at any time: nothing is sent twice.
+`python manage.py send_messages` runs it once (`--dry-run` to list what it would send, sending and reserving nothing: it records the run and, as every run does, creates the rental periods that are due). It prints flats, tenancy ids and months, never names or numbers, since its output can end up in logs. Safe to run again at any time: nothing is sent twice.
 
 **Every hour**, [cron-job.org](https://cron-job.org) calls `POST /api/v1/messaging/run/` (`messaging/views.py`), which starts the same run (recorded with the trigger `schedule`). Hourly because each property sends at its own time in its own zone, and a run that's late or missed is caught up the next hour. Setting it up: [deployment.md](deployment.md#messaging).
 

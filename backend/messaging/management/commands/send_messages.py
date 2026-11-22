@@ -17,7 +17,10 @@ class Command(BaseCommand):
         parser.add_argument(
             "--dry-run",
             action="store_true",
-            help="List what would be sent, and send or save nothing but the run's record.",
+            help=(
+                "List what would be sent, and send or reserve nothing. The run is recorded, and "
+                "rental periods that are due are created, as every run and the dashboard do."
+            ),
         )
 
     def handle(self, *args, dry_run=False, **options):

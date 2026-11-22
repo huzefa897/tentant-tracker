@@ -3,10 +3,18 @@ from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
-from messaging.models import Message, MessagingRun, PropertyMessagingSettings
+from messaging.models import (
+    Message,
+    MessagingRun,
+    PropertyMessagingSettings,
+    ReminderStage,
+    RentDueReminderItem,
+)
 from messaging.runner import MessageRunner
 from messaging.senders import FakeSender
 from messaging.tests.test_runner import ZAHID, RunnerTestCase, at, nov
@@ -66,6 +74,21 @@ class HistoryAdminTests(RunnerTestCase):
         self.assertContains(response, ZAHID)
         self.assertContains(response, "your rent for October 2026 is now due")
         self.assertContains(response, "October 2026")
+
+    def test_a_message_page_reads_its_months_in_one_query(self):
+        url = reverse("admin:messaging_message_change", args=[self.message.pk])
+        with CaptureQueriesContext(connection) as one_month:
+            self.client.get(url)
+        RentDueReminderItem.objects.create(
+            message=self.message,
+            rental_period=self.message.reminder_items.get().rental_period,
+            stage=ReminderStage.FOLLOW_UP,
+        )
+
+        with CaptureQueriesContext(connection) as two_months:
+            self.client.get(url)
+
+        self.assertEqual(len(two_months), len(one_month))
 
     def test_history_is_read_only(self):
         for name in ("message", "messagingrun"):
