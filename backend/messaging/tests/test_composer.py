@@ -62,6 +62,13 @@ class RentDueReminderTextTests(SimpleTestCase):
             .startswith("Hi Shaik Zahid Ali, ")
         )
 
+    def test_a_blank_name_is_left_out(self):
+        self.assertTrue(
+            rent_due_reminder("   ", [reminder(NOVEMBER, ReminderStage.DUE)]).startswith(
+                "Hi, your rent for November 2026"
+            )
+        )
+
     def test_plain_ascii_so_each_sms_part_holds_160_characters(self):
         text = rent_due_reminder(
             "Ali", [reminder(OCTOBER, ReminderStage.FOLLOW_UP), reminder(NOVEMBER, ReminderStage.DUE)]

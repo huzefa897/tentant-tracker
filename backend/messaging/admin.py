@@ -125,6 +125,10 @@ class RentDueReminderItemInline(admin.TabularInline):
     verbose_name = "month"
     verbose_name_plural = "months"
 
+    def get_queryset(self, request):
+        # Each row reads its rental period twice (month, due date).
+        return super().get_queryset(request).select_related("rental_period")
+
     def has_add_permission(self, request, obj=None):
         return False
 

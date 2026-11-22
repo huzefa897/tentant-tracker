@@ -26,7 +26,9 @@ def _join(parts: Sequence[str]) -> str:
 
 
 def _greeting(name: str) -> str:
-    return f"Hi {' '.join(name.split())}"
+    """'Hi <name>' with its spacing tidied, or just 'Hi' for a blank name."""
+    tidied = " ".join(name.split())
+    return f"Hi {tidied}" if tidied else "Hi"
 
 
 def rent_due_reminder(name: str, reminders: Sequence[DueReminder]) -> str:

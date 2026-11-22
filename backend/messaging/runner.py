@@ -3,7 +3,7 @@ Reminders due today and sends one message per tenancy (docs/messaging.md).
 
 Sending safely, in this order, per tenancy:
 
-1. Reserve: lock the months' rental periods, check again that they're owed and not reminded
+1. Reserve: lock the months' bills and rental periods, check again that they're owed and not reminded
    about yet, then create the reminder items and a `queued` message, and commit. The unique
    (period, stage) constraint is the last guard, so two runs at once can't both reserve one.
 2. Send, outside any transaction, then record `sent`, `failed` or `unknown`. A message left
@@ -33,7 +33,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from accounts.phone import validate_phone_number
-from billing.models import RentalPeriod
+from billing.models import RentalPeriod, RentEntry
 from properties.models import Tenancy
 
 from . import composer
@@ -86,6 +86,8 @@ class RunResult:
 
 
 def can_text(number: str) -> bool:
+    if not number:  # validate_phone_number lets an empty value through
+        return False
     try:
         validate_phone_number(number)
     except ValidationError:
@@ -249,8 +251,20 @@ class MessageRunner:
         ids = [reminder.period_id for reminder in due]
         try:
             with transaction.atomic():
+                # The bills first, as billing locks them (bill, then tenancy, then period): a
+                # payment or reversal being recorded holds its bill, so this waits for it to
+                # commit, and still_owed below sees it.
+                months = [reminder.period_month for reminder in due]
+                list(
+                    RentEntry.objects.select_for_update(no_key=True)
+                    .filter(tenancy=tenancy, billing_month__in=months)
+                    .values("pk")
+                )
                 # Locked, so a run at the same time waits here, then finds them reminded.
                 list(RentalPeriod.objects.select_for_update().filter(pk__in=ids).values("pk"))
+                # Again under the lock: a run at the same time may have just been refused.
+                if self._failed_today(tenancy, today):
+                    return None
                 owed, done = still_owed(ids), reminded(ids)
                 reminders = [
                     reminder
@@ -283,13 +297,20 @@ class MessageRunner:
         return message, reminders
 
     def _send(self, run, message, sender):
-        outcome = deliver(message, sender)
-        setattr(run, outcome.outcome.value, getattr(run, outcome.outcome.value) + 1)
+        outcome, recorded = _deliver(message, sender)
+        if recorded:  # counted only when this run recorded its status
+            setattr(run, outcome.outcome.value, getattr(run, outcome.outcome.value) + 1)
 
 
 def deliver(message: Message, sender: MessageSender) -> SendResult:
     """Sends a reserved (`queued`) message, outside any transaction, and records what came of
     it. Used by runs and by a message sent by hand (messaging/manual.py)."""
+    return _deliver(message, sender)[0]
+
+
+def _deliver(message: Message, sender: MessageSender) -> tuple[SendResult, bool]:
+    """deliver(), and whether this call recorded the status: False when the message had already
+    left `queued` some other way."""
     try:
         outcome = sender.send(message.recipient, message.body)
     except Exception as exc:
@@ -309,4 +330,4 @@ def deliver(message: Message, sender: MessageSender) -> SendResult:
             # Nothing went, so its months are free to be reminded about again.
             RentDueReminderItem.objects.filter(message=message).update(released_at=now)
     message.refresh_from_db()
-    return outcome
+    return outcome, bool(recorded)
