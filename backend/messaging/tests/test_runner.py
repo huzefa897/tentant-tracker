@@ -569,6 +569,24 @@ class NoProviderTests(RunnerTestCase):
 
         self.assertEqual((result.run.errors, result.run.held), ("", 0))
 
+    def test_an_untextable_number_is_still_recorded_while_held(self):  # it needs fixing anyway
+        Tenancy.objects.filter(pk=self.zahid.pk).update(mobile_number="+91123")
+
+        result = self.run_on(nov(11), sender=DisabledSender("textbee", "Not set up."))
+
+        skipped = self.messages().get()
+        self.assertEqual(skipped.status, MessageStatus.SKIPPED)
+        self.assertEqual(skipped.reason, UNTEXTABLE_REASON)
+        self.assertEqual((result.run.skipped, result.run.held), (1, 0))
+        self.assertFalse(RentDueReminderItem.objects.exists())
+
+    def test_a_held_message_is_composed_only_when_asked_for(self):
+        with mock.patch("messaging.runner.composer.rent_due_reminder") as compose:
+            result = self.run_on(nov(11), sender=DisabledSender("textbee", "Not set up."))
+
+        compose.assert_not_called()
+        self.assertIn("now due", result.planned[0].body)
+
     def test_a_dry_run_holds_nothing(self):  # it was never going to send
         result = self.run_on(nov(11), dry_run=True)
 

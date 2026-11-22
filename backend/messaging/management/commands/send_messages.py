@@ -8,8 +8,9 @@ from messaging.runner import MessageRunner
 class Command(BaseCommand):
     help = (
         "Sends the messages due now: Rent Due Reminders for each property whose send time has "
-        "come (docs/messaging.md). Safe to run again: nothing is sent twice. A property whose "
-        "provider isn't set up sends nothing: it lists what it would send."
+        "come (docs/messaging.md). Safe to run again: nothing is sent twice. While a "
+        "property's provider can't send here (MESSAGING_ENABLED off, or its credentials "
+        "not set), its messages are held: listed, counted and sent by a later run."
     )
 
     def add_arguments(self, parser):
