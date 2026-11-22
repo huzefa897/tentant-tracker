@@ -143,7 +143,7 @@ class RunEndpointRateLimitTests(RunnerTestCase):
         scheduler, stranger = APIClient(), APIClient()
         scheduler.credentials(HTTP_AUTHORIZATION=f"Bearer {TOKEN}")
         stranger.credentials(HTTP_AUTHORIZATION="Bearer wrong")
-        with mock.patch("messaging.views.get_sender", return_value=FakeSender()):
+        with mock.patch.object(registry, "sender_for", return_value=FakeSender()):
             runs = [scheduler.post(URL).status_code for _ in range(3)]
             guesses = [stranger.post(URL).status_code for _ in range(3)]
             after = scheduler.post(URL).status_code
