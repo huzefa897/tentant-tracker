@@ -142,6 +142,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("released_at", models.DateTimeField(blank=True, null=True)),
                 (
                     "message",
                     models.ForeignKey(
@@ -180,6 +181,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="rentduereminderitem",
             constraint=models.UniqueConstraint(
+                condition=models.Q(("released_at__isnull", True)),
                 fields=("rental_period", "stage"),
                 name="one_reminder_per_period_and_stage",
             ),
