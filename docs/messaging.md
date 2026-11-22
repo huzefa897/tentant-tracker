@@ -53,7 +53,7 @@ Worked out by `messaging/policy.py` (`reminders_due`), a pure function: no datab
 - **still owed**, by billing's own definition (`RentalPeriod.objects.owing()`, the dashboard's; read in `messaging/owed.py`): a month without a bill is owed, since payments need a bill; a month marked not owed and a void bill don't count; reversed payments don't count; a part-paid month is still owed;
 - **due** (its due date is today at the property or earlier), and fell due on or after the property's **reminders start**,
 
-is at the **Due** stage from its due date until 6 days after it, and at the **Follow-up** stage from 7 days after its due date on (`FOLLOW_UP_AFTER_DAYS`), counted from the due date and whether or not the Due message went out. Each month gets each stage once, ever. A run that missed a whole week sends only the Follow-up, never both stages of one month. Rental periods are created by their reads, so the runner creates any that are due first (`ensure_property_periods`), as the dashboard does.
+is at the **Due** stage from its due date until 6 days after it, and at the **Follow-up** stage from 7 days after its due date on (`FOLLOW_UP_AFTER_DAYS`), counted from the due date and whether or not the Due message went out. Each month gets each stage once, ever (a refused one is tried again: see [Sending safely](#sending-safely)). A run that missed a whole week sends only the Follow-up, never both stages of one month. Rental periods are created by their reads, so the runner creates any that are due first (`ensure_property_periods`), as the dashboard does.
 
 **One message per tenancy** lists all its months (`messaging/composer.py`), oldest first:
 
@@ -67,8 +67,9 @@ The name is the tenancy's, as written. The text is plain ASCII: one character ou
 
 `messaging/runner.py` (`MessageRunner`), per tenancy:
 
-1. **Reserve.** Lock the months' rental periods, check again that they're still owed and not reminded about yet, then create a `queued` **message** and one **reminder item** per month and stage (`RentDueReminderItem`, unique on rental period and stage), and commit. Two runs at once: the second waits on the lock, then finds them reminded; the unique constraint is the last guard.
+1. **Reserve.** Lock the months' rental periods, check again that they're still owed and not reminded about yet, then create a `queued` **message** and one **reminder item** per month and stage (`RentDueReminderItem`, unique on rental period and stage among those not released), and commit. Two runs at once: the second waits on the lock, then finds them reminded; the unique constraint is the last guard.
 2. **Send**, outside any transaction, then record `sent`, `failed` or `unknown` with the provider's message id and a short reason. A timeout, a lost answer or a sender that raises is `unknown`, never `failed`: it may have gone. `queued` (the process stopped) and `unknown` are never sent again by themselves, since their months are reserved.
+3. **A refusal is tried again.** `failed` means the provider refused it and nothing went (the phone offline, a plan limit used up), so its reminder items are released (`released_at`, kept for the history) and the months are due again. The next day's run sends them, at the send time: a tenancy whose reminder failed today isn't tried again until tomorrow, so a refusal that lasts (a wrong key) costs one attempt a day, not one an hour. A Due one refused on its last day leaves only the Follow-up, as a missed week does.
 
 - A number that can't be texted (not a valid number for the countries `accounts/phone.py` allows) is **skipped**: recorded once a day per tenancy (`message_skipped_once_a_day`) with the reason, and nothing reserved, so the reminder goes out once the number is fixed.
 - A failure for one tenancy, or one property (a time zone no longer in the database, say), is recorded on the run and never stops the others. Messaging never writes to bills or payments.

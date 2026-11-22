@@ -44,7 +44,9 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="rentduereminderitem",
             constraint=models.UniqueConstraint(
-                condition=models.Q(("stage__in", ["due", "follow_up"])),
+                condition=models.Q(
+                    ("released_at__isnull", True), ("stage__in", ["due", "follow_up"])
+                ),
                 fields=("rental_period", "stage"),
                 name="one_reminder_per_period_and_stage",
             ),

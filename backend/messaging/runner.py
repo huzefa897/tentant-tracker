@@ -8,7 +8,9 @@ Sending safely, in this order, per tenancy:
    (period, stage) constraint is the last guard, so two runs at once can't both reserve one.
 2. Send, outside any transaction, then record `sent`, `failed` or `unknown`. A message left
    `queued` (the process stopped) or `unknown` (a timeout) is never sent again by itself: its
-   months are reserved.
+   months are reserved. A `failed` one (the provider refused it, so nothing went) releases its
+   months, and the next day's run tries again: at most one failed try a day per tenancy, so a
+   refusal that lasts (a bad key) isn't retried hourly, and reminders stay at the send time.
 
 Each property sends with its own provider (its settings, messaging/senders/providers.py). A
 provider that isn't set up here (no credentials) sends nothing and reserves nothing: that
@@ -182,7 +184,7 @@ class MessageRunner:
 
     def _tenancy(self, result, tenancy, months, reminders_start, today, sender, plan_only):
         due = reminders_due(months, today, reminders_start, reminded([m.period_id for m in months]))
-        if not due:
+        if not due or self._failed_today(tenancy, today):
             return
         if not can_text(tenancy.mobile_number):
             self._skip(result.run, tenancy, today, sender, plan_only)
@@ -202,6 +204,17 @@ class MessageRunner:
         result.run.planned += 1
         result.planned.append(PlannedMessage(tenancy, reminders, message.body, sent=True))
         self._send(result.run, message, sender)
+
+    @staticmethod
+    def _failed_today(tenancy, today) -> bool:
+        """Whether a run's reminder to this tenancy was refused today: it's tried again tomorrow."""
+        return Message.objects.filter(
+            tenancy=tenancy,
+            type=MessageType.RENT_DUE_REMINDER,
+            status=MessageStatus.FAILED,
+            local_date=today,
+            run__isnull=False,
+        ).exists()
 
     def _skip(self, run, tenancy, today, sender, plan_only):
         """Recorded once a day (message_skipped_once_a_day) and nothing reserved, so the months
@@ -278,12 +291,16 @@ def deliver(message: Message, sender: MessageSender) -> SendResult:
         log_failure("sending message", message.pk, exc)
         outcome = SendResult(SendOutcome.UNKNOWN, reason="The sender stopped unexpectedly.")
     now = timezone.now()
-    Message.objects.filter(pk=message.pk, status=MessageStatus.QUEUED).update(
-        status=MessageStatus(outcome.outcome.value),
-        provider_message_id=outcome.provider_message_id[:100],
-        reason=outcome.reason[:300],
-        attempted_at=now,
-        updated_at=now,
-    )
+    with transaction.atomic():
+        recorded = Message.objects.filter(pk=message.pk, status=MessageStatus.QUEUED).update(
+            status=MessageStatus(outcome.outcome.value),
+            provider_message_id=outcome.provider_message_id[:100],
+            reason=outcome.reason[:300],
+            attempted_at=now,
+            updated_at=now,
+        )
+        if recorded and outcome.outcome == SendOutcome.FAILED:
+            # Nothing went, so its months are free to be reminded about again.
+            RentDueReminderItem.objects.filter(message=message).update(released_at=now)
     message.refresh_from_db()
     return outcome
