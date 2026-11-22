@@ -99,25 +99,42 @@ class LocalTimeTests(TestCase):
 
         self.assertEqual(self.settings_in("Asia/Kolkata").local_date(clock), date(2026, 11, 22))
 
-    def test_send_time_reached_from_the_send_time_on(self):
+    def test_sends_from_the_send_time_until_the_send_until_time(self):
         settings = self.settings_in("Asia/Kolkata")
         cases = {
             datetime(2026, 11, 21, 5, 59, tzinfo=UTC): False,  # 11:29 IST
             datetime(2026, 11, 21, 6, 0, tzinfo=UTC): True,  # 11:30 IST
             datetime(2026, 11, 21, 9, 0, tzinfo=UTC): True,  # 14:30 IST, a late run
-            datetime(2026, 11, 21, 18, 29, tzinfo=UTC): True,  # 23:59 IST
-            datetime(2026, 11, 21, 18, 30, tzinfo=UTC): False,  # 00:00 IST on the 22nd
+            datetime(2026, 11, 21, 14, 29, tzinfo=UTC): True,  # 19:59 IST
+            datetime(2026, 11, 21, 14, 30, tzinfo=UTC): False,  # 20:00 IST: too late today
+            datetime(2026, 11, 21, 18, 0, tzinfo=UTC): False,  # 23:30 IST, after an outage
         }
-        for moment, reached in cases.items():
+        for moment, open_ in cases.items():
             with self.subTest(moment=moment):
-                self.assertEqual(settings.send_time_reached(FixedClock(moment)), reached)
+                self.assertEqual(settings.in_send_window(FixedClock(moment)), open_)
 
-    def test_send_time_is_in_each_propertys_zone(self):
+    def test_send_window_is_in_each_propertys_zone(self):
         # 06:00 UTC: 11:30 in India, 10:00 in Dubai.
         clock = FixedClock(datetime(2026, 11, 21, 6, 0, tzinfo=UTC))
 
-        self.assertTrue(self.settings_in("Asia/Kolkata").send_time_reached(clock))
-        self.assertFalse(self.settings_in("Asia/Dubai").send_time_reached(clock))
+        self.assertTrue(self.settings_in("Asia/Kolkata").in_send_window(clock))
+        self.assertFalse(self.settings_in("Asia/Dubai").in_send_window(clock))
+
+    def test_the_window_is_at_least_an_hour_so_an_hourly_run_reaches_it(self):
+        for send_time, send_until, valid in (
+            (time(11, 30), time(12, 30), True),
+            (time(11, 30), time(12, 29), False),
+            (time(23, 30), time(23, 59), False),  # never reached by runs at :00 UTC (:30 IST)
+            (time(20, 0), time(9, 0), False),  # never past midnight
+        ):
+            with self.subTest(send_time=send_time, send_until=send_until):
+                settings = PropertyMessagingSettings(send_time=send_time, send_until=send_until)
+                if valid:
+                    settings.clean()
+                else:
+                    with self.assertRaises(ValidationError) as caught:
+                        settings.clean()
+                    self.assertIn("send_until", caught.exception.message_dict)
 
 
 class PropertyMessagingSettingsAdminTests(TestCase):
@@ -134,7 +151,7 @@ class PropertyMessagingSettingsAdminTests(TestCase):
                 "enabled": "on",
                 "provider": "textbee",
                 "time_zone": "Asia/Kolkata",
-                "send_time": "11:30",
+                "send_time": "11:30", "send_until": "20:00",
                 "reminders_start": "2026-12-01",
             },
         )
@@ -152,7 +169,7 @@ class PropertyMessagingSettingsAdminTests(TestCase):
                 "enabled": "on",
                 "provider": "textbee",
                 "time_zone": "Asia/Kolkata",
-                "send_time": "11:30",
+                "send_time": "11:30", "send_until": "20:00",
             },
         )
 
@@ -177,7 +194,7 @@ class PropertyMessagingSettingsAdminTests(TestCase):
         response = self.client.post(
             reverse("admin:messaging_propertymessagingsettings_change", args=[settings.pk]),
             {"property": other.pk, "provider": "textbee",
-                "time_zone": "Asia/Kolkata", "send_time": "12:00"},
+                "time_zone": "Asia/Kolkata", "send_time": "12:00", "send_until": "20:00"},
         )
 
         self.assertEqual(response.status_code, 302)
@@ -245,6 +262,7 @@ class PropertyPageMessagingTests(TestCase):
             "messaging_settings-0-provider": "textbee",
             "messaging_settings-0-time_zone": "Asia/Kolkata",
             "messaging_settings-0-send_time": "11:30",
+            "messaging_settings-0-send_until": "20:00",
         }
         for field, value in (messaging or {}).items():
             data[f"messaging_settings-0-{field}"] = value
@@ -306,7 +324,7 @@ class PropertyPageMessagingTests(TestCase):
         )
 
         response = self.post_property(
-            {"send_time": "10:00", "reminders_start": "2026-12-01"}, initial=1
+            {"send_time": "10:00", "send_until": "20:00", "reminders_start": "2026-12-01"}, initial=1
         )
 
         self.assertEqual(response.status_code, 302)

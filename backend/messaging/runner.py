@@ -165,7 +165,7 @@ class MessageRunner:
                 result.run.stopped_early = True
                 break
             try:
-                if not settings.send_time_reached(clock):
+                if not settings.in_send_window(clock):
                     continue
                 today = settings.local_date(clock)
                 result.run.properties_checked += 1
