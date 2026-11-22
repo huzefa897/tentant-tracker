@@ -330,3 +330,42 @@ class BillReminderTextTests(SimpleTestCase):
         ]:
             with self.subTest(amount=amount):
                 self.assertEqual(composer.rupees(Decimal(amount)), text)
+
+
+class OldReminderRouteTests(BillReminderTestCase):
+    """POST .../entries/{id}/reminder/, kept for app builds still open in people's tabs."""
+
+    def old_url(self, entry=None):
+        return (
+            f"/api/v1/properties/{self.property.pk}/tenancies/{self.tenancy.pk}"
+            f"/entries/{(entry or self.entry).pk}/reminder/"
+        )
+
+    def test_sends_the_bills_reminder_as_the_new_route_does(self):
+        response = self.client.post(self.old_url())
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()["status"], "sent")
+        self.assertEqual(len(self.sender.sent), 1)
+        self.assertEqual(RentDueReminderItem.objects.get().stage, ReminderStage.MANUAL)
+
+    def test_shares_the_one_a_day_guard_with_the_new_route(self):
+        self.assertEqual(self.send().status_code, 201)
+
+        response = self.client.post(self.old_url())
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "already_sent_today")
+        self.assertEqual(len(self.sender.sent), 1)
+
+    def test_same_access(self):
+        other_tenancy = make_tenancy(
+            self.property, name="Other", flat_number="306", start_date=date(2026, 8, 1)
+        )
+        other_entry = make_entry(other_tenancy, self.user, month=SEPTEMBER)
+        self.assertEqual(self.client.post(self.old_url(other_entry)).status_code, 404)
+
+        PropertyMembership.objects.filter(user=self.user).update(role="viewer")
+        self.assertEqual(self.client.post(self.old_url()).status_code, 403)
+        self.assertEqual(self.sender.sent, [])
+

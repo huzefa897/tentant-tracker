@@ -23,7 +23,12 @@ from billing.meter_views import (
     MeterReadingViewSet,
     MeterReadingVoidViewSet,
 )
-from messaging.views import PropertyMessagingView, SendMessageView, run_messaging
+from messaging.views import (
+    BillReminderView,
+    PropertyMessagingView,
+    SendMessageView,
+    run_messaging,
+)
 from properties.views import PropertyViewSet, TenancyViewSet
 
 from .views import health_check, readiness_check
@@ -78,6 +83,12 @@ urlpatterns = [
         "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/messages/",
         SendMessageView.as_view(),
         name="tenancy-messages",
+    ),
+    # The old route, for app builds still loaded while a release rolls out (BillReminderView).
+    path(
+        "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/entries/<uuid:entry_id>/reminder/",
+        BillReminderView.as_view(),
+        name="rent-entry-reminder",
     ),
     path(
         "api/v1/properties/<uuid:property_id>/tenancies/",

@@ -25,7 +25,7 @@ from config.throttling import AddressRateThrottle
 from properties.roles import Capability, role_can
 
 from .clock import SystemClock
-from .kinds import KINDS, kind_named
+from .kinds import BILL_REMINDER, KINDS, kind_named
 from .models import PropertyMessagingSettings, RunTrigger
 from .runner import MessageRunner
 from .sending import CannotSend, InvalidRequest, send_now
@@ -116,6 +116,18 @@ class PropertyMessagingView(ScopedLookupMixin, views.APIView):
         )
 
 
+def sent_response(sent) -> Response:
+    message = sent.message
+    return Response(
+        {
+            "status": message.status,
+            "reason": message.reason,
+            "sentAt": message.attempted_at.isoformat() if message.attempted_at else None,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
 class SendMessageView(ScopedLookupMixin, views.APIView):
     """POST .../tenancies/{id}/messages/ {"kind", ...}: texts the tenant one message now
     (owners and managers). The kind says what it's about: `bill_reminder` with `entryId`, a
@@ -141,12 +153,23 @@ class SendMessageView(ScopedLookupMixin, views.APIView):
             raise exceptions.ValidationError({error.field: [error.detail]}) from None
         except CannotSend as error:
             raise CannotSendError(error) from None
-        message = sent.message
-        return Response(
-            {
-                "status": message.status,
-                "reason": message.reason,
-                "sentAt": message.attempted_at.isoformat() if message.attempted_at else None,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        return sent_response(sent)
+
+
+class BillReminderView(ScopedLookupMixin, views.APIView):
+    """POST .../tenancies/{id}/entries/{id}/reminder/: the old way to send a bill's reminder,
+    kept for app builds still loaded in people's tabs while a release rolls out (the API and
+    the static site deploy separately, and an open tab keeps its build until reloaded). The
+    same as POST .../messages/ {"kind": "bill_reminder", "entryId"}: same access, checks,
+    answer and codes. Remove it once no build in use calls it (docs/messaging.md)."""
+
+    def post(self, request, property_id, tenancy_id, entry_id):
+        entry = self.get_entry()
+        if not role_can(self.get_property().role, Capability.SEND_MESSAGES):
+            raise exceptions.PermissionDenied(SEND_FORBIDDEN)
+        try:
+            sent = send_now(entry.tenancy, BILL_REMINDER, entry, request.user, SystemClock())
+        except CannotSend as error:
+            raise CannotSendError(error) from None
+        return sent_response(sent)
+
