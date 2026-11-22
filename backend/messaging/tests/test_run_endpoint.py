@@ -9,7 +9,7 @@ from rest_framework.throttling import SimpleRateThrottle
 
 from config.tests import REAL_CACHE
 from messaging.models import Message, MessageStatus, MessagingRun, RunTrigger
-from messaging.senders import FakeSender
+from messaging.senders import FakeSender, registry
 from messaging.tests.test_runner import ZAHID, RunnerTestCase, at, nov
 
 URL = "/api/v1/messaging/run/"
@@ -21,7 +21,7 @@ class RunEndpointTests(RunnerTestCase):
     def setUp(self):
         super().setUp()
         patches = [
-            mock.patch("messaging.views.get_sender", return_value=self.sender),
+            mock.patch.object(registry, "sender_for", return_value=self.sender),
             mock.patch("messaging.views.SystemClock", return_value=at(nov(11))),
         ]
         for patch in patches:
@@ -51,6 +51,7 @@ class RunEndpointTests(RunnerTestCase):
                 "failed": 0,
                 "unknown": 0,
                 "skipped": 0,
+                "held": 0,
                 "errors": 0,
                 "stoppedEarly": False,
             },
@@ -133,7 +134,7 @@ class RunEndpointRateLimitTests(RunnerTestCase):
     def test_limited_per_address_wrong_tokens_included(self):
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION="Bearer wrong")
-        with mock.patch("messaging.views.get_sender", return_value=FakeSender()):
+        with mock.patch.object(registry, "sender_for", return_value=FakeSender()):
             statuses = [client.post(URL).status_code for _ in range(3)]
 
         self.assertEqual(statuses, [403, 403, 429])
@@ -142,7 +143,7 @@ class RunEndpointRateLimitTests(RunnerTestCase):
         scheduler, stranger = APIClient(), APIClient()
         scheduler.credentials(HTTP_AUTHORIZATION=f"Bearer {TOKEN}")
         stranger.credentials(HTTP_AUTHORIZATION="Bearer wrong")
-        with mock.patch("messaging.views.get_sender", return_value=FakeSender()):
+        with mock.patch.object(registry, "sender_for", return_value=FakeSender()):
             runs = [scheduler.post(URL).status_code for _ in range(3)]
             guesses = [stranger.post(URL).status_code for _ in range(3)]
             after = scheduler.post(URL).status_code

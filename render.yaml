@@ -95,9 +95,10 @@ services:
         sync: false
       - key: FIREBASE_CLIENT_ID
         sync: false
-      # Messaging (docs/messaging.md): leave empty until ready to text tenants. textbee, its
-      # key and device id, and the secret cron-job.org sends to /api/v1/messaging/run/.
-      - key: MESSAGING_PROVIDER
+      # Messaging (docs/messaging.md): leave empty until ready to text tenants. TextBee's key
+      # and device id (each property picks its provider in admin), and the secret cron-job.org
+      # sends to /api/v1/messaging/run/. MESSAGING_ENABLED=true turns sending on.
+      - key: MESSAGING_ENABLED
         sync: false
       - key: TEXTBEE_API_KEY
         sync: false

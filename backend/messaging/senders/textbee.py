@@ -12,6 +12,7 @@ and the runner's reservation is what stops a second message.
 import json
 import logging
 
+from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import SendOutcome, SendResult
@@ -45,6 +46,7 @@ def _batch_id(data: dict) -> str:
 class TextBeeSender:
     provider = "textbee"
     can_send = True
+    reason = ""
 
     def __init__(
         self,
@@ -129,3 +131,14 @@ class TextBeeSender:
             return SendResult(SendOutcome.FAILED, reason=_NOT_DISPATCHED)
         logger.warning("TextBee: dispatched %s, failed %s, for one recipient", *counts)
         return SendResult(SendOutcome.UNKNOWN, reason=_UNREADABLE)
+
+
+def textbee_from_settings() -> TextBeeSender | None:
+    """The sender from TEXTBEE_API_KEY and TEXTBEE_DEVICE_ID, or None while either is unset."""
+    if not (settings.TEXTBEE_API_KEY and settings.TEXTBEE_DEVICE_ID):
+        return None
+    return TextBeeSender(
+        settings.TEXTBEE_API_KEY,
+        settings.TEXTBEE_DEVICE_ID,
+        base_url=settings.TEXTBEE_BASE_URL or DEFAULT_BASE_URL,  # empty: TextBee's own API
+    )

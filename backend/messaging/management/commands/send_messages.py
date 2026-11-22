@@ -3,14 +3,14 @@ from django.core.management.base import BaseCommand
 from messaging.clock import SystemClock
 from messaging.models import RunTrigger
 from messaging.runner import MessageRunner
-from messaging.senders import get_sender
 
 
 class Command(BaseCommand):
     help = (
         "Sends the messages due now: Rent Due Reminders for each property whose send time has "
-        "come (docs/messaging.md). Safe to run again: nothing is sent twice. Without a "
-        "provider configured it sends nothing and lists what it would send."
+        "come (docs/messaging.md). Safe to run again: nothing is sent twice. While a "
+        "property's provider can't send here (MESSAGING_ENABLED off, or its credentials "
+        "not set), its messages are held: listed, counted and sent by a later run."
     )
 
     def add_arguments(self, parser):
@@ -24,23 +24,22 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, dry_run=False, **options):
-        sender = get_sender()
-        result = MessageRunner(
-            sender, SystemClock(), trigger=RunTrigger.COMMAND, dry_run=dry_run
-        ).run()
+        result = MessageRunner(SystemClock(), trigger=RunTrigger.COMMAND, dry_run=dry_run).run()
         run = result.run
         if run.dry_run:
-            why = "dry run" if dry_run else "no provider configured"
-            self.stdout.write(f"Nothing sent ({why}). Would send {run.planned}:")
+            self.stdout.write(f"Nothing sent (dry run). Would send {run.planned}:")
         # Flats and months only: no names or numbers, since this output can end up in logs.
         for planned in result.planned:
             months = ", ".join(
                 f"{r.period_month:%B %Y} ({r.stage.label})" for r in planned.reminders
             )
-            self.stdout.write(f"  Flat {planned.tenancy.flat_number} ({planned.tenancy.pk}): {months}")
+            not_sent = "" if planned.sent or run.dry_run else " (not sent: see errors)"
+            self.stdout.write(
+                f"  Flat {planned.tenancy.flat_number} ({planned.tenancy.pk}): {months}{not_sent}"
+            )
         self.stdout.write(
             f"Properties checked {run.properties_checked}; sent {run.sent}, failed {run.failed}, "
-            f"unknown {run.unknown}, skipped {run.skipped}."
+            f"unknown {run.unknown}, skipped {run.skipped}, held {run.held}."
         )
         if run.errors:
             self.stderr.write(f"Errors:\n{run.errors}")

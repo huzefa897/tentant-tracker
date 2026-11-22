@@ -9,7 +9,7 @@ from unittest import mock
 
 from django.db import IntegrityError, connection
 from django.db.models import F
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
@@ -53,7 +53,8 @@ class RunnerTestCase(TestCase):
         self.sender = FakeSender()
 
     def run_on(self, day, sender=None, clock=None, **options):
-        return MessageRunner(sender or self.sender, clock or at(day), **options).run()
+        sender = sender or self.sender
+        return MessageRunner(clock or at(day), senders=lambda name: sender, **options).run()
 
     def bill(self, tenancy, month, *paid):
         entry = make_entry(tenancy, self.user, month=month)  # ₹15,750
@@ -526,15 +527,81 @@ class FailureTests(RunnerTestCase):
         self.assertNotIn("your rent", logged)
 
 
+class ProviderPerPropertyTests(RunnerTestCase):
+    def test_each_property_sends_with_its_own_provider(self):
+        other = make_property(name="Other Towers")
+        PropertyMessagingSettings.objects.create(
+            property=other, enabled=True, reminders_start=NOVEMBER, provider="other"
+        )
+        make_tenancy(other, flat_number="101", mobile_number=YUSUF, start_date=date(2026, 9, 1))
+        self.settings.provider = "textbee"
+        self.settings.save()
+        senders = {"textbee": FakeSender(provider="textbee"), "other": FakeSender(provider="other")}
+
+        MessageRunner(at(nov(11)), senders=senders.__getitem__).run()
+
+        self.assertEqual([to for to, _ in senders["textbee"].sent], [ZAHID])
+        self.assertEqual([to for to, _ in senders["other"].sent], [YUSUF])
+        self.assertEqual(
+            sorted(Message.objects.values_list("provider", flat=True)), ["other", "textbee"]
+        )
+
+    @override_settings(MESSAGING_ENABLED=True)
+    def test_by_default_the_registry_builds_it_and_without_credentials_sends_nothing(self):
+        result = MessageRunner(at(nov(11))).run()  # TEXTBEE_* are empty in tests
+
+        self.assertFalse(self.messages().exists())
+        self.assertIn("TextBee isn't set up", result.run.errors)
+
+    def test_off_on_the_server_sends_nothing(self):  # MESSAGING_ENABLED is off in tests
+        result = MessageRunner(at(nov(11))).run()
+
+        self.assertFalse(self.messages().exists())
+        self.assertEqual(result.run.held, 1)
+        self.assertIn("MESSAGING_ENABLED", result.run.errors)
+
+
 class NoProviderTests(RunnerTestCase):
     def test_no_provider_sends_and_reserves_nothing(self):  # TC-16
-        result = self.run_on(nov(11), sender=DisabledSender())
+        result = self.run_on(nov(11), sender=DisabledSender("textbee", "TextBee isn't set up."))
 
-        self.assertTrue(result.run.dry_run)
+        self.assertFalse(result.run.dry_run)
         self.assertEqual(result.run.planned, 1)
-        self.assertEqual(len(result.planned), 1)
+        self.assertFalse(result.planned[0].sent)
+        self.assertEqual(result.run.held, 1)
+        self.assertIn(f"Property {self.prop.pk}: TextBee isn't set up.", result.run.errors)
         self.assertFalse(self.messages().exists())
         self.assertFalse(RentDueReminderItem.objects.exists())
+
+    def test_nothing_due_records_no_error(self):  # not on every quiet hourly run
+        self.run_on(nov(11))  # October's Due one goes out
+
+        result = self.run_on(nov(12), sender=DisabledSender("textbee", "Not set up."))
+
+        self.assertEqual((result.run.errors, result.run.held), ("", 0))
+
+    def test_an_untextable_number_is_still_recorded_while_held(self):  # it needs fixing anyway
+        Tenancy.objects.filter(pk=self.zahid.pk).update(mobile_number="+91123")
+
+        result = self.run_on(nov(11), sender=DisabledSender("textbee", "Not set up."))
+
+        skipped = self.messages().get()
+        self.assertEqual(skipped.status, MessageStatus.SKIPPED)
+        self.assertEqual(skipped.reason, UNTEXTABLE_REASON)
+        self.assertEqual((result.run.skipped, result.run.held), (1, 0))
+        self.assertFalse(RentDueReminderItem.objects.exists())
+
+    def test_a_held_message_is_composed_only_when_asked_for(self):
+        with mock.patch("messaging.runner.composer.rent_due_reminder") as compose:
+            result = self.run_on(nov(11), sender=DisabledSender("textbee", "Not set up."))
+
+        compose.assert_not_called()
+        self.assertIn("now due", result.planned[0].body)
+
+    def test_a_dry_run_holds_nothing(self):  # it was never going to send
+        result = self.run_on(nov(11), dry_run=True)
+
+        self.assertEqual((result.run.planned, result.run.held), (1, 0))
 
     def test_once_a_provider_is_set_the_months_are_still_due(self):
         self.run_on(nov(11), sender=DisabledSender())
@@ -604,7 +671,6 @@ class RunRecordTests(RunnerTestCase):
         run = MessagingRun.objects.get()
         self.assertEqual(run, result.run)
         self.assertEqual((run.properties_checked, run.planned), (1, 0))
-        self.assertEqual(run.provider, "fake")
 
     def test_messages_link_their_run(self):
         result = self.run_on(nov(11))

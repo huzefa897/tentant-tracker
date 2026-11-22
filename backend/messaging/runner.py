@@ -12,6 +12,11 @@ Sending safely, in this order, per tenancy:
    months, and the next day's run tries again: at most one failed try a day per tenancy, so a
    refusal that lasts (a bad key) isn't retried hourly, and reminders stay at the send time.
 
+Each property sends with its own provider (its settings, messaging/senders/providers.py).
+While the provider can't send here (messaging is off on the server, MESSAGING_ENABLED, or its
+credentials aren't set) the property's messages are held: planned and counted, never reserved,
+so their months are still due once it can, and the run's errors say why.
+
 One property's or tenancy's failure is recorded on the run and never stops the others.
 Messaging never writes to bills or payments; it only creates rental periods that are due, as
 the dashboard's reads do.
@@ -46,7 +51,7 @@ from .models import (
 )
 from .owed import owed_months, reminded, still_owed
 from .policy import DueReminder, reminders_due
-from .senders import MessageSender, SendOutcome, SendResult
+from .senders import MessageSender, SendOutcome, SendResult, registry
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +76,32 @@ class PlannedMessage:
 
     tenancy: Tenancy
     reminders: list[DueReminder]
-    body: str
+    sent: bool  # False: planned only (a dry run, or held: the provider can't send here)
+
+    @property
+    def body(self) -> str:
+        """Composed when asked for: a held run, every hour, only counts."""
+        return composer.rent_due_reminder(self.tenancy.name, self.reminders)
+
+
+@dataclass(frozen=True)
+class PropertyPass:
+    """One property's part of a run: its day, its settings and its provider's sender."""
+
+    today: date
+    reminders_start: date | None
+    sender: MessageSender
+    dry_run: bool
+
+    @property
+    def held(self) -> bool:
+        """It would send, but the provider can't here: nothing is reserved, so the months stay
+        due for when it can."""
+        return not self.dry_run and not self.sender.can_send
+
+    @property
+    def plan_only(self) -> bool:
+        return self.dry_run or self.held
 
 
 @dataclass
@@ -100,15 +130,16 @@ def can_text(number: str) -> bool:
 class MessageRunner:
     def __init__(
         self,
-        sender: MessageSender,
         clock: Clock,
         *,
+        senders: Callable[[str], MessageSender] | None = None,
         trigger: RunTrigger = RunTrigger.COMMAND,
         dry_run: bool = False,
         time_budget: float | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ):
-        self.sender = sender
+        # A provider's name to its sender: the registry, or a fake in tests.
+        self.senders = senders or registry.sender_for
         self.clock = clock
         self.trigger = trigger
         # Seconds after which no new tenancy is started (None: no limit). A request has to
@@ -116,18 +147,14 @@ class MessageRunner:
         # sends it.
         self.time_budget = time_budget
         self.monotonic = monotonic
-        # Without a provider nothing can be sent, so nothing is reserved either: the months
-        # stay due for when one is set.
-        self.dry_run = dry_run or not sender.can_send
+        self.dry_run = dry_run
 
     def run(self) -> RunResult:
         # One moment for the whole run, so every property is judged at the same time.
         clock = FixedClock(self.clock.now())
         started = self.monotonic()
         result = RunResult(
-            MessagingRun.objects.create(
-                trigger=self.trigger, dry_run=self.dry_run, provider=self.sender.provider
-            )
+            MessagingRun.objects.create(trigger=self.trigger, dry_run=self.dry_run)
         )
         errors: list[str] = []
         enabled = PropertyMessagingSettings.objects.filter(
@@ -143,19 +170,26 @@ class MessageRunner:
                 today = settings.local_date(clock)
                 result.run.properties_checked += 1
                 owed = owed_months(settings.property, today, settings.reminders_start)
+                prop = PropertyPass(
+                    today, settings.reminders_start, self.senders(settings.provider), self.dry_run
+                )
             except Exception as exc:  # one property never stops the others
                 log_failure("property", settings.pk, exc)
                 errors.append(f"Property {settings.pk}: {type(exc).__name__}")
                 continue
+            held_before = result.run.held
             for tenancy, months in owed.items():
                 if self._out_of_time(started):
                     result.run.stopped_early = True
                     break
                 try:
-                    self._tenancy(result, tenancy, months, settings.reminders_start, today)
+                    self._tenancy(result, prop, tenancy, months)
                 except Exception as exc:  # nor one tenancy
                     log_failure("tenancy", tenancy.pk, exc)
                     errors.append(f"Tenancy {tenancy.pk}: {type(exc).__name__}")
+            # Said once, and only when a message was held back: not on every quiet hourly run.
+            if result.run.held > held_before:
+                errors.append(f"Property {settings.pk}: {prop.sender.reason}")
 
         run = result.run
         run.errors = "\n".join(errors)
@@ -166,7 +200,7 @@ class MessageRunner:
         ).delete()
         logger.info(
             "Messaging run %s: %s properties, %s planned, %s sent, %s failed, %s unknown, "
-            "%s skipped, %s errors%s",
+            "%s skipped, %s held, %s errors%s",
             run.pk,
             run.properties_checked,
             run.planned,
@@ -174,6 +208,7 @@ class MessageRunner:
             run.failed,
             run.unknown,
             run.skipped,
+            run.held,
             len(errors),
             ", stopped early" if run.stopped_early else "",
         )
@@ -182,26 +217,27 @@ class MessageRunner:
     def _out_of_time(self, started: float) -> bool:
         return self.time_budget is not None and self.monotonic() - started >= self.time_budget
 
-    def _tenancy(self, result, tenancy, months, reminders_start, today):
-        due = reminders_due(months, today, reminders_start, reminded([m.period_id for m in months]))
-        if not due or self._failed_today(tenancy, today):
+    def _tenancy(self, result: RunResult, prop: PropertyPass, tenancy, months):
+        done = reminded([m.period_id for m in months])
+        due = reminders_due(months, prop.today, prop.reminders_start, done)
+        if not due or self._failed_today(tenancy, prop.today):
             return
         if not can_text(tenancy.mobile_number):
-            self._skip(result.run, tenancy, today)
+            self._skip(result.run, prop, tenancy)
             return
-        if self.dry_run:
+        if prop.plan_only:
             result.run.planned += 1
-            result.planned.append(
-                PlannedMessage(tenancy, due, composer.rent_due_reminder(tenancy.name, due))
-            )
+            if prop.held:
+                result.run.held += 1
+            result.planned.append(PlannedMessage(tenancy, due, sent=False))
             return
-        reserved = self._reserve(result.run, tenancy, due, today)
+        reserved = self._reserve(result.run, prop, tenancy, due)
         if reserved is None:
             return
         message, reminders = reserved
         result.run.planned += 1
-        result.planned.append(PlannedMessage(tenancy, reminders, message.body))
-        self._send(result.run, message)
+        result.planned.append(PlannedMessage(tenancy, reminders, sent=True))
+        self._send(result.run, message, prop.sender)
 
     @staticmethod
     def _failed_today(tenancy, today) -> bool:
@@ -214,10 +250,11 @@ class MessageRunner:
             run__isnull=False,
         ).exists()
 
-    def _skip(self, run, tenancy, today):
+    def _skip(self, run, prop: PropertyPass, tenancy):
         """Recorded once a day (message_skipped_once_a_day) and nothing reserved, so the months
-        are reminded about once the number is fixed."""
-        if self.dry_run:
+        are reminded about once the number is fixed. Recorded while held too: the number needs
+        fixing whatever the provider. Only a dry run writes nothing."""
+        if prop.dry_run:
             run.skipped += 1
             return
         try:
@@ -228,10 +265,10 @@ class MessageRunner:
                     type=MessageType.RENT_DUE_REMINDER,
                     status=MessageStatus.SKIPPED,
                     reason=UNTEXTABLE_REASON,
-                    local_date=today,
+                    local_date=prop.today,
                     recipient=tenancy.mobile_number[:20],
                     body="",
-                    provider=self.sender.provider,
+                    provider=prop.sender.provider,
                 )
         except IntegrityError as exc:
             if violated(exc) != "message_skipped_once_a_day":
@@ -239,7 +276,7 @@ class MessageRunner:
             return  # already recorded today
         run.skipped += 1
 
-    def _reserve(self, run, tenancy, due, today):
+    def _reserve(self, run, prop: PropertyPass, tenancy, due):
         ids = [reminder.period_id for reminder in due]
         try:
             with transaction.atomic():
@@ -255,7 +292,7 @@ class MessageRunner:
                 # Locked, so a run at the same time waits here, then finds them reminded.
                 list(RentalPeriod.objects.select_for_update().filter(pk__in=ids).values("pk"))
                 # Again under the lock: a run at the same time may have just been refused.
-                if self._failed_today(tenancy, today):
+                if self._failed_today(tenancy, prop.today):
                     return None
                 owed, done = still_owed(ids), reminded(ids)
                 reminders = [
@@ -271,10 +308,10 @@ class MessageRunner:
                     run=run,
                     type=MessageType.RENT_DUE_REMINDER,
                     status=MessageStatus.QUEUED,
-                    local_date=today,
+                    local_date=prop.today,
                     recipient=tenancy.mobile_number,
                     body=composer.rent_due_reminder(tenancy.name, reminders),
-                    provider=self.sender.provider,
+                    provider=prop.sender.provider,
                 )
                 RentDueReminderItem.objects.bulk_create(
                     [
@@ -290,9 +327,9 @@ class MessageRunner:
             return None  # another run reserved one of them first
         return message, reminders
 
-    def _send(self, run, message):
+    def _send(self, run, message, sender):
         try:
-            outcome = self.sender.send(message.recipient, message.body)
+            outcome = sender.send(message.recipient, message.body)
         except Exception as exc:
             # A sender shouldn't raise, but one that does may have sent it: never retry blindly.
             log_failure("sending message", message.pk, exc)

@@ -20,7 +20,6 @@ from messaging.senders import FakeSender
 from messaging.tests.test_runner import ZAHID, RunnerTestCase, at, nov
 
 
-@override_settings(MESSAGING_PROVIDER="")
 class SendMessagesCommandTests(RunnerTestCase):
     def call(self, *args):
         out, err = StringIO(), StringIO()
@@ -29,13 +28,15 @@ class SendMessagesCommandTests(RunnerTestCase):
             call_command("send_messages", *args, stdout=out, stderr=err)
         return out.getvalue(), err.getvalue()
 
-    def test_no_provider_lists_what_it_would_send(self):
-        out, _ = self.call()
+    @override_settings(MESSAGING_ENABLED=True)
+    def test_a_provider_not_set_up_lists_what_it_would_send(self):  # TEXTBEE_* empty in tests
+        out, err = self.call()
 
-        self.assertIn("Nothing sent (no provider configured). Would send 1:", out)
-        self.assertIn(f"Flat 202 ({self.zahid.pk}): October 2026 (Due)", out)
+        self.assertIn(f"Flat 202 ({self.zahid.pk}): October 2026 (Due) (not sent: see errors)", out)
+        self.assertIn("TextBee isn't set up: set TEXTBEE_API_KEY and TEXTBEE_DEVICE_ID.", err)
+        self.assertIn("held 1", out)
         self.assertFalse(Message.objects.exists())
-        self.assertTrue(MessagingRun.objects.get().dry_run)
+        self.assertFalse(MessagingRun.objects.get().dry_run)
 
     def test_dry_run(self):
         out, _ = self.call("--dry-run")
@@ -54,7 +55,7 @@ class HistoryAdminTests(RunnerTestCase):
         super().setUp()
         admin = get_user_model().objects.create_superuser(username="admin", password="x")
         self.client.force_login(admin)
-        MessageRunner(FakeSender(), at(nov(11))).run()
+        MessageRunner(at(nov(11)), senders=lambda name: FakeSender()).run()
         self.message = Message.objects.get()
 
     def test_messages_list_shows_only_the_last_four_digits(self):

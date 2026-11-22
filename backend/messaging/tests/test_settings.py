@@ -57,6 +57,14 @@ class PropertyMessagingSettingsModelTests(TestCase):
         with transaction.atomic(), self.assertRaises(IntegrityError):
             PropertyMessagingSettings.objects.create(property=self.property, enabled=True)
 
+    def test_defaults_to_textbee_and_refuses_an_unknown_provider(self):
+        settings = PropertyMessagingSettings(property=self.property, provider="pigeon")
+
+        self.assertEqual(PropertyMessagingSettings().provider, "textbee")
+        with self.assertRaises(ValidationError) as caught:
+            settings.full_clean()
+        self.assertIn("provider", caught.exception.message_dict)
+
     def test_refuses_an_unknown_time_zone(self):
         settings = PropertyMessagingSettings(property=self.property, time_zone="India")
 
@@ -124,6 +132,7 @@ class PropertyMessagingSettingsAdminTests(TestCase):
             {
                 "property": self.property.pk,
                 "enabled": "on",
+                "provider": "textbee",
                 "time_zone": "Asia/Kolkata",
                 "send_time": "11:30",
                 "reminders_start": "2026-12-01",
@@ -141,6 +150,7 @@ class PropertyMessagingSettingsAdminTests(TestCase):
             {
                 "property": self.property.pk,
                 "enabled": "on",
+                "provider": "textbee",
                 "time_zone": "Asia/Kolkata",
                 "send_time": "11:30",
             },
@@ -153,7 +163,7 @@ class PropertyMessagingSettingsAdminTests(TestCase):
     def test_time_zone_is_picked_from_the_list(self):
         response = self.client.post(
             reverse("admin:messaging_propertymessagingsettings_add"),
-            {"property": self.property.pk, "time_zone": "Mars/Olympus", "send_time": "11:30"},
+            {"property": self.property.pk, "provider": "textbee", "time_zone": "Mars/Olympus", "send_time": "11:30"},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -166,7 +176,8 @@ class PropertyMessagingSettingsAdminTests(TestCase):
 
         response = self.client.post(
             reverse("admin:messaging_propertymessagingsettings_change", args=[settings.pk]),
-            {"property": other.pk, "time_zone": "Asia/Kolkata", "send_time": "12:00"},
+            {"property": other.pk, "provider": "textbee",
+                "time_zone": "Asia/Kolkata", "send_time": "12:00"},
         )
 
         self.assertEqual(response.status_code, 302)
@@ -180,6 +191,35 @@ class PropertyMessagingSettingsAdminTests(TestCase):
 
         self.assertContains(response, "Tower")
         self.assertContains(response, "Asia/Kolkata")
+
+    @override_settings(
+        MESSAGING_ENABLED=True,
+        TEXTBEE_API_KEY="test-key-not-real",
+        TEXTBEE_DEVICE_ID="d",
+        TEXTBEE_BASE_URL="http://api.textbee.dev",
+    )
+    def test_a_provider_set_up_wrong_says_so_instead_of_failing(self):
+        PropertyMessagingSettings.objects.create(property=self.property)
+
+        for url in (
+            reverse("admin:messaging_propertymessagingsettings_changelist"),
+            reverse("admin:messaging_propertymessagingsettings_change", args=[self.property.pk]),
+            reverse("admin:properties_property_change", args=[self.property.pk]),
+        ):
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assertContains(response, "must be https")
+
+    @override_settings(
+        MESSAGING_ENABLED=False, TEXTBEE_API_KEY="test-key-not-real", TEXTBEE_DEVICE_ID="d"
+    )
+    def test_credentials_are_checked_while_messaging_is_off_on_the_server(self):
+        PropertyMessagingSettings.objects.create(property=self.property)
+
+        response = self.client.get(reverse("admin:messaging_propertymessagingsettings_changelist"))
+
+        self.assertContains(response, "Ready, but messaging is off on this server")
 
 
 class PropertyPageMessagingTests(TestCase):
@@ -202,6 +242,7 @@ class PropertyPageMessagingTests(TestCase):
             "messaging_settings-TOTAL_FORMS": "1",
             "messaging_settings-INITIAL_FORMS": str(initial),
             "messaging_settings-0-property": str(self.property.pk),
+            "messaging_settings-0-provider": "textbee",
             "messaging_settings-0-time_zone": "Asia/Kolkata",
             "messaging_settings-0-send_time": "11:30",
         }
