@@ -11,6 +11,7 @@ class FakeSender:
 
     provider: str = "fake"
     can_send: bool = True
+    reason: str = ""
     outcomes: dict[str, SendResult] = field(default_factory=dict)
     raises: dict[str, Exception] = field(default_factory=dict)
     sent: list[tuple[str, str]] = field(default_factory=list)

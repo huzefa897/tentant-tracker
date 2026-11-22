@@ -20,11 +20,13 @@ class SendMessagesCommandTests(RunnerTestCase):
             call_command("send_messages", *args, stdout=out, stderr=err)
         return out.getvalue(), err.getvalue()
 
+    @override_settings(MESSAGING_ENABLED=True)
     def test_a_provider_not_set_up_lists_what_it_would_send(self):  # TEXTBEE_* empty in tests
         out, err = self.call()
 
         self.assertIn(f"Flat 202 ({self.zahid.pk}): October 2026 (Due) (not sent: see errors)", out)
         self.assertIn("TextBee isn't set up: set TEXTBEE_API_KEY and TEXTBEE_DEVICE_ID.", err)
+        self.assertIn("held 1", out)
         self.assertFalse(Message.objects.exists())
         self.assertFalse(MessagingRun.objects.get().dry_run)
 

@@ -79,6 +79,7 @@ def run_messaging(request):
             "failed": run.failed,
             "unknown": run.unknown,
             "skipped": run.skipped,
+            "held": run.held,
             "errors": len(run.errors.splitlines()),
             "stoppedEarly": run.stopped_early,
         }

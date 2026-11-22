@@ -35,7 +35,7 @@ class Command(BaseCommand):
             )
         self.stdout.write(
             f"Properties checked {run.properties_checked}; sent {run.sent}, failed {run.failed}, "
-            f"unknown {run.unknown}, skipped {run.skipped}."
+            f"unknown {run.unknown}, skipped {run.skipped}, held {run.held}."
         )
         if run.errors:
             self.stderr.write(f"Errors:\n{run.errors}")

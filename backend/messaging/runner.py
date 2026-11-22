@@ -144,8 +144,7 @@ class MessageRunner:
             # Without a provider nothing can be sent, so nothing is reserved either: the months
             # stay due for when it's set up.
             plan_only = self.dry_run or not sender.can_send
-            if not sender.can_send and owed:
-                errors.append(f"Property {settings.pk}: {getattr(sender, 'reason', 'cannot send')}")
+            held_before = result.run.held
             for tenancy, months in owed.items():
                 if self._out_of_time(started):
                     result.run.stopped_early = True
@@ -157,6 +156,9 @@ class MessageRunner:
                 except Exception as exc:  # nor one tenancy
                     log_failure("tenancy", tenancy.pk, exc)
                     errors.append(f"Tenancy {tenancy.pk}: {type(exc).__name__}")
+            # Said once, and only when a message was held back: not on every quiet hourly run.
+            if result.run.held > held_before:
+                errors.append(f"Property {settings.pk}: {sender.reason}")
 
         run = result.run
         run.errors = "\n".join(errors)
@@ -167,7 +169,7 @@ class MessageRunner:
         ).delete()
         logger.info(
             "Messaging run %s: %s properties, %s planned, %s sent, %s failed, %s unknown, "
-            "%s skipped, %s errors%s",
+            "%s skipped, %s held, %s errors%s",
             run.pk,
             run.properties_checked,
             run.planned,
@@ -175,6 +177,7 @@ class MessageRunner:
             run.failed,
             run.unknown,
             run.skipped,
+            run.held,
             len(errors),
             ", stopped early" if run.stopped_early else "",
         )
@@ -192,6 +195,8 @@ class MessageRunner:
             return
         if plan_only:
             result.run.planned += 1
+            if not self.dry_run:  # it would have gone, but the provider can't send here
+                result.run.held += 1
             result.planned.append(
                 PlannedMessage(
                     tenancy, due, composer.rent_due_reminder(tenancy.name, due), sent=False

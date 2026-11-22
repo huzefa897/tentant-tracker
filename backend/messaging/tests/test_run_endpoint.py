@@ -51,6 +51,7 @@ class RunEndpointTests(RunnerTestCase):
                 "failed": 0,
                 "unknown": 0,
                 "skipped": 0,
+                "held": 0,
                 "errors": 0,
                 "stoppedEarly": False,
             },

@@ -69,7 +69,7 @@ def provider_status(name: str) -> str:
     """Whether this server can send with the provider: its credentials are environment
     settings, so admin can only say whether they're there, never show them."""
     sender = registry.sender_for(name)
-    return "Ready" if sender.can_send else getattr(sender, "reason", "Not set up")
+    return "Ready" if sender.can_send else sender.reason
 
 
 class PropertyMessagingSettingsInline(admin.StackedInline):
@@ -204,6 +204,7 @@ class MessagingRunAdmin(ReadOnlyAdmin):
         "failed",
         "unknown",
         "skipped",
+        "held",
         "has_errors",
         "stopped_early",
     )

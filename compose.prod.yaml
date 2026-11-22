@@ -59,8 +59,10 @@ services:
       POSTGRES_PORT: "5432"
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?set in .env.production}
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase_service_account
-      # Messaging (docs/messaging.md): each property picks its provider in admin; without its
-      # credentials it sends nothing. Without the run token the run endpoint is off.
+      # Messaging (docs/messaging.md): nothing is texted until MESSAGING_ENABLED is true. Each
+      # property picks its provider in admin; without its credentials it sends nothing. Without
+      # the run token the run endpoint is off.
+      MESSAGING_ENABLED: ${MESSAGING_ENABLED:-false}
       TEXTBEE_API_KEY: ${TEXTBEE_API_KEY:-}
       TEXTBEE_DEVICE_ID: ${TEXTBEE_DEVICE_ID:-}
       MESSAGING_RUN_TOKEN: ${MESSAGING_RUN_TOKEN:-}
