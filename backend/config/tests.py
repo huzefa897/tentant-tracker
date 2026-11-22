@@ -17,6 +17,7 @@ from django.test import (
     skipUnlessDBFeature,
 )
 from django.urls import path, reverse
+from gunicorn.config import Config
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.test import APIClient
@@ -24,6 +25,7 @@ from rest_framework.throttling import SimpleRateThrottle
 
 from accounts.models import AdminLoginAttempts
 
+from .gunicorn_logging import QuietHealthCheckLogger
 from .settings import postgres_options
 from .views import health_check, readiness_check
 
@@ -531,3 +533,28 @@ class PostgresOptionsTests(SimpleTestCase):
         with mock.patch.dict("os.environ"):
             os.environ.pop("POSTGRES_SSLMODE", None)
             self.assertEqual(postgres_options(), {})
+
+
+class QuietHealthCheckLoggerTests(SimpleTestCase):
+    render = {"PATH_INFO": "/api/v1/health/", "HTTP_USER_AGENT": "Render/1.0"}
+
+    def access(self, environ, status_code):
+        logger = QuietHealthCheckLogger(Config())
+        resp = mock.Mock(status_code=status_code)
+        with mock.patch("gunicorn.glogging.Logger.access") as parent:
+            logger.access(resp, mock.Mock(), environ, mock.Mock())
+        return parent.called
+
+    def test_drops_renders_successful_health_checks(self):
+        self.assertFalse(self.access(self.render, 200))
+
+    def test_logs_a_failing_health_check(self):
+        self.assertTrue(self.access(self.render, 503))
+        self.assertTrue(self.access(self.render, None))
+
+    def test_logs_other_callers_and_paths(self):
+        monitor = {**self.render, "HTTP_USER_AGENT": "UptimeRobot/2.0"}
+        self.assertTrue(self.access(monitor, 200))
+        self.assertTrue(self.access({"PATH_INFO": "/api/v1/health/"}, 200))
+        ready = {**self.render, "PATH_INFO": "/api/v1/ready/"}
+        self.assertTrue(self.access(ready, 200))

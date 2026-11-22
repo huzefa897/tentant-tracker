@@ -6,5 +6,8 @@ set -e
 python manage.py migrate --noinput
 # The rate-limit counts' table (DJANGO_SHARED_CACHE); does nothing once it exists.
 python manage.py createcachetable
+# The logger class drops Render's successful health checks from the access log
+# (config/gunicorn_logging.py).
 exec gunicorn config.wsgi:application --bind "0.0.0.0:${PORT:-8000}" \
-    --access-logfile - --error-logfile - --no-control-socket
+    --access-logfile - --error-logfile - --no-control-socket \
+    --logger-class config.gunicorn_logging.QuietHealthCheckLogger
