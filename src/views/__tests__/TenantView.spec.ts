@@ -1,12 +1,15 @@
-import { flushPromises, type VueWrapper } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import router from '@/router'
+import { accessService } from '@/services/access.service'
 import { ApiError } from '@/services/apiError'
+import { messagingService } from '@/messaging/messaging.service'
 import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
-import { resetAccessService } from '@/test/mocks/accessService'
+import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService } from '@/test/mocks/authService'
+import { fakeMessaging, resetMessagingService } from '@/messaging/testing/fakeMessagingService'
 import { fakeReceipts } from '@/test/mocks/receiptService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { fakeTenancies, resetTenantService, testTenants } from '@/test/mocks/tenantService'
@@ -19,6 +22,7 @@ vi.mock('@/services/tenant.service', () => import('@/test/mocks/tenantService'))
 vi.mock('@/services/rentEntry.service', () => import('@/test/mocks/rentEntryService'))
 vi.mock('@/services/payment.service', () => import('@/test/mocks/paymentService'))
 vi.mock('@/services/receipt.service', () => import('@/test/mocks/receiptService'))
+vi.mock('@/messaging/messaging.service', () => import('@/messaging/testing/fakeMessagingService'))
 vi.mock('@/utils/receiptDownload', () => ({ downloadReceiptPdf: vi.fn() }))
 
 let view: VueWrapper | undefined
@@ -45,6 +49,9 @@ beforeEach(() => {
   resetAuthService()
   resetAccessService()
   resetRentEntryService()
+  resetMessagingService()
+  // Off unless a test turns it on, so Send SMS shows only where a test expects it.
+  fakeMessaging.status = { enabled: false, ready: true, canSend: true }
 })
 
 afterEach(() => {
@@ -132,7 +139,7 @@ describe('TenantView', () => {
       expect(card.text()).toContain('₹15,450')
       expect(card.text()).toContain('Unpaid')
 
-      await card.get('button').trigger('click')
+      await button('View bill').trigger('click')
       await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
       expect(router.currentRoute.value.params).toEqual({
         tenantId: 'tenant-001',
@@ -216,6 +223,143 @@ describe('TenantView', () => {
         'Configure the property address before issuing receipts.',
       )
       expect(downloadReceiptPdf).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('sending an SMS reminder', () => {
+    const body = new DOMWrapper(document.body)
+    const sendApi = vi.mocked(messagingService.sendMessage)
+
+    function dialog() {
+      return body.get('[role="dialog"]')
+    }
+
+    async function sendFromDialog() {
+      await button('Send SMS').trigger('click')
+      await flushPromises()
+      await dialog().get('form').trigger('submit')
+      await flushPromises()
+    }
+
+    beforeEach(() => {
+      fakeMessaging.status = { enabled: true, ready: true, canSend: true }
+      fakeEntries.entries = [
+        makeEntry({ id: 'sep', billingMonth: '2026-09' }),
+        makeEntry({ id: 'oct', billingMonth: '2026-10' }),
+      ]
+    })
+
+    it('offers Send SMS on the latest bill where messaging is on', async () => {
+      await openTenant()
+
+      const card = view!.get('[aria-labelledby="latest-entry-heading"]')
+      expect(card.find('[data-testid="send-reminder"]').exists()).toBe(true)
+    })
+
+    it('offers it to a manager', async () => {
+      vi.mocked(accessService.getMe).mockResolvedValue(
+        identityWith([{ ...testProperty, role: 'manager' }]),
+      )
+      await openTenant()
+
+      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(true)
+    })
+
+    it.each([
+      ['messaging is off', { enabled: false, ready: true, canSend: true }],
+      ['SMS is not set up', { enabled: true, ready: false, canSend: true }],
+      ['the role may not send', { enabled: true, ready: true, canSend: false }],
+    ])('hides it when %s', async (_, status) => {
+      fakeMessaging.status = status
+      await openTenant()
+
+      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
+    })
+
+    it('says so, with a retry, when it cannot tell whether SMS is offered', async () => {
+      vi.mocked(messagingService.getPropertyMessaging).mockRejectedValueOnce(
+        new ApiError('network', 'down'),
+      )
+      await openTenant()
+
+      const error = view!.get('[data-testid="reminder-status-error"]')
+      expect(error.get('[role="alert"]').text()).toContain(
+        "Couldn't check whether an SMS can be sent",
+      )
+      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
+
+      await error.get('button').trigger('click')
+      await flushPromises()
+
+      expect(view!.find('[data-testid="reminder-status-error"]').exists()).toBe(false)
+      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(true)
+    })
+
+    it('hides it when the latest bill is paid', async () => {
+      const oct = fakeEntries.entries.find((entry) => entry.id === 'oct')!
+      addFakePayment(makePayment({ id: 'p-all', entryId: 'oct', amount: oct.totalDue }))
+      await openTenant()
+
+      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
+    })
+
+    it('hides it for a tenant without bills', async () => {
+      fakeEntries.entries = []
+      await openTenant()
+
+      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
+      expect(view!.find('[data-testid="reminder-status-error"]').exists()).toBe(false)
+    })
+
+    it('confirms before sending, then sends for the latest bill and says so', async () => {
+      await openTenant()
+      await button('Send SMS').trigger('click')
+      await flushPromises()
+
+      expect(dialog().text()).toContain('Send SMS reminder')
+      expect(dialog().get('[data-testid="reminder-bill"]').text()).toContain('October 2026')
+      expect(sendApi).not.toHaveBeenCalled()
+
+      await dialog().get('form').trigger('submit')
+      await flushPromises()
+
+      expect(sendApi).toHaveBeenCalledWith(testProperty.id, 'tenant-001', {
+        kind: 'bill_reminder',
+        entryId: 'oct',
+      })
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(view!.get('[role="status"]').text()).toMatch(/^SMS reminder sent to .+\.$/)
+    })
+
+    it('says a second one today was refused, and keeps the dialog open', async () => {
+      fakeMessaging.sent = ['oct']
+      await openTenant()
+      await sendFromDialog()
+
+      expect(dialog().get('[role="alert"]').text()).toBe(
+        'A reminder for this bill was already sent today.',
+      )
+    })
+
+    it('shows why the provider refused it, to try again', async () => {
+      fakeMessaging.outcome = { outcome: 'failed', reason: 'The provider refused the message.' }
+      await openTenant()
+      await sendFromDialog()
+
+      expect(dialog().get('[role="alert"]').text()).toBe(
+        "The SMS wasn't sent: The provider refused the message. Try again.",
+      )
+    })
+
+    it('says an unconfirmed one may have gone', async () => {
+      fakeMessaging.outcome = { outcome: 'unknown', reason: 'No answer.' }
+      await openTenant()
+      await sendFromDialog()
+
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(view!.get('[role="status"]').text()).toBe(
+        "The SMS may not have gone out: it wasn't confirmed. It won't be sent again today.",
+      )
     })
   })
 })

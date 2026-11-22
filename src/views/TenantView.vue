@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { PhCheckCircle } from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
 import SkeletonLines from '@/components/common/SkeletonLines.vue'
@@ -13,11 +14,17 @@ import { useAutoRetry } from '@/composables/useAutoRetry'
 import { useReceiptDownload } from '@/composables/useReceiptDownload'
 import { useRouteTenant } from '@/composables/useRouteTenant'
 import AppLayout from '@/layouts/AppLayout.vue'
+import {
+  BillReminderSummary,
+  SendMessageDialog,
+  STATUS_ERROR_MESSAGE,
+  useSendMessage,
+} from '@/messaging'
 import { useAccessStore } from '@/stores/access'
 import { useRentEntryStore } from '@/stores/rentEntry'
 
-// One tenant: their terms, their latest bill, and the way to their bills, a new bill and their
-// meter. Opened from Tenants, the dashboard's search or a link.
+// One tenant: their terms, their latest bill (with Send SMS while it owes), and the way to their
+// bills, a new bill and their meter. Opened from Tenants, the dashboard's search or a link.
 const props = defineProps<{ tenantId: string }>()
 
 const router = useRouter()
@@ -72,6 +79,34 @@ watch(() => latestBill.value?.id, resetReceiptDownload)
 function downloadReceipt(entryId: string) {
   void downloadLatestReceipt(props.tenantId, entryId)
 }
+
+// Send SMS: owners and managers text the tenant a reminder about their latest bill while it
+// owes, where the property has messaging on and SMS is set up (the backend says so, and checks
+// it again).
+const sms = useSendMessage()
+const latestBillOwes = computed(
+  () => latestBill.value?.billStatus === 'active' && latestBill.value.status !== 'paid',
+)
+const canSendReminder = computed(() => latestBillOwes.value && sms.available.value)
+// Whether Send SMS is offered couldn't be loaded: said, with a retry, on a bill it could be for.
+const reminderStatusFailed = computed(() => latestBillOwes.value && sms.statusFailed.value)
+// The bill the dialog is about, kept while it's open even if the latest bill reloads.
+const reminderEntry = computed(() => {
+  const request = sms.request.value
+  const bill = latestBill.value
+  return request && bill?.id === request.entryId ? bill : null
+})
+
+function openReminder(entryId: string) {
+  sms.start({ kind: 'bill_reminder', entryId })
+}
+
+function handleSendReminder() {
+  if (tenant.value) void sms.send(props.tenantId, tenant.value.name)
+}
+
+// Another tenant on the same page: nothing about the last one's SMS carries over.
+watch(() => props.tenantId, sms.reset)
 
 function openNewEntry() {
   router.push({ name: 'rent-entry-new', params: { tenantId: props.tenantId } })
@@ -168,13 +203,44 @@ function goToTenants() {
         >
           {{ receiptError }}
         </p>
+        <div
+          v-if="reminderStatusFailed"
+          class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm"
+          data-testid="reminder-status-error"
+        >
+          <p class="text-destructive" role="alert">{{ STATUS_ERROR_MESSAGE }}</p>
+          <Button variant="outline" size="sm" @click="sms.retryStatus">Try again</Button>
+        </div>
+        <div
+          v-if="sms.notice.value"
+          :key="sms.notice.value"
+          class="mb-3 flex animate-rise-in items-center gap-2 rounded-lg bg-success/10 px-4 py-3 text-sm font-medium text-success"
+        >
+          <p class="flex items-center gap-2" role="status">
+            <PhCheckCircle class="size-5 shrink-0" aria-hidden="true" />
+            {{ sms.notice.value }}
+          </p>
+        </div>
         <LatestEntryCard
           :entry="latestBill"
           :downloading-receipt="downloadingReceiptId === latestBill.id"
+          :can-send-reminder="canSendReminder"
+          :busy="sms.sending.value"
           @view="openEntry"
           @download-receipt="downloadReceipt"
+          @send-reminder="openReminder"
         />
       </template>
     </TenantDetails>
+
+    <SendMessageDialog
+      v-model:open="sms.isOpen.value"
+      :kind="sms.kind.value"
+      :sending="sms.sending.value"
+      :error="sms.error.value"
+      @send="handleSendReminder"
+    >
+      <BillReminderSummary v-if="tenant && reminderEntry" :tenant="tenant" :entry="reminderEntry" />
+    </SendMessageDialog>
   </AppLayout>
 </template>
