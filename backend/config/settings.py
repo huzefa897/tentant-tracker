@@ -104,7 +104,8 @@ MESSAGING_PROVIDER = os.getenv("MESSAGING_PROVIDER", "").strip().lower()
 # TextBee dashboard. Secrets: never commit or log them.
 TEXTBEE_API_KEY = os.getenv("TEXTBEE_API_KEY", "").strip()
 TEXTBEE_DEVICE_ID = os.getenv("TEXTBEE_DEVICE_ID", "").strip()
-TEXTBEE_BASE_URL = os.getenv("TEXTBEE_BASE_URL", "https://api.textbee.dev/api/v1").strip()
+# Empty (the default) uses TextBee's own API (messaging/senders/textbee.py DEFAULT_BASE_URL).
+TEXTBEE_BASE_URL = os.getenv("TEXTBEE_BASE_URL", "").strip()
 
 # Where Django admin is served. Set another path in production so it isn't at the default
 # address bots try; its logins are throttled either way (config/middleware.py).
