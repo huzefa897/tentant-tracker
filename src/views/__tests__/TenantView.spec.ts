@@ -394,6 +394,31 @@ describe('TenantView', () => {
       )
     })
 
+    it('stays on the page while it sends, then shows the answer', async () => {
+      let answer!: () => void
+      sendApi.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => (answer = resolve))
+        return { outcome: 'sent', reason: '' }
+      })
+      await openTenant()
+      await sendFromDialog()
+
+      await router.push('/tenants/tenant-002')
+      await router.push('/tenants')
+      await flushPromises()
+      expect(router.currentRoute.value.params).toEqual({ tenantId: 'tenant-001' })
+      expect(body.find('[role="dialog"]').exists()).toBe(true)
+
+      answer()
+      await flushPromises()
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(view!.get('[role="status"]').text()).toMatch(/^SMS reminder sent to .+\.$/)
+
+      await router.push('/tenants')
+      await flushPromises()
+      expect(router.currentRoute.value.name).toBe('tenants')
+    })
+
     it('says an unconfirmed one may have gone', async () => {
       fakeMessaging.outcome = { outcome: 'unknown', reason: 'No answer.' }
       await openTenant()

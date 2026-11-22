@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRouter } from 'vue-router'
 import { PhCheckCircle } from '@phosphor-icons/vue'
 
 import LoadingRegion from '@/components/common/LoadingRegion.vue'
@@ -95,6 +95,11 @@ function handleSendMessage() {
 
 // Another tenant on the same page: nothing about the last one's SMS carries over.
 watch(() => props.tenantId, sms.reset)
+
+// Stay while an SMS is being sent, so its answer (sent, refused, or it may have gone) is seen
+// and not texted again blind. Logging out still goes: the session is ending.
+onBeforeRouteLeave((to) => !sms.sending.value || Boolean(to.meta.guestOnly))
+onBeforeRouteUpdate((to) => !sms.sending.value || Boolean(to.meta.guestOnly))
 
 function openNewEntry() {
   router.push({ name: 'rent-entry-new', params: { tenantId: props.tenantId } })

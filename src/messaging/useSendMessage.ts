@@ -51,6 +51,8 @@ export function useSendMessage() {
   // What it would say, for kinds that preview (kindWording(kind).previews).
   const preview = ref<PreviewState>({ status: 'none' })
   let previewToken = 0
+  // Bumped by reset(): a send's late answer is then about a tenant no longer shown.
+  let sendToken = 0
   const dialogOpen = ref(false)
   const sending = ref(false)
   const error = ref<string | null>(null)
@@ -112,10 +114,12 @@ export function useSendMessage() {
     const current = request.value
     const forTenant = tenantId.value
     if (!current || !forTenant || !canConfirm.value || sending.value) return null
+    const token = sendToken
     sending.value = true
     error.value = null
     try {
       const result = await store.send(forTenant, current)
+      if (token !== sendToken) return null
       const said = outcomeNotice(current.kind, result, recipientName)
       if (said === null) {
         error.value = failedSendMessage(result.reason)
@@ -125,15 +129,20 @@ export function useSendMessage() {
       notice.value = said
       return said
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : SEND_ERROR_MESSAGE
+      if (token === sendToken) {
+        error.value = caught instanceof Error ? caught.message : SEND_ERROR_MESSAGE
+      }
       return null
     } finally {
-      sending.value = false
+      if (token === sendToken) sending.value = false
     }
   }
 
-  // Another tenant or bill on the same page: nothing about the last one carries over.
+  // Another tenant or bill on the same page: nothing about the last one carries over, not
+  // even a send still waiting for its answer (pages hold navigation while one is in flight).
   function reset() {
+    sendToken++
+    sending.value = false
     dialogOpen.value = false
     request.value = null
     tenantId.value = null

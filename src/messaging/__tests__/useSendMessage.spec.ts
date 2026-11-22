@@ -126,6 +126,28 @@ describe('useSendMessage', () => {
     expect(sms.isOpen.value).toBe(false)
   })
 
+  it('ignores the answer to a send still on its way when reset', async () => {
+    const sms = await signedIn()
+    let finish!: () => void
+    vi.mocked(messagingService.sendMessage).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = () => resolve({ outcome: 'sent', reason: '' })
+      }),
+    )
+    sms.start('tenant-001', BILL_REMINDER)
+    const sending = sms.send('Meera')
+
+    sms.reset()
+    expect(sms.sending.value).toBe(false)
+    sms.start('tenant-002', BILL_REMINDER)
+    finish()
+
+    await expect(sending).resolves.toBeNull()
+    expect(sms.notice.value).toBeNull()
+    expect(sms.error.value).toBeNull()
+    expect(sms.isOpen.value).toBe(true)
+  })
+
   describe('a kind that previews', () => {
     const DUES = { kind: 'dues_reminder' } as const
 
