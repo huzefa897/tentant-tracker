@@ -32,6 +32,7 @@ _REFUSALS = {
     429: "TextBee's daily or monthly plan limit is used up.",
 }
 _REFUSED = "TextBee refused it."
+_NOT_DISPATCHED = "TextBee couldn't pass it to the phone."
 _UNREADABLE = "TextBee's answer couldn't be read: it may have been sent."
 _NO_ANSWER = "TextBee didn't answer in time: it may have been sent."
 
@@ -82,6 +83,8 @@ class TextBeeSender:
         if 200 <= status < 300:
             try:
                 data = json.loads(body)["data"]
+                if "successCount" in data or "failureCount" in data:
+                    return self._dispatched(data["successCount"], data["failureCount"])
                 accepted = data["success"] is True
                 batch_id = str(data.get("smsBatchId") or "")
             except (ValueError, KeyError, TypeError):
@@ -99,6 +102,21 @@ class TextBeeSender:
             return SendResult(SendOutcome.FAILED, reason=_REFUSALS.get(status, _REFUSED))
         # A 5xx or a redirect: whether it went is unknown.
         logger.warning("TextBee: answered %s", status)
+        return SendResult(SendOutcome.UNKNOWN, reason=_UNREADABLE)
+
+    @staticmethod
+    def _dispatched(succeeded, failed) -> SendResult:
+        """The immediate-dispatch answer: counts of recipients pushed to the phone, not a
+        queued batch. There is one recipient, so exactly one of the two must be 1."""
+        counts = (succeeded, failed)
+        if not all(isinstance(n, int) and not isinstance(n, bool) for n in counts):
+            raise TypeError("counts must be whole numbers")
+        if counts == (1, 0):
+            return SendResult(SendOutcome.SENT)
+        if counts == (0, 1):
+            logger.warning("TextBee: dispatch failed")
+            return SendResult(SendOutcome.FAILED, reason=_NOT_DISPATCHED)
+        logger.warning("TextBee: dispatched %s, failed %s, for one recipient", *counts)
         return SendResult(SendOutcome.UNKNOWN, reason=_UNREADABLE)
 
 

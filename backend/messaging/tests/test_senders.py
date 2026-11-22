@@ -143,6 +143,31 @@ class TextBeeSenderTests(SenderContract, SimpleTestCase):
 
         self.assertEqual(result.outcome, SendOutcome.FAILED)
 
+    def test_dispatched_at_once_is_sent(self):  # the 200 with counts instead of a batch
+        result = self.send(FakePost(200, textbee_answer(successCount=1, failureCount=0)))
+
+        self.assertEqual(result, SendResult(SendOutcome.SENT))
+
+    def test_failed_to_dispatch_is_failed(self):  # so it can be tried again
+        result = self.send(FakePost(200, textbee_answer(successCount=0, failureCount=1)))
+
+        self.assertEqual(result.outcome, SendOutcome.FAILED)
+        self.assertIn("phone", result.reason)
+
+    def test_counts_that_dont_fit_one_recipient_are_unknown(self):
+        for data in [
+            {"successCount": 1, "failureCount": 1},
+            {"successCount": 0, "failureCount": 0},
+            {"successCount": 2, "failureCount": 0},
+            {"successCount": True, "failureCount": False},
+            {"successCount": "1", "failureCount": "0"},
+            {"successCount": 1},
+        ]:
+            with self.subTest(data=data):
+                result = self.send(FakePost(200, textbee_answer(**data)))
+
+                self.assertEqual(result.outcome, SendOutcome.UNKNOWN)
+
     def test_accepted_without_a_batch_id_is_still_sent(self):
         result = self.send(FakePost(200, textbee_answer(success=True)))
 
