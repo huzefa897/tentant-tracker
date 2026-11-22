@@ -12,7 +12,7 @@ The terms (Message, Rent Due Reminder, Payment Message, Due, Follow-up, reminder
 | 2a   | Rent Due Reminders without a provider: messages, reminder items, policy, composer, runner, sender interface, `send_messages`, history in admin | [#90](https://github.com/huzefa897/tentant-tracker/pull/90) | In review   |
 | 2b   | The TextBee sender                                                                                                                             | [#91](https://github.com/huzefa897/tentant-tracker/pull/91) | In review   |
 | 3    | Scheduling: the run endpoint, called hourly by cron-job.org                                                                                    | [#92](https://github.com/huzefa897/tentant-tracker/pull/92) | In review   |
-| —    | Send SMS by hand (moved from the bill's page to the tenant page)                                                                               | [#95](https://github.com/huzefa897/tentant-tracker/pull/95) | In review   |
+| —    | Send SMS by hand from the tenant page: every month owed, previewed first                                                                       | [#95](https://github.com/huzefa897/tentant-tracker/pull/95) | In review   |
 | 4    | Payment Messages                                                                                                                               |                                                             | Not started |
 
 Every step: based on `dev`, tests in the same PR, the checks in `CLAUDE.md`, and this table updated.

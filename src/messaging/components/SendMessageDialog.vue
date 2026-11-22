@@ -13,12 +13,18 @@ import type { MessageKind } from '@/messaging/types'
 import { kindWording } from '@/messaging/utils/wording'
 
 // The confirm dialog for any kind of message, worded for its kind; what it's about goes in the
-// default slot. Wire it to useSendMessage: v-model:open="sms.isOpen", :kind, :sending, :error.
-const props = defineProps<{
-  kind: MessageKind | null
-  sending?: boolean
-  error?: string | null
-}>()
+// default slot. Wire it to useSendMessage: v-model:open="sms.isOpen", :kind, :sending,
+// :can-send="sms.canConfirm", :error.
+const props = withDefaults(
+  defineProps<{
+    kind: MessageKind | null
+    sending?: boolean
+    // False holds the send back (useSendMessage's canConfirm).
+    canSend?: boolean
+    error?: string | null
+  }>(),
+  { canSend: true, error: null },
+)
 
 const open = defineModel<boolean>('open', { required: true })
 
@@ -40,6 +46,7 @@ const wording = computed(() => (props.kind ? kindWording(props.kind) : null))
         v-if="open && wording"
         :note="wording.note"
         :sending="sending"
+        :disabled="!canSend"
         :send-error="error"
         @send="emit('send')"
         @cancel="open = false"

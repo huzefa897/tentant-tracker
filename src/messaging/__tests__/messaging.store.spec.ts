@@ -5,7 +5,11 @@ import { accessService } from '@/services/access.service'
 import { ApiError, RATE_LIMITED_MESSAGE } from '@/services/apiError'
 import { messagingService } from '@/messaging/messaging.service'
 import { MessageSendError, useMessagingStore } from '@/messaging/messaging.store'
-import { SEND_ERROR_MESSAGE, SEND_UNCONFIRMED_MESSAGE } from '@/messaging/utils/wording'
+import {
+  PREVIEW_ERROR_MESSAGE,
+  SEND_ERROR_MESSAGE,
+  SEND_UNCONFIRMED_MESSAGE,
+} from '@/messaging/utils/wording'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
@@ -151,6 +155,34 @@ describe('useMessagingStore', () => {
 
       expect(thrown).toBeInstanceOf(MessageSendError)
       expect(thrown.message).toBe(message)
+    })
+  })
+
+  describe('preview', () => {
+    const DUES = { kind: 'dues_reminder' } as const
+
+    it('asks for the selected property', async () => {
+      const store = await withProperty()
+
+      await expect(store.preview('tenant-001', DUES)).resolves.toEqual(fakeMessaging.preview)
+      expect(messagingService.previewMessage).toHaveBeenCalledWith(
+        testProperty.id,
+        'tenant-001',
+        DUES,
+      )
+    })
+
+    it("says why there's nothing to send, or that it couldn't load", async () => {
+      const store = await withProperty()
+      fakeMessaging.preview = null
+      await expect(store.preview('tenant-001', DUES)).rejects.toThrow(
+        "Nothing is owed: there's no month to remind about.",
+      )
+
+      vi.mocked(messagingService.previewMessage).mockRejectedValueOnce(new ApiError('network', 'x'))
+      const thrown = await store.preview('tenant-001', DUES).catch((e) => e)
+      expect(thrown).toBeInstanceOf(MessageSendError)
+      expect(thrown.message).toBe(PREVIEW_ERROR_MESSAGE)
     })
   })
 })

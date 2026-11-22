@@ -4,8 +4,9 @@ shares, reserving, sending and recording don't change."""
 
 from ..sending import MessageKind
 from .bill_reminder import BILL_REMINDER
+from .dues_reminder import DUES_REMINDER
 
-KINDS: dict[str, MessageKind] = {kind.name: kind for kind in (BILL_REMINDER,)}
+KINDS: dict[str, MessageKind] = {kind.name: kind for kind in (BILL_REMINDER, DUES_REMINDER)}
 
 
 def kind_named(name) -> MessageKind | None:

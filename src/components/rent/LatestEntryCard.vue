@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { PhCaretRight, PhChatText, PhDownloadSimple } from '@phosphor-icons/vue'
+import { PhCaretRight, PhDownloadSimple } from '@phosphor-icons/vue'
 
 import EntryStatusBadge from '@/components/rent/EntryStatusBadge.vue'
 import { Button } from '@/components/ui/button'
@@ -15,18 +15,12 @@ const props = defineProps<{
   entry: RentEntry
   // While its receipt is being prepared: the button waits.
   downloadingReceipt?: boolean
-  // Send SMS is offered (the page decides: messaging on, the role may send, the bill owes).
-  canSendReminder?: boolean
-  // While anything else on the page is saving or sending: Send SMS waits.
-  busy?: boolean
 }>()
 
 const emit = defineEmits<{
   view: [entryId: string]
   // The receipt for the bill's most recent payment (offered once anything is paid).
   'download-receipt': [entryId: string]
-  // Text the tenant a reminder about this bill (the page confirms first).
-  'send-reminder': [entryId: string]
 }>()
 
 const month = computed(() => formatMonthValue(props.entry.billingMonth))
@@ -68,18 +62,6 @@ const charges = computed(() => [
         >
           <PhDownloadSimple aria-hidden="true" />
           {{ downloadingReceipt ? 'Preparing…' : 'Download receipt' }}
-        </Button>
-        <Button
-          v-if="canSendReminder"
-          variant="outline"
-          class="h-10"
-          :disabled="busy"
-          :aria-label="`Send an SMS reminder for ${month}`"
-          data-testid="send-reminder"
-          @click="emit('send-reminder', entry.id)"
-        >
-          <PhChatText aria-hidden="true" />
-          Send SMS
         </Button>
         <Button
           variant="outline"

@@ -9,7 +9,11 @@ import { receiptService } from '@/services/receipt.service'
 import { rentEntryService } from '@/services/rentEntry.service'
 import { identityWith, resetAccessService, testProperty } from '@/test/mocks/accessService'
 import { resetAuthService } from '@/test/mocks/authService'
-import { fakeMessaging, resetMessagingService } from '@/messaging/testing/fakeMessagingService'
+import {
+  fakeMessaging,
+  makePreview,
+  resetMessagingService,
+} from '@/messaging/testing/fakeMessagingService'
 import { fakeReceipts } from '@/test/mocks/receiptService'
 import { addFakePayment, fakeEntries, resetRentEntryService } from '@/test/mocks/rentEntryService'
 import { fakeTenancies, resetTenantService, testTenants } from '@/test/mocks/tenantService'
@@ -139,7 +143,7 @@ describe('TenantView', () => {
       expect(card.text()).toContain('₹15,450')
       expect(card.text()).toContain('Unpaid')
 
-      await button('View bill').trigger('click')
+      await card.get('button').trigger('click')
       await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('rent-entry-details'))
       expect(router.currentRoute.value.params).toEqual({
         tenantId: 'tenant-001',
@@ -226,34 +230,39 @@ describe('TenantView', () => {
     })
   })
 
-  describe('sending an SMS reminder', () => {
+  describe('sending an SMS about what they owe', () => {
     const body = new DOMWrapper(document.body)
     const sendApi = vi.mocked(messagingService.sendMessage)
+    const DUES = { kind: 'dues_reminder' } as const
 
     function dialog() {
       return body.get('[role="dialog"]')
     }
 
-    async function sendFromDialog() {
-      await button('Send SMS').trigger('click')
+    async function openDialog() {
+      await view!.get('[data-testid="send-message"]').trigger('click')
       await flushPromises()
+    }
+
+    async function sendFromDialog() {
+      await openDialog()
       await dialog().get('form').trigger('submit')
       await flushPromises()
     }
 
     beforeEach(() => {
       fakeMessaging.status = { enabled: true, ready: true, canSend: true }
-      fakeEntries.entries = [
-        makeEntry({ id: 'sep', billingMonth: '2026-09' }),
-        makeEntry({ id: 'oct', billingMonth: '2026-10' }),
-      ]
     })
 
-    it('offers Send SMS on the latest bill where messaging is on', async () => {
+    it('offers Send SMS among the tenant’s actions where messaging is on', async () => {
       await openTenant()
 
-      const card = view!.get('[aria-labelledby="latest-entry-heading"]')
-      expect(card.find('[data-testid="send-reminder"]').exists()).toBe(true)
+      expect(view!.get('[data-testid="send-message"]').text()).toBe('Send SMS')
+      expect(
+        view!
+          .find('[aria-labelledby="latest-entry-heading"] [data-testid="send-message"]')
+          .exists(),
+      ).toBe(false)
     })
 
     it('offers it to a manager', async () => {
@@ -262,7 +271,7 @@ describe('TenantView', () => {
       )
       await openTenant()
 
-      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(true)
+      expect(view!.find('[data-testid="send-message"]').exists()).toBe(true)
     })
 
     it.each([
@@ -273,7 +282,7 @@ describe('TenantView', () => {
       fakeMessaging.status = status
       await openTenant()
 
-      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
+      expect(view!.find('[data-testid="send-message"]').exists()).toBe(false)
     })
 
     it('says so, with a retry, when it cannot tell whether SMS is offered', async () => {
@@ -286,58 +295,92 @@ describe('TenantView', () => {
       expect(error.get('[role="alert"]').text()).toContain(
         "Couldn't check whether an SMS can be sent",
       )
-      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
+      expect(view!.find('[data-testid="send-message"]').exists()).toBe(false)
 
       await error.get('button').trigger('click')
       await flushPromises()
 
       expect(view!.find('[data-testid="reminder-status-error"]').exists()).toBe(false)
-      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(true)
+      expect(view!.find('[data-testid="send-message"]').exists()).toBe(true)
     })
 
-    it('hides it when the latest bill is paid', async () => {
-      const oct = fakeEntries.entries.find((entry) => entry.id === 'oct')!
-      addFakePayment(makePayment({ id: 'p-all', entryId: 'oct', amount: oct.totalDue }))
+    it('previews every month owed and the text, sending nothing until confirmed', async () => {
       await openTenant()
+      await openDialog()
 
-      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
-    })
-
-    it('hides it for a tenant without bills', async () => {
-      fakeEntries.entries = []
-      await openTenant()
-
-      expect(view!.find('[data-testid="send-reminder"]').exists()).toBe(false)
-      expect(view!.find('[data-testid="reminder-status-error"]').exists()).toBe(false)
-    })
-
-    it('confirms before sending, then sends for the latest bill and says so', async () => {
-      await openTenant()
-      await button('Send SMS').trigger('click')
-      await flushPromises()
-
+      expect(messagingService.previewMessage).toHaveBeenCalledWith(
+        testProperty.id,
+        'tenant-001',
+        DUES,
+      )
       expect(dialog().text()).toContain('Send SMS reminder')
-      expect(dialog().get('[data-testid="reminder-bill"]').text()).toContain('October 2026')
+      const months = dialog().get('[data-testid="dues-months"]').text()
+      expect(months).toContain('August 2026')
+      expect(months).toContain('No bill yet')
+      expect(months).toContain('September 2026')
+      expect(months).toContain('₹15,750')
+      expect(dialog().get('[data-testid="dues-body"]').text()).toBe(makePreview().body)
       expect(sendApi).not.toHaveBeenCalled()
+    })
 
-      await dialog().get('form').trigger('submit')
-      await flushPromises()
+    it('sends on Send, closes and says so', async () => {
+      await openTenant()
+      await sendFromDialog()
 
-      expect(sendApi).toHaveBeenCalledWith(testProperty.id, 'tenant-001', {
-        kind: 'bill_reminder',
-        entryId: 'oct',
-      })
+      expect(sendApi).toHaveBeenCalledWith(testProperty.id, 'tenant-001', DUES)
       expect(body.find('[role="dialog"]').exists()).toBe(false)
       expect(view!.get('[role="status"]').text()).toMatch(/^SMS reminder sent to .+\.$/)
     })
 
+    it('sends nothing on Cancel', async () => {
+      await openTenant()
+      await openDialog()
+
+      const cancel = dialog()
+        .findAll('button')
+        .find((b) => b.text() === 'Cancel')!
+      await cancel.trigger('click')
+      await flushPromises()
+
+      expect(body.find('[role="dialog"]').exists()).toBe(false)
+      expect(sendApi).not.toHaveBeenCalled()
+    })
+
+    it('holds Send back while the preview loads', async () => {
+      vi.mocked(messagingService.previewMessage).mockReturnValueOnce(new Promise(() => {}))
+      await openTenant()
+      await openDialog()
+
+      expect(dialog().find('[data-testid="dues-loading"]').exists()).toBe(true)
+      const send = dialog()
+        .findAll('button')
+        .find((b) => b.text() === 'Send SMS')!
+      expect(send.attributes('disabled')).toBeDefined()
+      await dialog().get('form').trigger('submit')
+      expect(sendApi).not.toHaveBeenCalled()
+    })
+
+    it('says when nothing is owed, and offers no Send', async () => {
+      fakeMessaging.preview = null
+      await openTenant()
+      await openDialog()
+
+      expect(dialog().get('[data-testid="dues-error"] [role="alert"]').text()).toBe(
+        "Nothing is owed: there's no month to remind about.",
+      )
+      const send = dialog()
+        .findAll('button')
+        .find((b) => b.text() === 'Send SMS')!
+      expect(send.attributes('disabled')).toBeDefined()
+    })
+
     it('says a second one today was refused, and keeps the dialog open', async () => {
-      fakeMessaging.sent = ['oct']
+      fakeMessaging.sent = ['dues']
       await openTenant()
       await sendFromDialog()
 
-      expect(dialog().get('[role="alert"]').text()).toBe(
-        'A reminder for this bill was already sent today.',
+      expect(dialog().get('form > [role="alert"]').text()).toBe(
+        'A reminder for these months was already sent today.',
       )
     })
 
@@ -346,7 +389,7 @@ describe('TenantView', () => {
       await openTenant()
       await sendFromDialog()
 
-      expect(dialog().get('[role="alert"]').text()).toBe(
+      expect(dialog().get('form > [role="alert"]').text()).toBe(
         "The SMS wasn't sent: The provider refused the message. Try again.",
       )
     })

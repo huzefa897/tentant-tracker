@@ -25,6 +25,7 @@ from billing.meter_views import (
 )
 from messaging.views import (
     BillReminderView,
+    MessagePreviewView,
     PropertyMessagingView,
     SendMessageView,
     run_messaging,
@@ -89,6 +90,11 @@ urlpatterns = [
         "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/entries/<uuid:entry_id>/reminder/",
         BillReminderView.as_view(),
         name="rent-entry-reminder",
+    ),
+    path(
+        "api/v1/properties/<uuid:property_id>/tenancies/<uuid:tenancy_id>/messages/preview/",
+        MessagePreviewView.as_view(),
+        name="tenancy-message-preview",
     ),
     path(
         "api/v1/properties/<uuid:property_id>/tenancies/",

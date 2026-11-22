@@ -61,11 +61,11 @@ describe('useSendMessage', () => {
 
   it('opens for a message, sends it, closes and says so', async () => {
     const sms = await signedIn()
-    sms.start(BILL_REMINDER)
+    sms.start('tenant-001', BILL_REMINDER)
     expect(sms.isOpen.value).toBe(true)
     expect(sms.kind.value).toBe('bill_reminder')
 
-    await expect(sms.send('tenant-001', 'Meera')).resolves.toBe('SMS reminder sent to Meera.')
+    await expect(sms.send('Meera')).resolves.toBe('SMS reminder sent to Meera.')
 
     expect(messagingService.sendMessage).toHaveBeenCalledWith(
       testProperty.id,
@@ -79,15 +79,15 @@ describe('useSendMessage', () => {
   it('keeps the dialog open with the reason when it failed or was refused', async () => {
     const sms = await signedIn()
     fakeMessaging.outcome = { outcome: 'failed', reason: 'Refused.' }
-    sms.start(BILL_REMINDER)
+    sms.start('tenant-001', BILL_REMINDER)
 
-    await expect(sms.send('tenant-001', 'Meera')).resolves.toBeNull()
+    await expect(sms.send('Meera')).resolves.toBeNull()
     expect(sms.isOpen.value).toBe(true)
     expect(sms.error.value).toBe("The SMS wasn't sent: Refused. Try again.")
 
     fakeMessaging.sent = ['sep']
     fakeMessaging.outcome = { outcome: 'sent', reason: '' }
-    await sms.send('tenant-001', 'Meera')
+    await sms.send('Meera')
     expect(sms.error.value).toBe('A reminder for this bill was already sent today.')
     expect(sms.notice.value).toBeNull()
   })
@@ -100,9 +100,9 @@ describe('useSendMessage', () => {
         finish = () => resolve({ outcome: 'sent', reason: '' })
       }),
     )
-    sms.start(BILL_REMINDER)
+    sms.start('tenant-001', BILL_REMINDER)
 
-    const sending = sms.send('tenant-001', 'Meera')
+    const sending = sms.send('Meera')
     sms.isOpen.value = false
     expect(sms.isOpen.value).toBe(true)
     expect(sms.sending.value).toBe(true)
@@ -114,15 +114,68 @@ describe('useSendMessage', () => {
 
   it('sends nothing before start, and forgets everything on reset', async () => {
     const sms = await signedIn()
-    await expect(sms.send('tenant-001', 'Meera')).resolves.toBeNull()
+    await expect(sms.send('Meera')).resolves.toBeNull()
     expect(messagingService.sendMessage).not.toHaveBeenCalled()
 
-    sms.start(BILL_REMINDER)
-    await sms.send('tenant-001', 'Meera')
+    sms.start('tenant-001', BILL_REMINDER)
+    await sms.send('Meera')
     sms.reset()
 
     expect(sms.notice.value).toBeNull()
     expect(sms.request.value).toBeNull()
     expect(sms.isOpen.value).toBe(false)
+  })
+
+  describe('a kind that previews', () => {
+    const DUES = { kind: 'dues_reminder' } as const
+
+    it('loads what it would say, and sends only once it has', async () => {
+      const sms = await signedIn()
+      sms.start('tenant-001', DUES)
+      expect(sms.preview.value.status).toBe('loading')
+      expect(sms.canConfirm.value).toBe(false)
+      await expect(sms.send('Meera')).resolves.toBeNull()
+      expect(messagingService.sendMessage).not.toHaveBeenCalled()
+
+      await flushPromises()
+      expect(sms.preview.value).toEqual({ status: 'ready', value: fakeMessaging.preview })
+      expect(sms.canConfirm.value).toBe(true)
+      await expect(sms.send('Meera')).resolves.toBe('SMS reminder sent to Meera.')
+      expect(messagingService.sendMessage).toHaveBeenCalledWith(testProperty.id, 'tenant-001', DUES)
+    })
+
+    it('says why there is nothing to send, and loads again on retry', async () => {
+      const sms = await signedIn()
+      fakeMessaging.preview = null
+      sms.start('tenant-001', DUES)
+      await flushPromises()
+      expect(sms.preview.value).toEqual({
+        status: 'error',
+        message: "Nothing is owed: there's no month to remind about.",
+      })
+      expect(sms.canConfirm.value).toBe(false)
+
+      resetMessagingService()
+      await sms.loadPreview()
+      expect(sms.preview.value.status).toBe('ready')
+    })
+
+    it('drops a preview still on its way when reset', async () => {
+      const sms = await signedIn()
+      sms.start('tenant-001', DUES)
+      sms.reset()
+      await flushPromises()
+
+      expect(sms.preview.value).toEqual({ status: 'none' })
+    })
+
+    it('has no preview for a bill reminder', async () => {
+      const sms = await signedIn()
+      sms.start('tenant-001', BILL_REMINDER)
+
+      expect(sms.preview.value).toEqual({ status: 'none' })
+      expect(sms.canConfirm.value).toBe(true)
+      expect(messagingService.previewMessage).not.toHaveBeenCalled()
+    })
   })
 })

@@ -96,30 +96,4 @@ describe('LatestEntryCard', () => {
     expect(button.text()).toBe('Preparing…')
     expect(button.attributes('disabled')).toBeDefined()
   })
-
-  it('offers Send SMS only when the page says so, emitting the entry id', async () => {
-    expect(
-      mount(LatestEntryCard, { props: { entry: makeEntry() } })
-        .find('[data-testid="send-reminder"]')
-        .exists(),
-    ).toBe(false)
-
-    const wrapper = mount(LatestEntryCard, {
-      props: { entry: makeEntry(), canSendReminder: true },
-    })
-    const button = wrapper.get('[data-testid="send-reminder"]')
-    expect(button.text()).toBe('Send SMS')
-    expect(button.attributes('aria-label')).toBe('Send an SMS reminder for September 2026')
-    await button.trigger('click')
-
-    expect(wrapper.emitted('send-reminder')).toEqual([['entry-1']])
-  })
-
-  it('waits to send while the page is busy', () => {
-    const wrapper = mount(LatestEntryCard, {
-      props: { entry: makeEntry(), canSendReminder: true, busy: true },
-    })
-
-    expect(wrapper.get('[data-testid="send-reminder"]').attributes('disabled')).toBeDefined()
-  })
 })

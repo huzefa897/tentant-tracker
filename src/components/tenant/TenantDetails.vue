@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { PhClockCounterClockwise, PhGauge, PhPlus, PhUser } from '@phosphor-icons/vue'
+import { PhChatText, PhClockCounterClockwise, PhGauge, PhPlus, PhUser } from '@phosphor-icons/vue'
 
 import { Button } from '@/components/ui/button'
 import type { Tenant } from '@/types/tenant'
@@ -13,12 +13,18 @@ const props = defineProps<{
   tenant: Tenant
   // Saved bills for this tenant; null while unknown (not loaded, or loading failed).
   entryCount?: number | null
+  // Send SMS is offered: the page decides (messaging on and set up, the role may send).
+  canSendMessage?: boolean
+  // While a message is being sent: Send SMS waits.
+  sendingMessage?: boolean
 }>()
 
 const emit = defineEmits<{
   addEntry: []
   viewEntries: []
   viewMeter: []
+  // Text the tenant about what they owe (the page confirms first).
+  sendMessage: []
 }>()
 
 // The tenancy's terms as one quiet list; the name and flat are the heading, never repeated.
@@ -101,6 +107,17 @@ const details = computed(() => [
         >
           <PhGauge aria-hidden="true" />
           Meter readings
+        </Button>
+        <Button
+          v-if="canSendMessage"
+          variant="outline"
+          class="h-11 px-6"
+          :disabled="sendingMessage"
+          data-testid="send-message"
+          @click="emit('sendMessage')"
+        >
+          <PhChatText aria-hidden="true" />
+          Send SMS
         </Button>
       </div>
     </div>

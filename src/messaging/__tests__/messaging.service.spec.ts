@@ -92,3 +92,60 @@ describe('messagingService.sendMessage', () => {
     ).rejects.toMatchObject({ kind: 'conflict', code: 'already_sent_today' })
   })
 })
+
+describe('messagingService.previewMessage', () => {
+  const DUES = { kind: 'dues_reminder' } as const
+
+  it('reads what a dues reminder would say, money as numbers', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        body: 'Hi Meera, ...',
+        months: [
+          { month: '2026-08', dueDate: '2026-08-11', outstanding: null },
+          { month: '2026-09', dueDate: '2026-09-11', outstanding: '4712.50' },
+        ],
+        billedOutstanding: '4712.50',
+      },
+    })
+
+    await expect(messagingService.previewMessage(PROPERTY_ID, TENANCY_ID, DUES)).resolves.toEqual({
+      body: 'Hi Meera, ...',
+      months: [
+        { month: '2026-08', dueDate: '2026-08-11', outstanding: null },
+        { month: '2026-09', dueDate: '2026-09-11', outstanding: 4712.5 },
+      ],
+      billedOutstanding: 4712.5,
+    })
+    expect(get).toHaveBeenCalledWith(`${MESSAGES_URL}preview/`, { params: DUES })
+  })
+
+  it.each([
+    null,
+    { body: 'x', months: 'none', billedOutstanding: '0.00' },
+    {
+      body: 'x',
+      months: [{ month: 'Aug', dueDate: '2026-08-11', outstanding: null }],
+      billedOutstanding: '0.00',
+    },
+    { body: 'x', months: [], billedOutstanding: 'lots' },
+    {
+      body: 'x',
+      months: [{ month: '2026-08', dueDate: '2026-08-11', outstanding: 12 }],
+      billedOutstanding: '0.00',
+    },
+  ])('refuses an unexpected answer (%j)', async (data) => {
+    vi.spyOn(api, 'get').mockResolvedValue({ data })
+    await expect(
+      messagingService.previewMessage(PROPERTY_ID, TENANCY_ID, DUES),
+    ).rejects.toMatchObject({ kind: 'invalid-response' })
+  })
+
+  it("passes on the backend's reason there's nothing to send", async () => {
+    vi.spyOn(api, 'get').mockRejectedValue(
+      httpError(409, { code: 'nothing_owed', detail: 'Nothing is owed.' }),
+    )
+    await expect(
+      messagingService.previewMessage(PROPERTY_ID, TENANCY_ID, DUES),
+    ).rejects.toMatchObject({ kind: 'conflict', code: 'nothing_owed' })
+  })
+})

@@ -9,6 +9,8 @@ defineProps<{
   // What they'll get, in a sentence, above the buttons.
   note: string
   sending?: boolean
+  // Not yet: e.g. while what it would say loads, or when there's nothing to send.
+  disabled?: boolean
   sendError?: string | null
 }>()
 
@@ -19,7 +21,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <form class="space-y-5" novalidate @submit.prevent="emit('send')">
+  <form class="space-y-5" novalidate @submit.prevent="!disabled && emit('send')">
     <slot />
 
     <p class="text-sm text-muted-foreground">{{ note }}</p>
@@ -27,7 +29,7 @@ const emit = defineEmits<{
     <p v-if="sendError" class="text-sm text-destructive" role="alert">{{ sendError }}</p>
 
     <div class="grid gap-3 sm:grid-cols-2">
-      <Button type="submit" class="h-11 sm:order-last" :disabled="sending">
+      <Button type="submit" class="h-11 sm:order-last" :disabled="sending || disabled">
         <PhChatText aria-hidden="true" />
         {{ sending ? 'Sending…' : 'Send SMS' }}
       </Button>

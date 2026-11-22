@@ -2,7 +2,9 @@ import { api, toApiError } from '@/services/api'
 import { ApiError } from '@/services/apiError'
 import type {
   MessageOutcome,
+  MessagePreview,
   MessageRequest,
+  OwedMonth,
   PropertyMessaging,
   SendMessageResult,
 } from '@/messaging/types'
@@ -15,6 +17,29 @@ function invalid(what: string): never {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// Money comes as decimal strings ("15750.00").
+function money(value: unknown, what: string): number {
+  const amount = typeof value === 'string' && value.trim() ? Number(value) : NaN
+  if (!Number.isFinite(amount)) invalid(what)
+  return amount
+}
+
+function owedMonth(value: unknown): OwedMonth {
+  if (!isRecord(value)) invalid('month')
+  const { month, dueDate, outstanding } = value
+  if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month)) invalid('month')
+  if (typeof dueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) invalid('dueDate')
+  return {
+    month,
+    dueDate,
+    outstanding: outstanding === null ? null : money(outstanding, 'outstanding'),
+  }
+}
+
+function messagesUrl(propertyId: string, tenancyId: string) {
+  return `${propertyUrl(propertyId)}/tenancies/${encodeURIComponent(tenancyId)}/messages/`
 }
 
 function propertyUrl(propertyId: string) {
@@ -53,10 +78,7 @@ export const messagingService = {
   ): Promise<SendMessageResult> {
     let response
     try {
-      response = await api.post(
-        `${propertyUrl(propertyId)}/tenancies/${encodeURIComponent(tenancyId)}/messages/`,
-        request,
-      )
+      response = await api.post(messagesUrl(propertyId, tenancyId), request)
     } catch (error) {
       throw toApiError(error)
     }
@@ -68,5 +90,33 @@ export const messagingService = {
     }
     if (typeof reason !== 'string') invalid('reason')
     return { outcome: status as MessageOutcome, reason }
+  },
+
+  // GET .../messages/preview/: what this message would say now, before it's sent (a dues
+  // reminder: which months and what's outstanding). Errors: 'conflict' with code
+  // 'nothing_owed' when there's nothing to send; 'invalid-request' for a kind with no preview.
+  async previewMessage(
+    propertyId: string,
+    tenancyId: string,
+    request: MessageRequest,
+  ): Promise<MessagePreview> {
+    let response
+    try {
+      response = await api.get(`${messagesUrl(propertyId, tenancyId)}preview/`, {
+        params: request,
+      })
+    } catch (error) {
+      throw toApiError(error)
+    }
+    const data: unknown = response.data
+    if (!isRecord(data)) invalid('body')
+    const { body, months, billedOutstanding } = data
+    if (typeof body !== 'string') invalid('body')
+    if (!Array.isArray(months)) invalid('months')
+    return {
+      body,
+      months: months.map(owedMonth),
+      billedOutstanding: money(billedOutstanding, 'billedOutstanding'),
+    }
   },
 }

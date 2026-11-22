@@ -28,7 +28,7 @@ from .clock import SystemClock
 from .kinds import BILL_REMINDER, KINDS, kind_named
 from .models import PropertyMessagingSettings, RunTrigger
 from .runner import MessageRunner
-from .sending import CannotSend, InvalidRequest, send_now
+from .sending import CannotSend, InvalidRequest, local_today, send_now
 from .senders import registry
 
 
@@ -128,6 +128,22 @@ def sent_response(sent) -> Response:
     )
 
 
+def read_request(view, tenancy, data):
+    """The kind and what it's about, from a request to send or preview one: 403 for a role
+    that may not send, 400 for an unknown kind or a missing field, 404 for another tenancy's
+    record. The tenancy is the URL's, already scoped to the person's properties."""
+    if not role_can(view.get_property().role, Capability.SEND_MESSAGES):
+        raise exceptions.PermissionDenied(SEND_FORBIDDEN)
+    data = data if isinstance(data, dict) else {}
+    kind = kind_named(data.get("kind"))
+    if kind is None:
+        raise exceptions.ValidationError({"kind": [f"Choose one of: {', '.join(KINDS)}."]})
+    try:
+        return kind, kind.parse(tenancy, data)
+    except InvalidRequest as error:
+        raise exceptions.ValidationError({error.field: [error.detail]}) from None
+
+
 class SendMessageView(ScopedLookupMixin, views.APIView):
     """POST .../tenancies/{id}/messages/ {"kind", ...}: texts the tenant one message now
     (owners and managers). The kind says what it's about: `bill_reminder` with `entryId`, a
@@ -140,17 +156,9 @@ class SendMessageView(ScopedLookupMixin, views.APIView):
 
     def post(self, request, property_id, tenancy_id):
         tenancy = self.get_tenancy()
-        if not role_can(self.get_property().role, Capability.SEND_MESSAGES):
-            raise exceptions.PermissionDenied(SEND_FORBIDDEN)
-        data = request.data if isinstance(request.data, dict) else {}
-        kind = kind_named(data.get("kind"))
-        if kind is None:
-            raise exceptions.ValidationError({"kind": [f"Choose one of: {', '.join(KINDS)}."]})
+        kind, subject = read_request(self, tenancy, request.data)
         try:
-            subject = kind.parse(tenancy, data)
             sent = send_now(tenancy, kind, subject, request.user, SystemClock())
-        except InvalidRequest as error:
-            raise exceptions.ValidationError({error.field: [error.detail]}) from None
         except CannotSend as error:
             raise CannotSendError(error) from None
         return sent_response(sent)
@@ -172,4 +180,24 @@ class BillReminderView(ScopedLookupMixin, views.APIView):
         except CannotSend as error:
             raise CannotSendError(error) from None
         return sent_response(sent)
+
+
+class MessagePreviewView(ScopedLookupMixin, views.APIView):
+    """GET .../tenancies/{id}/messages/preview/?kind=...: what that message would say now,
+    before it's sent, for kinds that can say (a dues reminder: which months and what's
+    outstanding). 200 {"body", ...the kind's details}; 409 with a code when there's nothing to
+    send (e.g. `nothing_owed`); 400 for a kind with no preview. Writes nothing but any rental
+    periods that are due, as the dashboard does."""
+
+    def get(self, request, property_id, tenancy_id):
+        tenancy = self.get_tenancy()
+        kind, subject = read_request(self, tenancy, request.query_params.dict())
+        preview = getattr(kind, "preview", None)
+        if preview is None:
+            raise exceptions.ValidationError({"kind": ["This kind of message has no preview."]})
+        try:
+            result = preview(tenancy, subject, local_today(tenancy, SystemClock()))
+        except CannotSend as error:
+            raise CannotSendError(error) from None
+        return Response({"body": result.body, **result.details})
 

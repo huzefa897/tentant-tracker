@@ -4,6 +4,7 @@ export const SEND_ERROR_MESSAGE = "The SMS couldn't be sent. Try again."
 export const SEND_UNCONFIRMED_MESSAGE =
   "We couldn't confirm the SMS was sent. Trying again won't text the tenant twice today."
 export const STATUS_ERROR_MESSAGE = "Couldn't check whether an SMS can be sent."
+export const PREVIEW_ERROR_MESSAGE = "Couldn't load what the SMS would say. Try again."
 
 interface KindWording {
   // The confirm dialog's title and description, and the note above its buttons.
@@ -14,6 +15,8 @@ interface KindWording {
   sent: (name: string) => string
   // Said when it may have gone: the backend couldn't confirm it.
   unconfirmed: string
+  // Whether the dialog shows what it would say first (GET .../messages/preview/).
+  previews: boolean
 }
 
 // What each kind of message says in the app. The text tenants get is the backend's.
@@ -25,6 +28,16 @@ const WORDING: Record<MessageKind, KindWording> = {
     sent: (name) => `SMS reminder sent to ${name}.`,
     unconfirmed:
       "The SMS may not have gone out: it wasn't confirmed. It won't be sent again today.",
+    previews: false,
+  },
+  dues_reminder: {
+    title: 'Send SMS reminder',
+    description: 'Text the tenant about everything they owe now.',
+    note: "They'll get this SMS on their mobile number. One a day for the same months.",
+    sent: (name) => `SMS reminder sent to ${name}.`,
+    unconfirmed:
+      "The SMS may not have gone out: it wasn't confirmed. It won't be sent again today.",
+    previews: true,
   },
 }
 
