@@ -82,7 +82,7 @@ The name is the tenancy's, as written. The text is plain ASCII: one character ou
 **Every hour**, [cron-job.org](https://cron-job.org) calls `POST /api/v1/messaging/run/` (`messaging/views.py`), which starts the same run (recorded with the trigger `schedule`). Hourly because each property sends at its own time in its own zone, and a run that's late or missed is caught up the next hour. Setting it up: [deployment.md](deployment.md#messaging).
 
 - **Its own token, not a person's:** it needs `Authorization: Bearer <MESSAGING_RUN_TOKEN>`, compared in constant time, and never reads a Firebase token. Without the setting it answers 404; with a wrong token, 403. The token must be at least 32 characters, or the app doesn't start.
-- **Limited** to 12 requests an hour per address (`DJANGO_THROTTLE_MESSAGING_RUN`), counted before the token is checked.
+- **Limited** to 12 refused requests an hour per address (`DJANGO_THROTTLE_MESSAGING_RUN`): guessing the token stays slow, but requests with the right token aren't counted, so someone who knows the URL (on cron-job.org's shared addresses, say) can't use up the limit and lock the scheduler out. The scheme is case-insensitive (`bearer` works too).
 - **Answers counts only** (`run`, `dryRun`, `propertiesChecked`, `planned`, `sent`, `failed`, `unknown`, `skipped`, `errors`, `stoppedEarly`), never names, numbers or text.
 - **A time budget:** a request must finish within Gunicorn's 30 seconds, and a send can take 10, so the run starts no new message after 15 seconds (`MESSAGING_RUN_TIME_BUDGET`). What's left was never reserved, so the next run sends it; the run is marked **stopped early**. The command has no budget.
 
